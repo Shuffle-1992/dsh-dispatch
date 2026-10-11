@@ -17,7 +17,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { attachGiftQuota, matchQuotaExhausted, recentQuotaExhausted } from '../wire.host.mjs';
+import { attachGiftQuota, dispatchQuotaHint, matchQuotaExhausted, recentQuotaExhausted } from '../wire.host.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const INDEX_SRC = readFileSync(join(HERE, '..', 'index.js'), 'utf8');
@@ -59,6 +59,32 @@ test('ZB-37 ③：recentQuotaExhausted 从台账认出 429 通道，并按 provi
   assert.ok(matchQuotaExhausted({ id: 'builtin:bigmodel-coding-plan' }, ex), '真实 id 命中');
   assert.equal(matchQuotaExhausted({ id: 'account:bigmodel-start-plan' }, ex), null, '免费额度通道不该被误标');
   assert.deepEqual(recentQuotaExhausted(join(dir, 'nope.jsonl'), now), {}, '台账不存在 → 空对象（不抛）');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('ZB-38 ⑤：派发到"刚撞过额度"的通道时给出 warning + suggestedProvider（不阻塞派发）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zb38-'));
+  const ledger = join(dir, 'zcode-runs.jsonl');
+  writeFileSync(ledger, JSON.stringify({ at: new Date().toISOString(), provider: 'plan:bigmodel-coding-plan', rateLimited: true }) + '\n');
+  const CH = [
+    { id: 'plan', name: '默认套餐', enabled: true, aliasOf: 'builtin:bigmodel-coding-plan' },
+    { id: 'account:bigmodel-start-plan', name: '免费额度（Start Plan）', enabled: true },
+  ];
+  const dispatcher = { listChannels: async () => ({ channels: CH }), getChannel: async () => ({ provider: 'plan' }) };
+
+  /* 显式派到撞顶通道 → 有提示，且建议通道 = 免费额度 */
+  const hit = await dispatchQuotaHint(dispatcher, { kind: 'prompt', provider: 'plan' }, { ledgerPath: ledger });
+  assert.match(hit.warning, /最近撞过额度/);
+  assert.match(hit.warning, /quota-exhausted/);
+  assert.equal(hit.suggestedProvider, 'account:bigmodel-start-plan');
+
+  /* 不传 provider → 用默认通道（同样命中） */
+  const byDefault = await dispatchQuotaHint(dispatcher, { kind: 'prompt' }, { ledgerPath: ledger });
+  assert.equal(byDefault?.suggestedProvider, 'account:bigmodel-start-plan', '默认通道为撞顶通道时也要提示');
+
+  /* 派到免费额度通道 → 无提示；台账不存在 → 无提示 */
+  assert.equal(await dispatchQuotaHint(dispatcher, { kind: 'prompt', provider: 'account:bigmodel-start-plan' }, { ledgerPath: ledger }), null);
+  assert.equal(await dispatchQuotaHint(dispatcher, { kind: 'prompt', provider: 'plan' }, { ledgerPath: join(dir, 'nope.jsonl') }), null);
   rmSync(dir, { recursive: true, force: true });
 });
 

@@ -220,6 +220,8 @@ dispatch | list | kill | dismiss | tail | quota | status | switch | channels | c
 > 通道 `account:<family>-start-plan` 常常仍可用），或 `action=fallback {chain:[…]}` + `action=retry` 交接。
 > ③ **派发前先看额度**：`channels[].quotaText` / `giftQuotaText`（剩余与窗口剩余时间），剩余少或窗口
 > 将尽就拆小任务。
+> ④ **派发到"已撞顶"通道时立刻给提示**（ZB-38）：`action=dispatch` 的返回里带 `warning` +
+> `suggestedProvider`（优先建议可用的免费额度通道）—— 不必等它 429 暂停再靠猜。
 > （事故复盘见 [`tasks/ZB-37-dispatch-path-incident.md`](tasks/ZB-37-dispatch-path-incident.md)：
 > 真因是工具 schema 的 `provider` enum 只有 `["plan","personal"]`，与"接受清单任意 id"的说明矛盾，
 > 把免费额度通道挡在门外 ⇒ agent 只能派到付费通道 ⇒ 撞限额后绕开派发台。）

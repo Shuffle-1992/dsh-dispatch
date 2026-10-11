@@ -321,6 +321,43 @@ export function matchQuotaExhausted(channel, exhausted) {
   return null;
 }
 
+/**
+ * ZB-38：派发时若**目标通道最近撞过额度**，返回 `{warning, suggestedProvider}`（**不阻塞派发**）。
+ * 真机事故（2026-10-11）：agent 只能靠撞出 429 才发现通道已满；这里有提示就能立刻改派。
+ * 建议通道优先给"可用的免费额度通道"（`account:<family>-start-plan`），否则给任一可用且未撞顶的通道。
+ */
+export async function dispatchQuotaHint(dispatcher, spec, config = {}) {
+  const exhausted = recentQuotaExhausted(config.ledgerPath);
+  if (Object.keys(exhausted).length === 0) return null;
+  let channels;
+  try {
+    channels = (await dispatcher.listChannels())?.channels ?? [];
+  } catch {
+    return null;
+  }
+  let target = typeof spec?.provider === 'string' && spec.provider !== '' ? spec.provider : '';
+  if (target === '') {
+    try {
+      target = (await dispatcher.getChannel())?.provider ?? '';
+    } catch {
+      target = '';
+    }
+  }
+  if (target === '') return null;
+  const targetCh = channels.find((c) => c.id === target || c.aliasOf === target) ?? { id: target, name: target };
+  const hit = matchQuotaExhausted(targetCh, exhausted);
+  if (!hit) return null;
+  const alt =
+    channels.find((c) => c.enabled && GIFT_CHANNEL_RE.test(c.id ?? '')) ??
+    channels.find((c) => c.enabled && !matchQuotaExhausted(c, exhausted));
+  return {
+    warning: `目标通道「${targetCh.name ?? targetCh.id}」最近撞过额度（${hit.at}）：很可能一启动就 paused / quota-exhausted。` +
+      (alt ? `建议改用 provider:"${alt.id}"${alt.name ? `（${alt.name}）` : ''}` : '建议 action=channels 另选可用通道') +
+      '，或先 action=fallback 开降级链再 retry。',
+    ...(alt ? { suggestedProvider: alt.id } : {}),
+  };
+}
+
 /** 只取额度字段（`action=quota` 用）。 */
 export function giftQuotaFields() {
   const quota = readGiftQuota();
@@ -361,7 +398,11 @@ export function createActionHandler(dispatcher, config = {}) {
           if (p.timeoutMin != null && p.timeoutMin !== '') spec.timeoutMin = Number(p.timeoutMin);
           if (p.memoryBench != null) spec.memoryBench = Boolean(p.memoryBench);
           const job = dispatcher.dispatch(spec); // 参数不合法时 core 抛 TypeError，走 catch 返回 error
-          return { ok: true, job: slimJob(job) };
+          /* ZB-38（真机事故：agent 派到付费通道 → 一启动就 429 暂停，只能靠撞了才知道）：
+           * 目标通道「最近撞过额度」时**在派发结果里立刻提示**，并给出建议通道 —— 让调用方
+           * 有机会马上重派到可用通道，而不是等 paused。提示不阻塞派发（job 照常建）。 */
+          const hint = await dispatchQuotaHint(dispatcher, spec, config);
+          return { ok: true, job: slimJob(job), ...(hint ?? {}) };
         }
         case 'list':
           return { ok: true, jobs: dispatcher.list().map(slimJob).filter(withoutDismissed(dispatcher)) };

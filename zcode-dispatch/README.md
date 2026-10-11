@@ -378,6 +378,8 @@ CLI 硬限制：`--resume` + `--model` 必失败（ZCode 机制实测 F2），�
   「免费额度（Start Plan）通道」一节。
   **ZB-37**：下拉里对**最近撞过额度**的通道追加「（5 小时窗口已满）」——数据来自台账里 runner 写的
   `rateLimited:true`（取最近 5 小时，与 Coding Plan 滚动窗口同尺度），只提示、不改可用性。
+  **ZB-38**：`action=dispatch` 若目标是"最近撞过额度"的通道，返回里直接带 `warning` +
+  `suggestedProvider`（优先建议可用的免费额度通道），agent 可立刻改派而不用等 429 暂停。
 - **暂停态**：run 非 0 退出且输出命中暂停签名 → `paused` + 原因徽章（`额度耗尽` / `未开通` /
   `需签名` / `配置错误`）。paused **不占锁、不占并发、不自动重试**，队列继续跑其他任务；
   未命中签名保持 `failed`（Z1 语义不变），仅记 `pauseReason: unknown` 作信息字段。
