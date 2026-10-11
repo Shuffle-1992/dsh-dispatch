@@ -90,6 +90,10 @@ const RES = {
   result: /^\[zcode-run\] result=(.+)$/,
   // ZB-28：runner 打印 `memory-ban=on` = 它接受了 --memory-ban 并已注入禁令（job.memoryBanRunner 确认位）
   memoryBan: /^\[zcode-run\] memory-ban=on\b/,
+  /* ZB-40：**心跳/进度**（免费额度通道每 10s 一行）—— 让面板能显示"当前在做什么 + 多久没动静"，
+   * 而不是只有沉默（真机事故：轮次失败后 runner 死等，外部看像"卡住"）。
+   * 例：`[zcode-run] progress stage=waiting-turn elapsed=120s chars=1024 tools=3 lastTool=Write stageAgo=8s session=sess_x` */
+  progress: /^\[zcode-run\] progress stage=(\S+) elapsed=(\d+)s chars=(\d+) tools=(\d+)(?: lastTool=(\S+))? stageAgo=(\d+)s(?: session=(\S+))?\s*$/,
 };
 
 const num = (s) => (s == null || s === '-' ? null : Number(s));
@@ -202,6 +206,21 @@ export function parseRunnerLine(line) {
   if ((m = RES.start.exec(line))) return { runnerTag: m[1], runnerMode: m[2], runnerCwd: m[3] };
   if ((m = RES.resume.exec(line))) return { resume: m[1] };
   if ((m = RES.memoryBan.exec(line))) return { memoryBanSeen: true }; // ZB-28：runner 确认禁令已注入
+  if ((m = RES.progress.exec(line))) {
+    /* ZB-40：心跳 → job.progress（面板/工具据此显示"当前工作内容"与"是否可能卡住"） */
+    return {
+      progress: {
+        stage: m[1],
+        elapsedSec: Number(m[2]),
+        chars: Number(m[3]),
+        tools: Number(m[4]),
+        lastTool: m[5] ?? null,
+        stageAgoSec: Number(m[6]),
+        sessionId: m[7] ?? null,
+      },
+      lastProgressAt: Date.now(),
+    };
+  }
   if ((m = REASONING_APPLIED_RE.exec(line))) {
     // ZB-29：确认思考强度已写入临时 provider 配置（job 上可观测Applied 值与目标）
     return { reasoningLevelApplied: m[1], reasoningTarget: `${m[2]}/${m[3]}` };
@@ -1172,6 +1191,9 @@ export function createDispatcher(options = {}) {
     if (!parsed || Object.keys(parsed).length === 0) return;
 
     if (parsed.runnerTag && job.tag == null) job.tag = parsed.runnerTag; // runner 分配的 tag 回填，用于台账匹配
+    /* ZB-40：心跳/进度落库（面板显示"当前工作内容 + 是否可能卡住"） */
+    if (parsed.progress) job.progress = parsed.progress;
+    if (parsed.lastProgressAt) job.lastProgressAt = parsed.lastProgressAt;
     if (parsed.summarySeen) job.summarySeen = true;
     if (parsed.exitCode != null) job.exitCode = parsed.exitCode;
     if (parsed.sessionId) job.sessionId = parsed.sessionId;

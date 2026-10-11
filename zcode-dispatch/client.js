@@ -454,6 +454,8 @@ window.__ModuleLoader__.load({
         lockScopeHint: '只锁上面列出的文件；留空则锁整个仓库（与其它任务互斥）',
         secChannel: '通道', chanNewTask: '新任务将使用：', chanDisabled: '不可用', chanLoadFail: '通道清单加载失败',
         giftQuota: '免费额度剩余', giftQuotaUnavailable: '免费额度余量不可用', chanQuotaExhausted: '5 小时窗口已满',
+        jobCurrent: '当前：', jobLastBeat: '最近心跳', jobStalled: '可能卡住',
+        jobStalledHint: '超过 150 秒没有收到 runner 的心跳/输出：可能卡在上游请求、MCP 连接或等锁。可用「终止」后重派，或 action=tail 看最后输出。',
         chanOfflineHint: '未连接宿主：通道/模型来自宿主远端面，连接后这两个下拉才可选',
         chanDefaultModel: '（通道默认模型）',
         paused: '已暂停', pQuota: '额度耗尽', pEntitled: '未开通', pSigning: '需签名', pConfig: '配置错误', pUnknown: '未知原因',
@@ -512,6 +514,8 @@ window.__ModuleLoader__.load({
         lockScopeHint: 'locks only the files listed above; empty locks the whole repo (exclusive)',
         secChannel: 'Channels', chanNewTask: 'New tasks will use: ', chanDisabled: 'unavailable', chanLoadFail: 'Failed to load channels',
         giftQuota: 'Free quota left', giftQuotaUnavailable: 'Free-quota balance unavailable', chanQuotaExhausted: '5h window full',
+        jobCurrent: 'Now: ', jobLastBeat: 'last heartbeat', jobStalled: 'possibly stuck',
+        jobStalledHint: 'No runner heartbeat/output for over 150s: it may be stuck on an upstream request, MCP connect or a lock. Kill and re-dispatch, or use action=tail for the last output.',
         chanOfflineHint: 'Host not connected: channel/model come from the host Remote face and unlock once connected',
         chanDefaultModel: '(channel default model)',
         paused: 'Paused', pQuota: 'Quota exhausted', pEntitled: 'Not entitled', pSigning: 'Signing required', pConfig: 'Config error', pUnknown: 'Unknown',
@@ -2351,6 +2355,22 @@ window.__ModuleLoader__.load({
             h('span', { className: 'zcd-dim', title: `${job.contextUsed ?? '—'} / ${job.contextWindow ?? '—'} tokens` }, ctxLabel(job)),
             job.exitCode != null ? h('span', { className: 'zcd-dim' }, `${t('exit')} ${job.exitCode}`) : null,
           ),
+          /* ZB-40（用户要求「能看出进程确实在工作还是可能卡住」）：运行中显示**当前阶段/最近工具/心跳**，
+           * 超过 150s 无心跳 → 红色「可能卡住」徽标。数据来自 runner 每 10s 的 progress 心跳行。 */
+          job.state === 'running' && (job.progress || job.stalled)
+            ? h('div', { className: 'zcd-dim', style: { fontSize: '11px', marginTop: '2px' } },
+              h('span', { style: job.stalled ? { color: T.danger } : undefined },
+                `${t('jobCurrent')}${job.progress
+                  ? `${job.progress.stage ?? '?'}` +
+                    `${job.progress.lastTool ? ` · ${job.progress.lastTool}` : ''}` +
+                    `${Number.isFinite(job.progress.chars) && job.progress.chars > 0 ? ` · ${job.progress.chars} 字` : ''}` +
+                    `${Number.isFinite(job.progress.tools) && job.progress.tools > 0 ? ` · 工具 ${job.progress.tools} 次` : ''}`
+                  : '—（尚无心跳）'}`),
+              job.stalled
+                ? h('span', { className: 'zcd-badge', title: t('jobStalledHint'), style: { color: T.danger } }, ` ${t('jobStalled')}`)
+                : h('span', null, ` ｜ ${t('jobLastBeat')} ${job.lastProgressAgoSec ?? '?'}s`),
+            )
+            : null,
         ),
         /* 反馈行移到动作区之外：关闭按钮现在在行头，终态行没有动作区，失败反馈仍需可见。 */
         retryFb ? h('div', { className: 'zcd-note', role: 'status' }, retryFb) : null,

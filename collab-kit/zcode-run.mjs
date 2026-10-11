@@ -714,6 +714,25 @@ if (GIFT_MODE) {
   if (opt.attach.length > 0) {
     console.warn('[zcode-run] ⚠️ 免费额度通道暂不转发 --attach（agent 有自己的文件工具，可直接在工作目录里读）；已忽略');
   }
+  /* ZB-40（真机事故）：**模型 ⇄ 权益授予**校验。免费额度这类"活动赠送"权益通常只授予**特定模型**
+   * （本机实测：Start Plan 授予 `GLM-5.3-Flash`；用 `GLM-5.3` 会被上游判 `providerCode 1005
+   * exceed quota limit`，轮次直接失败）。此前不做校验 ⇒ 派发跑 35 分钟、零输出、额度不动，
+   * 从外面看像"卡住"。现在：授予模型已知且与 `--model` 不一致时**改用授予模型并大声说明**。 */
+  if (opt.model && !opt.dryRun) {
+    try {
+      const { readGiftQuota } = await import('./appserver-gift.mjs');
+      const q = readGiftQuota();
+      if (q?.ok === true && q.state === 'active' && typeof q.model === 'string' && q.model !== '' && q.model !== opt.model) {
+        console.error(
+          `[zcode-run] ⚠️ 模型替换：--model ${opt.model} → ${q.model}` +
+            `（免费额度权益「${q.planName ?? q.planId}」只授予 ${q.model}；用未授予的模型会被上游判 1005 exceed quota limit）`,
+        );
+        opt.model = q.model;
+      }
+    } catch {
+      /* 读不到权益就不猜：按用户给的模型继续，真失败会在 result 里带 providerError */
+    }
+  }
   const { runGiftJob } = await import('./appserver-gift-job.mjs'); // 动态导入：新模块的问题不该拖垮既有 print 路径
   process.exit(
     await runGiftJob({

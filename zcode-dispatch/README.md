@@ -382,6 +382,14 @@ CLI 硬限制：`--resume` + `--model` 必失败（ZCode 机制实测 F2），�
   `suggestedProvider`（优先建议可用的免费额度通道），agent 可立刻改派而不用等 429 暂停。
   **ZB-39**：显式指定"已撞顶"通道时**自动改派**到用户选定的可用通道（默认通道 → 降级链 → 免费额度），
   返回 `redirectedFrom` + `warning`；候选全不可用则只提示。⇒ 调用方**通常不需要传 `provider`**。
+  **ZB-40（运行中可观测）**：免费额度通道的 runner 每 **10s** 打一行心跳
+  （`[zcode-run] progress stage=… elapsed=…s chars=… tools=… lastTool=…`），派发台解析后：
+  运行中行显示「**当前：**<阶段> · <最近工具> · N 字 · 工具 N 次 ｜ 最近心跳 Ns」；**>150s 无心跳**
+  → 红色「**可能卡住**」徽标；`action=list` 的 job 也带 `progress` / `lastProgressAgoSec` / `stalled`。
+  同时修掉一个真机事故：**失败的回合只发 `turn.failed`**，此前 runner 只认 `turn.completed` ⇒ 死等
+  60/75 分钟、零输出（外部看像"卡住"）；现在立刻收尾并把上游业务错误写进 `result.json.providerError`。
+  另：免费额度权益**只授予特定模型**（`action=quota` 的 `giftQuota.model`）；`--model` 与该授予不一致时
+  runner **自动替换为授予模型并大声说明**（否则上游判 `providerCode 1005 exceed quota limit`）。
 - **暂停态**：run 非 0 退出且输出命中暂停签名 → `paused` + 原因徽章（`额度耗尽` / `未开通` /
   `需签名` / `配置错误`）。paused **不占锁、不占并发、不自动重试**，队列继续跑其他任务；
   未命中签名保持 `failed`（Z1 语义不变），仅记 `pauseReason: unknown` 作信息字段。

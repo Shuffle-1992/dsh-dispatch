@@ -211,6 +211,13 @@ export function slimJob(job) {
       write: Array.isArray(spec?.write) ? spec.write.filter((x) => typeof x === 'string' && x.trim()) : [],
     },
     usage: { ...(usage ?? {}) },
+    /* ZB-40（用户要求：「能看出派发的进程确实在工作还是可能卡住」）——
+     * `progress` 来自 runner 每 10s 的心跳行；`stalledSec` = 距上次心跳的秒数，
+     * `stalled` = running 且超过 150s 没有任何心跳/输出（面板据此显示「可能卡住」徽标）。 */
+    progress: job.progress ?? null,
+    lastProgressAgoSec: Number.isFinite(job.lastProgressAt) ? Math.round((Date.now() - job.lastProgressAt) / 1000) : null,
+    stalledSec: job.lastProgressAt ? Math.round((Date.now() - job.lastProgressAt) / 1000) : null,
+    stalled: job.state === 'running' && (!job.lastProgressAt || Date.now() - job.lastProgressAt > 150_000),
     tailCount: Array.isArray(tailLines) ? tailLines.length : 0,
     parseWarnings: (parseWarnings ?? []).slice(-5),
   };

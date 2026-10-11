@@ -58,23 +58,41 @@ export async function runGiftJob(input) {
   if (opt.reasoningLevel) console.log(`[gift] reasoningLevel=${opt.reasoningLevel}`);
 
   let lastReport = 0;
-  const result = await runGiftTurn({
-    cliPath: input.cliPath,
-    prompt: input.prompt,
-    cwd: input.cwd,
-    model: opt.model,
-    reasoningLevel: opt.reasoningLevel,
-    mode: opt.mode,
-    accountProviderId: input.accountProviderId,
-    timeoutMs: Math.max(1, opt.timeoutMin) * 60 * 1000,
-    logger: { info: (m) => console.log(m), warn: (m) => console.error(m) },
-    onEvent: (kind, payload) => {
-      const now = Date.now();
-      if (now - lastReport < 3000) return; // 进度节流（避免刷屏）
-      lastReport = now;
-      if (kind === 'tool') console.log(`[gift] 工具 ${payload.name}（${payload.type}）`);
-    },
-  });
+  /* ZB-40：**心跳**（用户要求「能看出进程确实在工作还是卡住」）——
+   * 每 10s 打一行 `[zcode-run] progress stage=… elapsed=…s chars=… tools=…`，
+   * 派发台解析后可在面板/job 上显示"当前在做什么 + 多久没动静"。 */
+  const progress = { stage: 'spawn-app-server', at: Date.now(), textChars: 0, tools: 0 };
+  const heartbeat = setInterval(() => {
+    const ago = ((Date.now() - (progress.at ?? Date.now())) / 1000).toFixed(0);
+    console.log(
+      `[zcode-run] progress stage=${progress.stage ?? '?'} elapsed=${((Date.now() - started) / 1000).toFixed(0)}s ` +
+        `chars=${progress.textChars ?? 0} tools=${progress.tools ?? 0}${progress.lastTool ? ` lastTool=${progress.lastTool}` : ''} ` +
+        `stageAgo=${ago}s${progress.sessionId ? ` session=${String(progress.sessionId).slice(5, 13)}` : ''}`,
+    );
+  }, 10000);
+  let result;
+  try {
+    result = await runGiftTurn({
+      cliPath: input.cliPath,
+      prompt: input.prompt,
+      cwd: input.cwd,
+      model: opt.model,
+      reasoningLevel: opt.reasoningLevel,
+      mode: opt.mode,
+      accountProviderId: input.accountProviderId,
+      timeoutMs: Math.max(1, opt.timeoutMin) * 60 * 1000,
+      progress,
+      logger: { info: (m) => console.log(m), warn: (m) => console.error(m) },
+      onEvent: (kind, payload) => {
+        const now = Date.now();
+        if (now - lastReport < 3000) return; // 进度节流（避免刷屏）
+        lastReport = now;
+        if (kind === 'tool') console.log(`[gift] 工具 ${payload.name}（${payload.type}）`);
+      },
+    });
+  } finally {
+    clearInterval(heartbeat);
+  }
   const elapsed = ((Date.now() - started) / 1000).toFixed(1);
 
   /* ── 产物（与 print 模式同名：out = agent 正文，err = 诊断尾部，result = 可解析摘要） ── */
@@ -95,6 +113,8 @@ export async function runGiftJob(input) {
     eventTypes: result.eventTypes ?? [], // ZB-34：见过的事件类型（对齐真实词汇表）
     permissionRequests: result.permissionRequests ?? [], // ZB-35：审批链路（yolo 通常为空）
     reasoningChars: result.reasoningChars ?? null,
+    providerError: result.providerError ?? null, // ZB-40：上游业务错误（如 1005 exceed quota limit）
+    lastStage: progress.stage ?? null, // ZB-40：卡在哪一阶段（诊断用）
   };
   writeFileSync(input.outLog, `${result.response ?? ''}\n\n--- gift-result-json ---\n${JSON.stringify(resultShape, null, 2)}\n`);
   writeFileSync(input.errLog, `${(result.stderrTail ?? []).join('\n')}\n`);
@@ -132,7 +152,19 @@ export async function runGiftJob(input) {
 
   /* ── 失败归因：命中暂停指纹就打出对应字样（派发台据此落 paused 并可能自动交接） ── */
   const failureText = `${result.finish?.error ?? ''} ${(result.stderrTail ?? []).join(' ')}`;
-  if (result.exitCode !== 0 && failureText.trim() !== '') {
+  /* ZB-40：上游业务错误（providerCode/providerMessage）优先成句 —— 真机事故里
+   * `GLM-5.3` 在免费额度通道被判 `1005 exceed quota limit`，必须让调用方一眼看懂怎么改。 */
+  const pe = result.providerError;
+  if (result.exitCode !== 0 && pe && (pe.code !== null || pe.message)) {
+    console.error(
+      `[gift] 上游业务错误 providerCode=${pe.code ?? '-'} providerId=${pe.providerId ?? '-'} ` +
+        `modelId=${pe.modelId ?? '-'} retryable=${pe.retryable ?? '-'} message="${String(pe.message).slice(0, 160)}"` +
+        (/exceed quota limit/i.test(String(pe.message))
+          ? ` ｜ 提示：免费额度权益通常只授予**特定模型**（以 action=quota 的 giftQuota.model 为准）——用未授予的模型会被判 1005；不改 model 直接重试一定还会失败`
+          : ''),
+    );
+    console.error(`[gift] pause-signature quota-exhausted（上游额度/权益判定）：${String(pe.message).slice(0, 200)}`);
+  } else if (result.exitCode !== 0 && failureText.trim() !== '') {
     for (const hint of PAUSE_HINTS) {
       if (hint.re.test(failureText)) {
         console.error(`[gift] pause-signature ${hint.token}（${hint.reason}）：${failureText.slice(0, 300)}`);

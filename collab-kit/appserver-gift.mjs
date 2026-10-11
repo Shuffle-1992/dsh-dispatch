@@ -412,6 +412,13 @@ export async function runGiftTurn(opts) {
   const toolEvents = [];
   const seenEventTypes = new Set(); // 首次出现的 event 类型打一行诊断（对齐真实事件词汇表）
   const permissionRequests = []; // 每次审批请求（method/mode/decision）—— yolo vs edit 的差异可观测
+  /* ZB-40：**阶段/进度共享对象**（job 模块拿着它周期性地打 `[zcode-run] progress …` 心跳，
+   * 让派发台面板能显示"当前在做什么"，而不是只有沉默）。 */
+  const progress = opts.progress ?? {};
+  const mark = (stage) => {
+    progress.stage = stage;
+    progress.at = Date.now();
+  };
   let finished;
   let channel;
   let turnUsage;
@@ -481,6 +488,8 @@ export async function runGiftTurn(opts) {
           const kind = payload?.kind;
           if (kind === 'text_delta' && typeof payload.delta === 'string') text += payload.delta;
           else if (kind === 'reasoning_delta' && typeof payload.delta === 'string') reasoningChars += payload.delta.length;
+          progress.textChars = text.length; // ZB-40：心跳用（"正在流式输出 N 字"）
+          progress.reasoningChars = reasoningChars;
           opts.onEvent?.('delta', { kind, chars: String(payload?.delta ?? '').length });
           break;
         }
@@ -504,6 +513,23 @@ export async function runGiftTurn(opts) {
           };
           opts.onEvent?.('turn', finished);
           break;
+        /* ZB-40（真机事故）：**失败的回合必须立刻收尾**。此前只认 `turn.completed`，
+         * 而失败回合只发 `turn.failed` ⇒ 死等直到 timeoutMin，外部表现为"running 但零输出、
+         * 额度不动"。这里把上游业务错误（providerCode/providerMessage/modelId）结构化带出。 */
+        case 'turn.failed': {
+          const err = payload?.error ?? payload?.cause ?? payload;
+          const ctx = err?.context ?? err?.cause?.context ?? {};
+          const providerError = {
+            message: ctx.providerMessage ?? err?.message ?? 'turn failed',
+            code: ctx.providerCode ?? err?.code ?? null,
+            providerId: ctx.providerId ?? null,
+            modelId: ctx.modelId ?? null,
+            retryable: ctx.retryable ?? null,
+          };
+          finished = { response: text, resultType: 'failed', error: providerError.message, providerError };
+          opts.onEvent?.('turn', finished);
+          break;
+        }
         default: {
           /* 诊断 + 工具计数：
            * ① 每个**首次出现**的 event 类型打一行 `[gift] event=<type>`（不带 [zcode-run] 前缀，
@@ -516,6 +542,8 @@ export async function runGiftTurn(opts) {
           if (typeof type === 'string' && /^tool[.\-_]/i.test(type)) {
             const name = payload?.name ?? payload?.toolName ?? payload?.tool ?? '(unnamed)';
             toolEvents.push({ type, name });
+            progress.tools = toolEvents.length; // ZB-40：心跳用
+            progress.lastTool = name;
             opts.onEvent?.('tool', { type, name });
           }
           break;
@@ -531,16 +559,21 @@ export async function runGiftTurn(opts) {
   let usage = { inputTokens: null, outputTokens: null };
   let basis = 'none';
   try {
+    mark('create-session');
     const created = await client.call('session/create', { workspace: { workspacePath: opts.cwd, workspaceKey: 'zcode-dispatch-gift' } });
     sessionId = created?.session?.sessionId ?? created?.sessionId;
     if (typeof sessionId !== 'string' || sessionId === '') throw new Error('app-server 没有返回 sessionId');
+    progress.sessionId = sessionId;
+    mark('subscribe');
     await client.call('session/subscribe', { sessionId, deliveryKind: 'desktop-continuous', afterSeq: 0, includeSnapshot: true });
     try {
+      mark('set-mode');
       await client.call('session/setMode', { sessionId, mode: opts.mode === 'yolo' ? 'yolo' : 'build' });
     } catch (error) {
       logger.warn?.(`[gift] setMode 失败（用会话默认模式继续）：${error?.message ?? error}`);
     }
     /* 账户注入：basedOn 必须与 spawn 的 builtin 文件同源 */
+    mark('inject-account');
     const injected = await client.call('provider/updateAccountConfig', {
       revision: `zcode-dispatch-gift:${Date.now()}`,
       basedOnZCodeBuiltinRevision: revision,
@@ -549,12 +582,15 @@ export async function runGiftTurn(opts) {
     });
     logger.info?.(`[gift] 账户注入 providerCount=${injected?.providerCount ?? '?'} status=${injected?.status ?? '?'}`);
     await sleep(ACCOUNT_INJECT_SETTLE_MS); // 异步注册：不等待会撞 "Provider Registry 中不存在 Model"
+    mark('set-model');
     await client.call('session/setModel', {
       sessionId,
       model: { providerId: accountProviderId, modelId, options: { reasoningLevel } }, // 档位必填，见上
     });
     await sleep(STEP_SETTLE_MS);
+    mark('send-turn');
     await client.call('session/send', { sessionId, content: opts.prompt });
+    mark('waiting-turn');
 
     /* 等回合结束（或超时 / 进程死亡） */
     const deadline = Date.now() + timeoutMs;
@@ -633,6 +669,10 @@ export async function runGiftTurn(opts) {
       turnCount: projection.turnCount ?? null,
     },
     finish: { kind: finished?.resultType ?? (timedOut ? 'timeout' : 'unknown'), error: finished?.error },
+    /* ZB-40：**上游业务错误的结构化留痕**（真机事故：`GLM-5.3` 在免费额度通道被判
+     * `providerCode 1005 exceed quota limit` ⇒ 轮次失败；此前 runner 不认 `turn.failed`，
+     * 干等 35 分钟、无产物、额度不动，从外面看就像"卡住"）。 */
+    providerError: finished?.providerError ?? null,
     channel: channel ?? { providerId: accountProviderId, modelId, baseURL: 'https://zcode.z.ai/api/v1/zcode-plan/anthropic' },
     accountProviderId,
     runtimeVersion: runtime.version,
