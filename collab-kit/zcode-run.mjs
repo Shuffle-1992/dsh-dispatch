@@ -720,7 +720,7 @@ if (GIFT_MODE) {
    * 从外面看像"卡住"。现在：授予模型已知且与 `--model` 不一致时**改用授予模型并大声说明**。 */
   if (opt.model && !opt.dryRun) {
     try {
-      const { readGiftQuota } = await import('./appserver-gift.mjs');
+      const { readGiftQuota } = await import('../zcode-dispatch/core/gift-quota.mjs'); // 额度读取在插件核心（只读 ZCode 日志）
       const q = readGiftQuota();
       if (q?.ok === true && q.state === 'active' && typeof q.model === 'string' && q.model !== '' && q.model !== opt.model) {
         console.error(
