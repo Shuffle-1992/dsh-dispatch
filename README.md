@@ -211,6 +211,18 @@ dispatch | list | kill | dismiss | tail | quota | status | switch | channels | c
 > **仅当派发台不可用**（开关已关闭、`dispatch` 返回 `ok:false`：未配置 runner/workRoot、锁冲突等，
 > 或用户明确要求「你自己去做」）才退回 DSH 自带的 `subagent` / 后台 jobs，
 > 且**要说明为什么没用派发台**，不静默切换。
+>
+> **三条硬规则（ZB-37，2026-10-11 真机事故逼出来的）**：
+> ① **不要用 `pwsh`/`Bash` 直接跑 `collab-kit/zcode-run.mjs`**（含 `run_in_background`）—— 那会绕过
+> 文件锁、台账/额度分账、面板可见性、暂停分类与降级链；派发台 job **落地时本来就会自动唤醒**发起会话。
+> ② **通道撞 429/额度耗尽**（job 变 `paused / quota-exhausted`）时：先 `action=channels` 看
+> `recentQuotaExhausted` 与 `quotaText` → **直接 `dispatch {provider:"<通道 id>"}` 换通道**（免费额度
+> 通道 `account:<family>-start-plan` 常常仍可用），或 `action=fallback {chain:[…]}` + `action=retry` 交接。
+> ③ **派发前先看额度**：`channels[].quotaText` / `giftQuotaText`（剩余与窗口剩余时间），剩余少或窗口
+> 将尽就拆小任务。
+> （事故复盘见 [`tasks/ZB-37-dispatch-path-incident.md`](tasks/ZB-37-dispatch-path-incident.md)：
+> 真因是工具 schema 的 `provider` enum 只有 `["plan","personal"]`，与"接受清单任意 id"的说明矛盾，
+> 把免费额度通道挡在门外 ⇒ agent 只能派到付费通道 ⇒ 撞限额后绕开派发台。）
 
 ---
 

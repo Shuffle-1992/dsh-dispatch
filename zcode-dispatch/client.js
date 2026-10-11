@@ -453,7 +453,7 @@ window.__ModuleLoader__.load({
         writeFiles: '要写入的文件列表', lockNoneHint: '不取锁（确认无竞写关系时才用）',
         lockScopeHint: '只锁上面列出的文件；留空则锁整个仓库（与其它任务互斥）',
         secChannel: '通道', chanNewTask: '新任务将使用：', chanDisabled: '不可用', chanLoadFail: '通道清单加载失败',
-        giftQuota: '免费额度剩余', giftQuotaUnavailable: '免费额度余量不可用',
+        giftQuota: '免费额度剩余', giftQuotaUnavailable: '免费额度余量不可用', chanQuotaExhausted: '5 小时窗口已满',
         chanOfflineHint: '未连接宿主：通道/模型来自宿主远端面，连接后这两个下拉才可选',
         chanDefaultModel: '（通道默认模型）',
         paused: '已暂停', pQuota: '额度耗尽', pEntitled: '未开通', pSigning: '需签名', pConfig: '配置错误', pUnknown: '未知原因',
@@ -511,7 +511,7 @@ window.__ModuleLoader__.load({
         writeFiles: 'files to write', lockNoneHint: 'no lock (only when no write conflict is possible)',
         lockScopeHint: 'locks only the files listed above; empty locks the whole repo (exclusive)',
         secChannel: 'Channels', chanNewTask: 'New tasks will use: ', chanDisabled: 'unavailable', chanLoadFail: 'Failed to load channels',
-        giftQuota: 'Free quota left', giftQuotaUnavailable: 'Free-quota balance unavailable',
+        giftQuota: 'Free quota left', giftQuotaUnavailable: 'Free-quota balance unavailable', chanQuotaExhausted: '5h window full',
         chanOfflineHint: 'Host not connected: channel/model come from the host Remote face and unlock once connected',
         chanDefaultModel: '(channel default model)',
         paused: 'Paused', pQuota: 'Quota exhausted', pEntitled: 'Not entitled', pSigning: 'Signing required', pConfig: 'Config error', pUnknown: 'Unknown',
@@ -1948,7 +1948,8 @@ window.__ModuleLoader__.load({
           ];
         return list.map((c) =>
           h('option', { key: c.id, value: c.id, ...(c.enabled ? {} : { disabled: true }) },
-            `${c.name ?? c.id}${c.enabled ? '' : `（${t('chanDisabled')}：${c.reason ?? '-'}）`}`),
+            `${c.name ?? c.id}${c.enabled ? '' : `（${t('chanDisabled')}：${c.reason ?? '-'}）`}` +
+              `${c.recentQuotaExhausted ? `（${t('chanQuotaExhausted')}）` : ''}`),
         );
       };
 

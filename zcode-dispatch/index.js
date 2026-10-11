@@ -301,8 +301,14 @@ const TOOL_PARAMETERS = {
   prompt: { type: 'string', description: 'dispatch(kind=prompt)：发给 ZCode 的提示词' },
   task: { type: 'string', description: 'dispatch(kind=task)：任务文件绝对路径' },
   target: { type: 'string', description: 'dispatch(kind=target)：目标描述' },
-  model: { type: 'string', enum: ['GLM-5.3', 'GLM-5.3-Flash'], description: 'dispatch：模型（枚举=常用别名；实际可用值以 action=channels 清单为准，其它模型经 action=channel 设默认后使用）' },
-  provider: { type: 'string', enum: ['plan', 'personal'], description: 'dispatch：plan=套餐通道 / personal=个人 Key（枚举=常用别名；清单里的其它真实 id 走 action=channel 设默认）' },
+  /* ZB-37（真机事故修复）：`model` / `provider` **不能用 enum** —— 与上面 thinking 同一条纪律：
+   * 合法取值随账号/清单变（模型：GLM-5.3 系 / deepseek-flash / …；通道：plan / personal /
+   * `builtin:*` / **`account:<family>-start-plan`（免费额度）**），权威来源是 `action=channels`。
+   * 事故现场（2026-10-11，keysion 会话）：agent 按教学读 channels 后想设免费额度通道为默认，
+   * 却撞上 `invalid arguments: "provider" must be one of ["plan","personal"]` ⇒ 被迫用 `plan`
+   * （付费套餐，5h 窗口已满）⇒ 三个作业全部 429 ⇒ 它转而用后台 pwsh 直跑 runner 绕过派发台。 */
+  model: { type: 'string', description: 'dispatch：模型（如 GLM-5.3 / GLM-5.3-Flash / deepseek-flash；实际可用值以 action=channels 清单为准，其它模型经 action=channel 设默认后使用）' },
+  provider: { type: 'string', description: 'dispatch：通道 id。`plan`=套餐通道 / `personal`=个人 Key / `account:<family>-start-plan`=免费额度 / 清单里的任意真实 id（以 action=channels 为准）；不传 = 用 action=channel 设的默认通道' },
   mode: { type: 'string', enum: ['build', 'edit', 'plan', 'yolo'], description: 'dispatch：ZCode 运行模式，默认 edit' },
   /* ZB-29：思考强度。不用 enum —— 合法档位随模型声明不同（ZB-31 实测：GLM-5.3 系 low|high|max，
    * deepseek 系 disabled|low|high|max），以 channels[].thinkingLevels 为准；语义详述在描述正文。
@@ -378,6 +384,10 @@ function buildToolDescription(switchFile) {
   return [
     '【派发优先级：能用派发台就优先用派发台】凡是「把任务交给一个 agent 去做」的诉求——用户说「派发给 ZCode / 让 ZCode 做 / 用 ZCode 跑 / zcode 派发 / 在派发台派一个」，或只是笼统地说「派发这个任务」——**先**用本工具的 action=dispatch：它才会在「ZCode 派发台」面板里生成一个可监视的 job（独立 ZCode 进程、独立额度与会话，可查输出/终止/续跑/换通道）。',
     '✅ **仅当派发台不可用时**才退回 DSH 自带的 subagent / spawn_teammate / subagent_fork / 后台 jobs：即 action=status 显示开关已关闭、dispatch 返回 ok:false（未配置 runner/workRoot、锁冲突等），或用户明确要求「你自己（DSH）去做」。此时要**说明为什么没用派发台**，不要静默切换。',
+    /* ZB-37：真机事故（2026-10-11）逼出来的两条硬规则 —— 写进工具描述，让下一次不再走歪。 */
+    '🚫 **不要用 `pwsh` / `Bash` 直接跑 `collab-kit/zcode-run.mjs`（或用 `run_in_background` 承载它）**：那会**绕过派发台**——丢 单写者文件锁、用量台账/额度分账、面板可见性、暂停分类与降级链。派发台的 job **落地时同样会自动唤醒**发起会话（与 DSH 后台任务同款），所以「想被唤醒」不是绕过的理由。',
+    '🔁 **额度撞顶（dispatch 后 job 变 `paused / quota-exhausted`，如 Coding Plan 的 5 小时窗口满）时怎么办**：(1) 先 `action=channels` 看清单——**免费额度通道**（`account:<family>-start-plan`）常常仍可用，并带 `quotaText`（剩余/窗口剩余时间）；(2) **换通道派发**：`action=dispatch` 直接传 `provider: "<通道 id>"`（接受清单里任意 id，不再受枚举限制），或 `action=channel {provider}` 设默认通道再派；(3) 或 `action=fallback {chain:["<备用通道 id>"]}` 开降级链后 `action=retry {id}` 自动交接；(4) **不要**因为付费通道撞限额就改用后台 jobs 直跑 runner。',
+    '💰 **派发前先看额度**：`action=channels` 的 `channels[].quotaText` / 顶层 `giftQuotaText` 给出免费额度剩余与窗口剩余时间；`action=quota` 另给 `giftQuota` 结构化字段。剩余很少或窗口将尽时**拆小任务**，别让长任务跑到窗口关闭（那会 `paused / quota-exhausted`）。',
     `当前派发总开关：${state}（实时状态用 action=status）。action=switch 切换开关；action=list/tail 监视；与页面右下角悬浮窗是同一套操作（一操作两调用方）。`,
   ].join('\n') + `\n${TOOL_DESCRIPTION_BODY}`;
 }

@@ -255,18 +255,70 @@ export function quotaWindows(ledgerPath) {
  * 纪律：只读 ZCode 客户端日志（零网络请求、零额度消耗）；只有 start-plan 通道才挂 quota。
  * 工具路径（switch 的 channels/quota 分支）与 RemoteFace 路径（impl.*）都走这两个函数，
  * 避免"面板看得到、工具看不到"这类漂移。 */
-export function attachGiftQuota(channels) {
+export function attachGiftQuota(channels, ledgerPath) {
   const quota = readGiftQuota();
   const text = formatGiftQuota(quota);
+  const exhausted = recentQuotaExhausted(ledgerPath); // ZB-37：谁刚撞过额度（提示，不改可用性）
   return {
-    channels: (Array.isArray(channels) ? channels : []).map((ch) =>
-      GIFT_CHANNEL_RE.test(ch?.id ?? '')
-        ? { ...ch, ...(text ? { quota, quotaText: text } : { giftQuotaUnavailable: quota.reason ?? 'unavailable' }) }
-        : ch,
-    ),
+    channels: (Array.isArray(channels) ? channels : []).map((ch) => {
+      const hit = matchQuotaExhausted(ch, exhausted);
+      return {
+        ...ch,
+        ...(GIFT_CHANNEL_RE.test(ch?.id ?? '')
+          ? (text ? { quota, quotaText: text } : { giftQuotaUnavailable: quota.reason ?? 'unavailable' })
+          : {}),
+        ...(hit
+          ? {
+            recentQuotaExhausted: hit,
+            quotaNote: `最近撞过额度（${hit.at}${hit.retryAfterSec ? `，retry-after=${hit.retryAfterSec}s` : ''}）：优先改用其它通道（如 account:<family>-start-plan 免费额度）`,
+          }
+          : {}),
+      };
+    }),
     giftQuota: quota,
     ...(text ? { giftQuotaText: text } : {}),
+    ...(Object.keys(exhausted).length ? { recentQuotaExhausted: exhausted } : {}),
   };
+}
+
+/* ── ZB-37：**哪些通道刚撞过额度**（真机事故：`plan` 显示 enabled=true，实际 Coding Plan 5 小时
+ * 窗口已满、一撞就 429；agent 无从判断，只能撞了才知道）。
+ * 数据来源 = 台账（runner 识别到 429/限额时写 `rateLimited:true`），取最近 5 小时（与 Coding Plan
+ * 滚动窗口同尺度）。只做**提示**、不擅自改可用性（enabled 仍以 runner 清单为准）。
+ * provider 归一：台账里可能是 `plan:bigmodel-coding-plan` / `builtin:bigmodel-coding-plan`，
+ * 通道 id 可能是 `plan`（别名）/`builtin:bigmodel-coding-plan`。 */
+export function recentQuotaExhausted(ledgerPath, nowMs = Date.now(), windowMs = 5 * 3600 * 1000) {
+  if (!ledgerPath || !existsSync(ledgerPath)) return {};
+  const out = {};
+  let lines;
+  try {
+    lines = readFileSync(ledgerPath, 'utf8').split('\n');
+  } catch {
+    return {};
+  }
+  for (const line of lines.slice(-500)) {
+    if (!line.trim()) continue;
+    let row;
+    try { row = JSON.parse(line); } catch { continue; }
+    const at = Date.parse(row.at ?? '');
+    if (!Number.isFinite(at) || nowMs - at > windowMs) continue;
+    if (row.rateLimited !== true && row.rateLimited !== 1) continue;
+    const p = typeof row.provider === 'string' && row.provider !== '' ? row.provider : '(unknown)';
+    out[p.replace(/^plan:/, '')] = { at: row.at, retryAfterSec: row.retryAfterSec ?? null };
+  }
+  return out;
+}
+
+/** 通道是否命中「刚撞过额度」（见 recentQuotaExhausted 的归一规则）。 */
+export function matchQuotaExhausted(channel, exhausted) {
+  const ids = [channel?.id, channel?.aliasOf].filter((x) => typeof x === 'string' && x !== '');
+  for (const key of Object.keys(exhausted)) {
+    for (const id of ids) {
+      const bare = id.replace(/^plan:/, '');
+      if (id === key || bare === key || id.includes(key) || key.includes(bare)) return exhausted[key];
+    }
+  }
+  return null;
 }
 
 /** 只取额度字段（`action=quota` 用）。 */
@@ -403,7 +455,7 @@ export function createActionHandler(dispatcher, config = {}) {
         /* ---- Z6 增量动作：通道 / 续跑 / 降级链（既有动作语义不变） ---- */
         case 'channels': {
           const r = await dispatcher.listChannels();
-          return { ok: true, ...attachGiftQuota(r.channels ?? []), warnings: r.warnings ?? [] };
+          return { ok: true, ...attachGiftQuota(r.channels ?? [], config.ledgerPath), warnings: r.warnings ?? [] };
         }
         case 'channel': {
           if (p.provider != null && p.provider !== '') {
@@ -525,7 +577,7 @@ export function createRemoteFace(dispatcher, config = {}) {
       const c = await channelsCached();
       /* ZB-33：免费额度通道带**剩余额度**（只读 ZCode 日志，零网络请求）。
        * 面板据此画额度条；agent 工具 `action=channels` 也返回同一份（同一函数）。 */
-      return { ...attachGiftQuota(c.channels), warnings: c.warnings };
+      return { ...attachGiftQuota(c.channels, config.ledgerPath), warnings: c.warnings };
     },
     async channel() {
       if (!dispatcher) throw new Error(NOT_READY);
