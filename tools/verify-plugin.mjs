@@ -77,7 +77,7 @@ check('index.js 声明 Config（可配置）', /export\s+const\s+Config\s*=/.tes
     const res = typeof fn === 'function' ? fn({}) : null;
     const v = res && res.value;
     std = {
-      ok: typeof fn === 'function' && !!v && v.demo === false && v.maxConcurrent === 1 && typeof v.workRoot === 'string',
+      ok: typeof fn === 'function' && !!v && v.demo === false && v.maxConcurrent === 3 && typeof v.workRoot === 'string',
       detail: typeof fn === 'function' ? JSON.stringify(v) : '无 ~standard.validate',
     };
   } catch (e) {

@@ -148,7 +148,7 @@ function demoSnapshot() {
   return {
     generatedAt: nowIso(),
     workRoot: '(demo)',
-    maxConcurrent: 1,
+    maxConcurrent: 3,
     counts: { running: 1, queued: 1, done: 1 },
     locks: {
       repo: { jobId: 'j-demo-run', pid: 4242, at: nowIso(), lock: 'repo' },
@@ -544,7 +544,7 @@ export function createClientWire(ctx, config = {}) {
     return {
       generatedAt: nowIso(),
       workRoot: '(demo)',
-      maxConcurrent: 1,
+      maxConcurrent: 3,
       counts,
       locks: { repo: holder ? lockRec : null, memory: holder ? lockRec : null },
       queue: [...queue],

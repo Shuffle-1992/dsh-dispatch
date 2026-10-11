@@ -35,7 +35,7 @@ const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url));
  */
 const FIELDS = [
   { name: 'demo', type: 'boolean', def: false, desc: 'UI 演示模式：客户端用内置假数据渲染悬浮窗，不触达 dispatcher' },
-  { name: 'maxConcurrent', type: 'number', def: 1, min: 1, max: 8, desc: '同时运行的 run 上限（单写者互斥语义下的并发度）' },
+  { name: 'maxConcurrent', type: 'number', def: 3, min: 1, max: 8, desc: '同时运行的 run 上限（单写者互斥语义下的并发度）' },
   { name: 'runnerPath', type: 'string', def: '', desc: 'runner 脚本绝对路径（通用工具仓库 zcode-dispatch/collab-kit/zcode-run.mjs，只读使用）；留空则不创建 dispatcher' },
   { name: 'ledgerPath', type: 'string', def: '', desc: '台账 zcode-runs.jsonl 绝对路径；留空则跳过台账回读与用量聚合' },
   { name: 'workRoot', type: 'string', def: '', desc: '派发器工作根目录（locks/、state/jobs.json、logs/ 落在这里）；留空则不创建 dispatcher' },
@@ -560,7 +560,7 @@ export function apply(ctx, config = {}) {
       maxConcurrent: config.maxConcurrent,
       ...(config.runnerCwd ? { runnerCwd: config.runnerCwd } : {}),
     });
-    log('info', `dispatcher 就绪：work=${dispatcher.workRoot} maxConcurrent=${config.maxConcurrent ?? 1}`);
+    log('info', `dispatcher 就绪：work=${dispatcher.workRoot} maxConcurrent=${config.maxConcurrent ?? 3}`);
   } else {
     log('warn', '缺少 runnerPath / workRoot 配置，dispatcher 未创建（UI 将进入 demo 降级；工具动作返回可读错误）');
   }

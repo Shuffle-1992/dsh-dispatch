@@ -102,7 +102,7 @@ zcode-dispatch/
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `demo` | `false` | UI 演示模式：用内置假数据渲染面板，不触达 dispatcher |
-| `maxConcurrent` | `1` | 同时运行的 run 上限 |
+| `maxConcurrent` | `3` | 同时运行的 run 上限 |
 | `runnerPath` | `''` | runner 脚本绝对路径（通用工具仓库 `<本仓库>/collab-kit/zcode-run.mjs`，只读使用） |
 | `ledgerPath` | `''` | 台账 `zcode-runs.jsonl` 绝对路径；留空则跳过用量聚合 |
 | `workRoot` | `''` | 派发器工作根目录（`locks/`、`state/jobs.json`、`logs/`）；留空落到插件目录 `.data/` |
@@ -121,7 +121,7 @@ zcode-dispatch/
   name: "dsh-zcode-dispatch"
   config:
     demo: false
-    maxConcurrent: 1
+    maxConcurrent: 3
     runnerPath: '<宿主项目>\scripts\collab\zcode-run.mjs'
     ledgerPath: '<宿主项目>\collab\logs\zcode-runs.jsonl'
     workRoot:   '<本插件目录>\.data'

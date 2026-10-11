@@ -75,7 +75,7 @@ dsh plugin --profile web add "https://github.com/Shuffle-1992/zcode-dispatch#pat
 | 字段 | 类型/默认 | 说明 |
 |---|---|---|
 | `demo` | boolean / `false` | UI 演示模式：客户端用内置假数据渲染面板，不触达 dispatcher |
-| `maxConcurrent` | integer / `1` | 同时运行的 run 上限。**注意：它与单写者锁是两道独立的闸，实际并发 = min(两者)**，见下节 |
+| `maxConcurrent` | integer / `3` | 同时运行的 run 上限。**注意：它与单写者锁是两道独立的闸，实际并发 = min(两者)**，见下节 |
 | `runnerPath` | string / `''` | runner 绝对路径（通用工具仓库 `<本仓库>/collab-kit/zcode-run.mjs`，只读使用）。**与 `workRoot` 任一为空则不创建 dispatcher**（UI 走 demo 降级，工具动作返回可读错误） |
 | `runnerCwd` | string / `''` | runner 子进程的工作目录（通常设为宿主项目根）。runner 已迁出通用工具仓库、无法从自身位置推项目根，故它与「从绝对 `--task` 反推」构成**双保险**；留空 = 用 DSH 进程 cwd |
 | `ledgerPath` | string / `''` | 台账 `zcode-runs.jsonl` 绝对路径；留空则跳过台账回读与用量聚合 |
@@ -717,7 +717,7 @@ zcd dispatch --kind task --task <任务包> --provider start-plan --mode yolo
    靠既有 `timeoutMin` + 暂停分类兜底。
 3. 免费额度是**时间窗口**型：窗口外派发会以 `paused / quota-exhausted` 停下（不静默改烧付费额度）；
    窗口恢复后 `retry` 续跑。
-4. 并发：一个 job 一个 app-server 进程；建议先由 `maxConcurrent` 限 1–2。
+4. 并发：一个 job 一个 app-server 进程；建议先由 `maxConcurrent` 限 1–3。
 5. **`--cwd` / `runnerCwd` 必须落在宿主项目内**（与 `ledgerPath` 同项目）：runner 的台账固定在
    `<PROJECT>/collab/logs/zcode-runs.jsonl`，两者不同项目时 job 能跑通但用量聚合看不到这一单
    （面板显示 `billing=-`）。

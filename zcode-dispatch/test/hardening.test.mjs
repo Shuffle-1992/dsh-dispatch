@@ -189,7 +189,7 @@ test('A2 非法 config 一律 warn + 安全默认（不再让插件整体不激�
 
   const bad = validate({ maxConcurrent: 0, maxConsecutiveWakes: 2.5, runnerPath: 123, demo: 'yes', notifyOnSettle: 'false', bogus: 1 });
   assert.equal(bad.issues, undefined, '★ 非法配置**不再返回 issues**（原先 cordis 会 throw ⇒ 插件 INACTIVE）');
-  assert.equal(bad.value.maxConcurrent, 1, 'maxConcurrent=0 → 安全默认 1');
+  assert.equal(bad.value.maxConcurrent, 1, 'maxConcurrent=0 → 夹到下限 min=1（不是回落 def）');
   assert.equal(bad.value.maxConsecutiveWakes, 2, 'maxConsecutiveWakes=2.5 → 取整 2（原先被静默当"不限"=0）');
   assert.equal(bad.value.runnerPath, '', 'runnerPath=123（非字符串）→ 空串');
   assert.equal(bad.value.demo, false, "demo='yes' → false");
@@ -200,5 +200,5 @@ test('A2 非法 config 一律 warn + 安全默认（不再让插件整体不激�
   assert.equal(good.value.maxConcurrent, 4, '合法值原样保留');
   assert.equal(good.value.notifyOnSettle, false, 'false 被尊重');
   assert.equal(good.value.runnerPath, 'r');
-  assert.equal(validate({}).value.maxConcurrent, 1, '空配置补默认值');
+  assert.equal(validate({}).value.maxConcurrent, 3, '空配置补默认值');
 });

@@ -19,4 +19,4 @@
       name: 'dsh-zcode-dispatch'
       config:
         demo: false
-        maxConcurrent: 1
+        maxConcurrent: 3

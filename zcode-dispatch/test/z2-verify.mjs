@@ -93,7 +93,7 @@ const yamlChecks = [
   [/^\s+name:\s*'@local\/zcode-dispatch'\s*$/m, "行 name='dsh-zcode-dispatch'"],
   [/^\s+config:\s*$/m, 'config: 块'],
   [/^\s+demo:\s*false\s*$/m, 'config.demo=false'],
-  [/^\s+maxConcurrent:\s*1\s*$/m, 'config.maxConcurrent=1'],
+  [/^\s+maxConcurrent:\s*3\s*$/m, 'config.maxConcurrent=3'],
 ];
 for (const [re, name] of yamlChecks) ok(re.test(yamlText), `patch.yml ${name}`);
 const strOf = (key) => {
@@ -205,7 +205,7 @@ section('6. index.js Host 半边端到端（Z1 假 runner）');
   const KEYS = ['demo', 'maxConcurrent', 'runnerPath', 'ledgerPath', 'workRoot'];
   const v0 = host.Config['~standard'].validate({});
   ok(!!v0?.value && KEYS.every((k) => k in v0.value), 'validate({}) 补全 5 字段', JSON.stringify(v0?.value));
-  ok(v0.value.demo === false && v0.value.maxConcurrent === 1 && v0.value.runnerPath === '' && v0.value.ledgerPath === '' && v0.value.workRoot === '', 'validate({}) 默认值逐项正确');
+  ok(v0.value.demo === false && v0.value.maxConcurrent === 3 && v0.value.runnerPath === '' && v0.value.ledgerPath === '' && v0.value.workRoot === '', 'validate({}) 默认值逐项正确');
   const v1 = host.Config['~standard'].validate({ maxConcurrent: 3, demo: true, runnerPath: 'r', ledgerPath: 'l', workRoot: 'w' });
   ok(v1.value.maxConcurrent === 3 && v1.value.demo === true && v1.value.runnerPath === 'r' && v1.value.ledgerPath === 'l' && v1.value.workRoot === 'w', 'validate 保留显式配置值');
 

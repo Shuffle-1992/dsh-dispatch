@@ -429,7 +429,7 @@ function fileLockPath(dirLocks, p) {
  *   runnerCwd     子进程工作目录（默认 process.cwd()；spec.cwd 会作为 runner 的 --cwd 传入）
  *   ledgerPath    台账 zcode-runs.jsonl（缺省则跳过台账回读）
  *   workRoot      工作根目录（locks/state/logs 都在它下面）
- *   maxConcurrent 最大并发（默认 1）
+ *   maxConcurrent 最大并发（默认 3）
  *   repoLockPath  整仓库锁文件路径（默认 <workRoot>/locks/repo.lock）；memory 锁已于 ZB-16 删除
  *   timeoutGraceSec  dispatcher 看门狗在 runner 自身超时之后的宽限秒数（默认 120）
  *   spawnImpl / now  测试注入
@@ -449,7 +449,7 @@ export function createDispatcher(options = {}) {
    * memory.lock 文件 —— 否则升级后那个文件会永远躺在 locks/ 里、且被旧版快照当成"有人持锁"。 */
   const legacyMemoryLockPath = join(dirLocks, 'memory.lock');
   const ledgerPath = options.ledgerPath ? resolve(options.ledgerPath) : null;
-  const maxConcurrent = Math.max(1, Number(options.maxConcurrent) || 1);
+  const maxConcurrent = Math.max(1, Number(options.maxConcurrent) || 3);
   const runnerCwd = options.runnerCwd ? resolve(options.runnerCwd) : process.cwd();
   const timeoutGraceMs = Math.max(0, Number(options.timeoutGraceSec ?? 120) * 1000);
   const spawnImpl = options.spawnImpl || nodeSpawn;
