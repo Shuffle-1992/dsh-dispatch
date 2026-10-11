@@ -2805,6 +2805,13 @@ window.__ModuleLoader__.load({
       // （isInteractive 已上移模块级：与 JobRow 行头点击守卫共用）
       /* ZB-27：只保留**主题令牌**注入 —— 浮窗时代的 --zcd-w / --zcd-h（用户拖拽出来的宽高）
        * 随拖拽功能一起去掉：弹窗宽高由 .zcd-menu 的 CSS 决定（width: min(440px, 100vw-32px)）。 */
+      /* ZB-36（用户要求「调整派发台面板的高度，增加 100%」）：弹窗高度上限 **480px → 960px**。
+       * ⚠️ 刻意**不改 `.zcd-menu` 类本身**：那条 `max-height:min(480px,calc(100vh - 140px))` 是
+       * **照抄 DSH 官方菜单**的值（`header-entry.test.mjs` B28 钉住；job-list 等弹层共用该类）。
+       * 所以只在**面板这一层**用行内 maxHeight 覆盖 —— 视口项 `calc(100vh - 140px)` 保持不变，
+       * 短屏仍不会顶出屏幕（只影响"能显示多高"，不影响其它弹层）。 */
+      const PANEL_MAX_HEIGHT = 'min(960px, calc(100vh - 140px))';
+
       const cssVars = {
         '--zcd-bg': T.bg, '--zcd-bgBar': T.bgBar, '--zcd-sunken': T.sunken, '--zcd-hover': T.hover,
         '--zcd-accent': T.accent, '--zcd-onAccent': T.onAccent, '--zcd-border': T.border, '--zcd-shadow': T.shadow,
@@ -2830,8 +2837,14 @@ window.__ModuleLoader__.load({
 
       /* ZB-27：容器改用系统菜单样式（.zcd-menu，见 CSS —— 令牌与 job-list 的弹层同一套）。
        * --zcd-* 自定义属性挂在**这一层**，下面的各分区样式照旧解析。 */
-      /* ZB-27x：menuShift 由入口按视口余量算出（左对齐后防右溢出），合并进容器样式。 */
-      return h('div', { className: 'zcd-menu', style: menuShift ? { ...cssVars, marginLeft: `${menuShift}px` } : cssVars, role: 'dialog', 'aria-label': t('title') },
+      /* ZB-27x：menuShift 由入口按视口余量算出（左对齐后防右溢出），合并进容器样式。
+       * ZB-36：再加一层面板专属 maxHeight（见 PANEL_MAX_HEIGHT 说明）。 */
+      return h('div', {
+        className: 'zcd-menu',
+        style: { ...cssVars, maxHeight: PANEL_MAX_HEIGHT, ...(menuShift ? { marginLeft: `${menuShift}px` } : {}) },
+        role: 'dialog',
+        'aria-label': t('title'),
+      },
         h('div', { className: 'zcd-panelHead' },
           h(StatusDot, { state: runningNow ? 'running' : 'idle' }),
           h('span', { className: 'zcd-panelTitle' }, t('title')),

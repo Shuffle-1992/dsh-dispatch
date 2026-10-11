@@ -608,7 +608,7 @@ paused/pausedAt 与 unknown 分支、timeoutMin 校验）。
 | `node test/panel-style.test.mjs` | 24 | 样式注入与作用域（ZB-21/27：样式只注入 head 一次、重渲染不触碰；border-box 限定 .zcd-menu 子树） |
 | `node test/notify.test.mjs` | 21 | 落地自动唤醒（ZB-22：空闲 followup / 忙碌 inject、幂等、自己 kill/wait 的抑制、唤醒预算、卸载退订、工具层译码） |
 | `node test/wake-integration.test.mjs` | 3 | 落地唤醒**全链路接线**（ZB-22：`apply()` → inject agents/systemPrompt → 派发 → 落地 → 唤醒 + 信标 `wakeActive`；关配置 / 无服务时降级） |
-| `node test/header-entry.test.mjs` | 102 | 会话标题行入口 + 悬浮弹窗（ZB-27：槽位/order、**入口样式与同排一致**、系统菜单令牌、点外部/Esc 关闭、入口不建 wire、真点击开合；ZB-28b：共享 wire 配对释放契约） |
+| `node test/header-entry.test.mjs` | 105 | 会话标题行入口 + 悬浮弹窗（ZB-27：槽位/order、**入口样式与同排一致**、系统菜单令牌、点外部/Esc 关闭、入口不建 wire、真点击开合；ZB-28b：共享 wire 配对释放契约；**ZB-36：弹窗高度上限 ×2 = 960px 且只挂在面板层（真渲染断言）**） |
 | `node test/shared-wire-liveness.test.mjs` | 18 | **共享 wire 存活哨兵**（ZB-28b：功能重放「面板开→关不得处决入口的 live wire」+ 配对释放/REMOTE_READY 补投/kind 标签源码不变量——修「状态灯冻结、切换会话才显示」） |
 | `node test/single-source.test.mjs` | 31 | **单源哨兵**（ZB-25：动作清单 ≡ switch、状态集合引用同一性、三表方法集相等、协议常量逐字相等、STRINGS ↔ locale 逐值） |
 | `node test/hardening.test.mjs` | 5 | **核对硬化**（ZB-26：B1 锁 realpath / B2 ownerPid 不改写活 job / B3 多进程不丢更新 / B4 tail 不读越界 / A2 非法 config 只 warn 不阻断激活） |

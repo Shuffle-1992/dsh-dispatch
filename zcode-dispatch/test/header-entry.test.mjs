@@ -76,6 +76,11 @@ console.log('\nB. 入口样式**逐项对齐官方源码**（ui-jobs/JobListActi
     'B26 背景/圆角/阴影用官方同款令牌');
   ok(/backdrop-filter:var\(--dsw-menu-backdrop-filter/.test(mcss), '★ B27 backdrop-filter 用 --dsw-menu-backdrop-filter（官方同值）');
   ok(/max-height:min\(480px,calc\(100vh - 140px\)\)/.test(mcss), '★ B28 max-height min(480px,100vh-140px)（官方同值）');
+  /* ZB-36（用户要求「面板高度增加 100%」）：**面板这一层**用行内 maxHeight 覆盖 ——
+   * 类本身仍是官方 480px（B28 保持不变），视口项也不变；只有面板的上限翻倍到 960px。 */
+  ok(/min\(960px, calc\(100vh - 140px\)\)/.test(src), '★ ZB-36 面板自身高度上限 ×2（960px；视口项不变，短屏不顶出屏幕）');
+  ok(/maxHeight: PANEL_MAX_HEIGHT/.test(src),
+    '★ ZB-36 覆盖**只挂在面板容器上**（不污染 .zcd-menu 类 —— job-list 等弹层共用它）');
   ok(/left:0/.test(mcss) && !/right:0/.test(mcss), '★ B29 与入口**左对齐、向右展开**（官方 .menu 同款 left:0；用户要求「改成往右侧，参考智能体的」）');
   ok(/const \[menuShift, setMenuShift\] = useState\(0\)/.test(src) && /marginLeft:/.test(src) && /\$\{menuShift\}px/.test(src),
     '★ B29b 靠近视口右缘时用 menuShift（marginLeft 负值）兜回视口内 —— 与官方 JobListAction 的 style={{left: menuShift}} 同一意图');
@@ -268,6 +273,10 @@ console.log('\nE. 真渲染（React 桩）：开合与弹窗内容');
   tree = render();
   const menus = findAll(tree, (n) => typeof n.props?.className === 'string' && n.props.className.includes('zcd-menu'));
   ok(menus.length === 1, 'E6 ★ 点击后挂出弹窗（.zcd-menu）');
+  /* ZB-36：真渲染断言 —— 面板高度上限确实**挂在弹窗元素的行内样式**上（不是只写在源码里）。 */
+  const menuStyle = menus[0].props.style ?? {};
+  ok(menuStyle.maxHeight === 'min(960px, calc(100vh - 140px))',
+    `★ ZB-36 弹窗行内 maxHeight = 960px 上限（实际 ${JSON.stringify(menuStyle.maxHeight)}）`);
   ok(chipOf(tree).props['aria-expanded'] === true, 'E7 展开状态与 aria-expanded 一致');
   const menuText = texts(menus[0]);
   ok(menuText.includes('派发'), `E8 弹窗里是原面板内容（含分区标题，实际片段=${menuText.slice(0, 40)}）`);
