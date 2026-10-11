@@ -222,6 +222,10 @@ dispatch | list | kill | dismiss | tail | quota | status | switch | channels | c
 > 将尽就拆小任务。
 > ④ **派发到"已撞顶"通道时立刻给提示**（ZB-38）：`action=dispatch` 的返回里带 `warning` +
 > `suggestedProvider`（优先建议可用的免费额度通道）—— 不必等它 429 暂停再靠猜。
+> ⑤ **显式指定"已撞顶"通道 ⇒ 自动改派**（ZB-39，用户报告「面板选的是免费额度，派发却先走付费 5h 窗口」）：
+> 候选顺序 = **你在面板 / `action=channel` 选定的默认通道** → 降级链首个可用目标 → 可用的免费额度通道；
+> 返回里带 `redirectedFrom` + `warning` 说明改派事实。**绝不硬闯注定 429 的通道**，也不静默乱派
+> （候选全不可用 ⇒ 仅提示）。**因此调用方通常根本不需要传 `provider`**：不传就是用你选的通道。
 > （事故复盘见 [`tasks/ZB-37-dispatch-path-incident.md`](tasks/ZB-37-dispatch-path-incident.md)：
 > 真因是工具 schema 的 `provider` enum 只有 `["plan","personal"]`，与"接受清单任意 id"的说明矛盾，
 > 把免费额度通道挡在门外 ⇒ agent 只能派到付费通道 ⇒ 撞限额后绕开派发台。）

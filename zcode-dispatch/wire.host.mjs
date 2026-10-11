@@ -326,6 +326,61 @@ export function matchQuotaExhausted(channel, exhausted) {
  * 真机事故（2026-10-11）：agent 只能靠撞出 429 才发现通道已满；这里有提示就能立刻改派。
  * 建议通道优先给"可用的免费额度通道"（`account:<family>-start-plan`），否则给任一可用且未撞顶的通道。
  */
+/** 降级链里的目标 provider（未启用则空）。 */
+function fallbackTargetProviders(dispatcher) {
+  try {
+    const fb = dispatcher.getFallbackChain() ?? {};
+    if (fb.enabled === false) return [];
+    const list = Array.isArray(fb.targets) ? fb.targets : Array.isArray(fb.chain) ? fb.chain : [];
+    return list.map((t) => (typeof t === 'string' ? t : t?.provider)).filter((x) => typeof x === 'string' && x !== '');
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * ZB-39（用户报告：「通道我设置的是免费额度，派发却先走付费 5 小时窗口、撞顶后才回退」）：
+ * 调用方**显式指定**的通道「最近撞过额度」（一启动必然 429）时，**改派到用户选定的可用通道** ——
+ * 候选顺序 = 默认通道（面板 / `action=channel` 选定）→ 降级链首个可用目标 → 可用的免费额度通道。
+ * 只处理"注定失败"这一种情况：候选顺序 = 默认通道 → 降级链首个可用目标 → 可用的免费额度通道；
+ * 若这些候选都不可用（或就是被指定的那条），则**不改派**（仅由 dispatchQuotaHint 给提示）。
+ * @returns {null | {from: string, to: string, name: string}}
+ */
+export async function applyExhaustedChannelGuard(dispatcher, spec, config = {}) {
+  const exhausted = recentQuotaExhausted(config.ledgerPath);
+  if (Object.keys(exhausted).length === 0) return null;
+  let channels;
+  try {
+    channels = (await dispatcher.listChannels())?.channels ?? [];
+  } catch {
+    return null;
+  }
+  const chOf = (id) => channels.find((c) => c.id === id || c.aliasOf === id) ?? { id, name: id, enabled: false };
+  const usable = (id) => {
+    const c = chOf(id);
+    return c.enabled === true && !matchQuotaExhausted(c, exhausted);
+  };
+  let defaultProvider = '';
+  try {
+    defaultProvider = (await dispatcher.getChannel())?.provider ?? '';
+  } catch {
+    defaultProvider = '';
+  }
+  const requested = typeof spec?.provider === 'string' && spec.provider !== '' ? spec.provider : defaultProvider;
+  if (!requested) return null;
+  if (!matchQuotaExhausted(chOf(requested), exhausted)) return null; // 目标没撞顶 ⇒ 不动
+  const candidates = [
+    defaultProvider,
+    ...fallbackTargetProviders(dispatcher),
+    ...channels.filter((c) => GIFT_CHANNEL_RE.test(c.id ?? '')).map((c) => c.id),
+  ];
+  for (const id of candidates) {
+    if (!id || id === requested) continue;
+    if (usable(id)) return { from: requested, to: id, name: chOf(id).name ?? id };
+  }
+  return null;
+}
+
 export async function dispatchQuotaHint(dispatcher, spec, config = {}) {
   const exhausted = recentQuotaExhausted(config.ledgerPath);
   if (Object.keys(exhausted).length === 0) return null;
@@ -397,12 +452,28 @@ export function createActionHandler(dispatcher, config = {}) {
           if (p.thinking != null && String(p.thinking).trim() !== '') spec.reasoningLevel = String(p.thinking).trim();
           if (p.timeoutMin != null && p.timeoutMin !== '') spec.timeoutMin = Number(p.timeoutMin);
           if (p.memoryBench != null) spec.memoryBench = Boolean(p.memoryBench);
+          /* ZB-39：显式指定的通道"注定失败"（最近撞过额度）⇒ **改派到用户选定的可用通道**
+           * （默认通道 → 降级链 → 免费额度通道），并在返回里说明改派事实。 */
+          const guard = await applyExhaustedChannelGuard(dispatcher, spec, config);
+          if (guard) spec.provider = guard.to;
+          let defaultProvider = '';
+          try { defaultProvider = (await dispatcher.getChannel())?.provider ?? ''; } catch { defaultProvider = ''; }
           const job = dispatcher.dispatch(spec); // 参数不合法时 core 抛 TypeError，走 catch 返回 error
           /* ZB-38（真机事故：agent 派到付费通道 → 一启动就 429 暂停，只能靠撞了才知道）：
            * 目标通道「最近撞过额度」时**在派发结果里立刻提示**，并给出建议通道 —— 让调用方
            * 有机会马上重派到可用通道，而不是等 paused。提示不阻塞派发（job 照常建）。 */
           const hint = await dispatchQuotaHint(dispatcher, spec, config);
-          return { ok: true, job: slimJob(job), ...(hint ?? {}) };
+          return {
+            ok: true,
+            job: slimJob(job),
+            ...(guard
+              ? {
+                redirectedFrom: guard.from,
+                warning: `显式指定的通道「${guard.from}」最近撞过额度（一启动必然 429）：已改派到${guard.to === defaultProvider ? `你选定的默认通道「${guard.to}」` : `可用的替代通道「${guard.to}」`}（${guard.name}）。若确认原通道窗口已重置，可 action=channels 复核后再指定。`,
+              }
+              : {}),
+            ...(hint ?? {}),
+          };
         }
         case 'list':
           return { ok: true, jobs: dispatcher.list().map(slimJob).filter(withoutDismissed(dispatcher)) };

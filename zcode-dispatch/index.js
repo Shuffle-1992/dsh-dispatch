@@ -308,7 +308,7 @@ const TOOL_PARAMETERS = {
    * 却撞上 `invalid arguments: "provider" must be one of ["plan","personal"]` ⇒ 被迫用 `plan`
    * （付费套餐，5h 窗口已满）⇒ 三个作业全部 429 ⇒ 它转而用后台 pwsh 直跑 runner 绕过派发台。 */
   model: { type: 'string', description: 'dispatch：模型（如 GLM-5.3 / GLM-5.3-Flash / deepseek-flash；实际可用值以 action=channels 清单为准，其它模型经 action=channel 设默认后使用）' },
-  provider: { type: 'string', description: 'dispatch：通道 id。`plan`=套餐通道 / `personal`=个人 Key / `account:<family>-start-plan`=免费额度 / 清单里的任意真实 id（以 action=channels 为准）；不传 = 用 action=channel 设的默认通道' },
+  provider: { type: 'string', description: 'dispatch：通道 id。**通常不要传** —— 不传 = 用用户在面板 / `action=channel` 选定的默认通道（推荐做法）；只有确实要临时换通道时才传。可用值：`plan` 套餐 / `personal` 个人 Key / `account:<family>-start-plan` 免费额度 / 清单里任意真实 id（以 action=channels 为准）。传入的通道若"最近撞过额度"，派发会**自动改派**到你选定的可用通道并在返回里说明（`redirectedFrom`）' },
   mode: { type: 'string', enum: ['build', 'edit', 'plan', 'yolo'], description: 'dispatch：ZCode 运行模式，默认 edit' },
   /* ZB-29：思考强度。不用 enum —— 合法档位随模型声明不同（ZB-31 实测：GLM-5.3 系 low|high|max，
    * deepseek 系 disabled|low|high|max），以 channels[].thinkingLevels 为准；语义详述在描述正文。
@@ -387,6 +387,7 @@ function buildToolDescription(switchFile) {
     /* ZB-37：真机事故（2026-10-11）逼出来的两条硬规则 —— 写进工具描述，让下一次不再走歪。 */
     '🚫 **不要用 `pwsh` / `Bash` 直接跑 `collab-kit/zcode-run.mjs`（或用 `run_in_background` 承载它）**：那会**绕过派发台**——丢 单写者文件锁、用量台账/额度分账、面板可见性、暂停分类与降级链。派发台的 job **落地时同样会自动唤醒**发起会话（与 DSH 后台任务同款），所以「想被唤醒」不是绕过的理由。',
     '🔁 **额度撞顶（dispatch 后 job 变 `paused / quota-exhausted`，如 Coding Plan 的 5 小时窗口满）时怎么办**：(1) 先 `action=channels` 看清单——**免费额度通道**（`account:<family>-start-plan`）常常仍可用，并带 `quotaText`（剩余/窗口剩余时间）；(2) **换通道派发**：`action=dispatch` 直接传 `provider: "<通道 id>"`（接受清单里任意 id，不再受枚举限制），或 `action=channel {provider}` 设默认通道再派；(3) 或 `action=fallback {chain:["<备用通道 id>"]}` 开降级链后 `action=retry {id}` 自动交接；(4) **不要**因为付费通道撞限额就改用后台 jobs 直跑 runner。',
+    '🎯 **`provider` 默认不要传**：不传 = 用**用户在面板 / `action=channel` 选定的默认通道**（这是推荐做法，也是用户的意图）。只有**确实要临时换通道**时才传。若要传，先 `action=channels` 看该通道是否带 `recentQuotaExhausted`；即使你传了"已撞顶"的通道，派发也会**自动改派**到用户选定的可用通道（返回里带 `redirectedFrom` + `warning`），所以不用自己先试探再回退。',
     '💰 **派发前先看额度**：`action=channels` 的 `channels[].quotaText` / 顶层 `giftQuotaText` 给出免费额度剩余与窗口剩余时间；`action=quota` 另给 `giftQuota` 结构化字段。剩余很少或窗口将尽时**拆小任务**，别让长任务跑到窗口关闭（那会 `paused / quota-exhausted`）。',
     `当前派发总开关：${state}（实时状态用 action=status）。action=switch 切换开关；action=list/tail 监视；与页面右下角悬浮窗是同一套操作（一操作两调用方）。`,
   ].join('\n') + `\n${TOOL_DESCRIPTION_BODY}`;

@@ -17,7 +17,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { attachGiftQuota, dispatchQuotaHint, matchQuotaExhausted, recentQuotaExhausted } from '../wire.host.mjs';
+import { applyExhaustedChannelGuard, attachGiftQuota, dispatchQuotaHint, matchQuotaExhausted, recentQuotaExhausted } from '../wire.host.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const INDEX_SRC = readFileSync(join(HERE, '..', 'index.js'), 'utf8');
@@ -103,5 +103,56 @@ test('ZB-37 ④：attachGiftQuota(…, ledgerPath) 把额度提示挂到通道�
   assert.match(plan.quotaNote, /改用其它通道/);
   assert.equal(gift.recentQuotaExhausted, undefined, '免费额度通道不被误标');
   assert.ok(out.recentQuotaExhausted && Object.keys(out.recentQuotaExhausted).length === 1, '顶层也给出标记表');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('ZB-39 ⑥：显式指定"已撞顶"通道时自动改派到用户选定的可用通道（不再硬闯 429）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zb39-'));
+  const ledger = join(dir, 'zcode-runs.jsonl');
+  writeFileSync(ledger, JSON.stringify({ at: new Date().toISOString(), provider: 'plan:bigmodel-coding-plan', rateLimited: true }) + '\n');
+  const CH = [
+    { id: 'plan', name: '默认套餐', enabled: true, aliasOf: 'builtin:bigmodel-coding-plan' },
+    { id: 'account:bigmodel-start-plan', name: '免费额度（Start Plan）', enabled: true },
+    { id: 'personal', name: '深度求索', enabled: true },
+  ];
+  const mk = (defaultProvider, chain = []) => ({
+    listChannels: async () => ({ channels: CH }),
+    getChannel: async () => ({ provider: defaultProvider }),
+    getFallbackChain: () => ({ enabled: chain.length > 0, chain, targets: chain.map((p) => ({ provider: p })) }),
+  });
+
+  /* ① 用户默认通道 = 免费额度；调用方显式传 plan（撞顶）⇒ 改派到免费额度 */
+  const g1 = await applyExhaustedChannelGuard(mk('account:bigmodel-start-plan'), { kind: 'prompt', provider: 'plan' }, { ledgerPath: ledger });
+  assert.deepEqual(g1, { from: 'plan', to: 'account:bigmodel-start-plan', name: '免费额度（Start Plan）' });
+
+  /* ② 目标是免费额度（未撞顶）⇒ 不动 */
+  assert.equal(await applyExhaustedChannelGuard(mk('plan'), { kind: 'prompt', provider: 'account:bigmodel-start-plan' }, { ledgerPath: ledger }), null);
+
+  /* ③ 默认通道自己就是撞顶通道 ⇒ 仍找兜底（这里命中免费额度通道），**不硬闯付费 429** */
+  const g3 = await applyExhaustedChannelGuard(mk('plan'), { kind: 'prompt', provider: 'plan' }, { ledgerPath: ledger });
+  assert.equal(g3?.to, 'account:bigmodel-start-plan', '默认通道也撞顶时用免费额度通道兜底');
+
+  /* ③b 兜底候选也全不可用 ⇒ 不改派（交给 hint 提示，绝不静默乱派） */
+  const g3b = await applyExhaustedChannelGuard(
+    { listChannels: async () => ({ channels: [{ id: 'plan', enabled: true, aliasOf: 'builtin:bigmodel-coding-plan' }] }), getChannel: async () => ({ provider: 'plan' }), getFallbackChain: () => ({ enabled: false, chain: [], targets: [] }) },
+    { kind: 'prompt', provider: 'plan' },
+    { ledgerPath: ledger },
+  );
+  assert.equal(g3b, null, '没有可用兜底 ⇒ 不改派');
+
+  /* ④ 默认通道同样撞顶、且列表里没有免费额度通道 ⇒ 退到降级链首个可用目标 */
+  const g4 = await applyExhaustedChannelGuard(
+    {
+      listChannels: async () => ({ channels: [{ id: 'plan', enabled: true, aliasOf: 'builtin:bigmodel-coding-plan' }, { id: 'personal', name: '深度求索', enabled: true }] }),
+      getChannel: async () => ({ provider: 'plan' }),
+      getFallbackChain: () => ({ enabled: true, chain: ['personal'], targets: [{ provider: 'personal' }] }),
+    },
+    { kind: 'prompt', provider: 'plan' },
+    { ledgerPath: ledger },
+  );
+  assert.equal(g4?.to, 'personal', '降级链首个可用目标（personal 未被标）');
+
+  /* ⑤ 台账不存在（无撞顶记录）⇒ 永不改派 */
+  assert.equal(await applyExhaustedChannelGuard(mk('account:bigmodel-start-plan'), { kind: 'prompt', provider: 'plan' }, { ledgerPath: join(dir, 'nope.jsonl') }), null);
   rmSync(dir, { recursive: true, force: true });
 });
