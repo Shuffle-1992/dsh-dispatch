@@ -16,7 +16,7 @@ DSH 自带的 `subagent` 跑的是 DSH 自己的 agent；**本插件跑的是 ZC
 **从 GitHub 仓库安装（推荐）**——git 规格 + `#path:` 子目录定位：
 
 ```bash
-dsh plugin --profile web add "github:Shuffle-1992/zcode-dispatch#path:dispatch"
+dsh plugin --profile web add "github:Shuffle-1992/dsh-dispatch#path:dispatch"
 ```
 
 > 把 `web` 换成你的 profile 名（`dsh plugin list` 可查）。装完**重启 DSH** 生效。

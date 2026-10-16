@@ -82,7 +82,7 @@
 ## 二、复现命令与结果
 
 ```powershell
-cd "F:\My Code\zcode-dispatch\zcode-dispatch"
+cd "F:\My Code\dsh-dispatch\zcode-dispatch"
 node --test test/lock-queue-visibility.test.mjs   # 6/6
 node --test test/pause-timeout.test.mjs           # 5/5
 node --test test/memory-ban.test.mjs              # 6/6

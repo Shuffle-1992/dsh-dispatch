@@ -10,8 +10,8 @@
 
 | 项 | 值 |
 |---|---|
-| 插件源码 | `F:\My Code\zcode-dispatch\dispatch\`（独立 git 仓库 `main`；最近提交 `e4cdb4c`） |
-| 安装方式 | GUI 插件页「添加插件」→ 填本地目录路径；profile 里是 **Junction 软链**：`~/.dsh/profiles/desktop/node_modules/dsh-dispatch → F:\My Code\zcode-dispatch\dispatch` |
+| 插件源码 | `F:\My Code\dsh-dispatch\dispatch\`（独立 git 仓库 `main`；最近提交 `e4cdb4c`） |
+| 安装方式 | GUI 插件页「添加插件」→ 填本地目录路径；profile 里是 **Junction 软链**：`~/.dsh/profiles/desktop/node_modules/dsh-dispatch → F:\My Code\dsh-dispatch\dispatch` |
 | 启用状态 | ✅ `~/.dsh/profiles/desktop/package.json` 的 `dsh.profile.bundles` **含** `dsh-dispatch` |
 | DSH 启动 | ✅ 14:12:56 重启后**无崩溃报告**（`%APPDATA%\@deepseek-ai\dsh-desktop\logs\crash-*.log` 最新仍是 14:05 的两条旧记录） |
 | **面板** | ✅ **已可见**（2026-09-30 14:2x 用户确认）。根因 = `createWire()` 渲染期抛错且当时无 ErrorBoundary → 整块浮层静默消失；修复见提交 `e4cdb4c`（createWire 兜底 + DEAD_WIRE + PanelBoundary），用户刷新页面后可见 |
@@ -104,7 +104,7 @@
 **阶段 C（已由标准模式完成，供参考）**：agent 工具注册的官方契约已挖到并存档于 `refs/dsh-tools/`：
 `import { defineTool } from '@deepseek-ai/dsh-tools'` + 插件导出 `inject = ['tools']` + `ctx.tools.register(defineTool({name, description, parameters, output, execute}))`（样例：`refs/dsh-tools/tool-fs-example/index.js:261`、`:1176`、`:1212`；契约：`refs/dsh-tools/schema.js:274-330`）。Z13 已据此改造完成，DSH 独立复现 **13/13**（`tools/` 内的探针 + 桩模块路径）。
 
-> ⚠️ **留给创造模式核实的一个真机风险**：`@deepseek-ai/dsh-tools` 是**裸 import**，而我们的包位于 `F:\My Code\zcode-dispatch`（不在 DSH 安装目录内），profile 的 `node_modules` 里也**没有** `@deepseek-ai` 作用域 —— 本地复现必须用解析钩子把它指向桩模块才能走通。
+> ⚠️ **留给创造模式核实的一个真机风险**：`@deepseek-ai/dsh-tools` 是**裸 import**，而我们的包位于 `F:\My Code\dsh-dispatch`（不在 DSH 安装目录内），profile 的 `node_modules` 里也**没有** `@deepseek-ai` 作用域 —— 本地复现必须用解析钩子把它指向桩模块才能走通。
 > whale-pet 的宿主半边**不 import 任何 `@deepseek-ai/*`**（只用注入的 `agents` 服务），所以第三方插件能否裸 import 宿主包**没有先例证据**。
 > 请用 `Tool.listTools` 核实 `dispatch` 是否真的出现；若**缺席**，修法是给 `loadDefineTool()` 增加**绝对路径回退**（候选：`process.resourcesPath`、`D:\DeepSeek\resources\app.asar\dsh\node_modules\@deepseek-ai\dsh-tools\lib\index.js`、env 覆盖），而不是继续猜。
 
@@ -137,9 +137,9 @@
 
 ```powershell
 # 1) 常驻探针（20 项；profile 写入那条按预期放行）
-$env:Z2_ALLOW_PROFILE_WRITE='1'; node "F:\My Code\zcode-dispatch\tools\verify-plugin.mjs"
+$env:Z2_ALLOW_PROFILE_WRITE='1'; node "F:\My Code\dsh-dispatch\tools\verify-plugin.mjs"
 # 2) 单测
-cd "F:\My Code\zcode-dispatch\dispatch"; node test/core.test.mjs; node test/channel-retry.test.mjs
+cd "F:\My Code\dsh-dispatch\dispatch"; node test/core.test.mjs; node test/channel-retry.test.mjs
 # 3) 语法
 node --check index.js; node --check client.js; node --check wire.host.mjs; node --check wire.client.mjs
 ```
@@ -154,7 +154,7 @@ node --check index.js; node --check client.js; node --check wire.host.mjs; node 
 ## 七、交付与沟通
 
 - 交付写 `tasks/Z11-delivery.md`：**改动清单 / 你确定下来的形态（贴代码 + 来源文件:行号）/ 复现命令 + 原始输出 / 未确定项（如实写，宁缺毋编）**；
-- 仓库 `F:\My Code\zcode-dispatch` 是独立 git 仓库，一轮一个 conventional commit（`fix(dispatch): ...`）；
+- 仓库 `F:\My Code\dsh-dispatch` 是独立 git 仓库，一轮一个 conventional commit（`fix(dispatch): ...`）；
 - 历史教训：Z7 曾按"看起来对"的形态写 Remote 接线，Z8 才补真实证据 —— **凡涉及宿主/客户端 API 形态，必须以 inspection 或官方包源码为准，不许猜**。
 
 ---

@@ -335,7 +335,7 @@ New-Item -ItemType Junction `
 1. **插件 config 只认 Standard Schema**：cordis 读 `runtime.Config['~standard'].validate(config)`。裸 JSON Schema 会抛 `Cannot read properties of undefined (reading 'validate')` 导致插件不激活。优先用 `@deepseek-ai/schemastery`，解析不到再手写 Standard Schema 降级。
 2. **客户端 `inject` 不能声明自家尚未就绪的 `remote.<ns>`**：否则 `pending (waiting for service: remote.opencodeDispatch)` → **web boot 直接失败**。用 `inject: ['slots','remote']` + 运行时探测。
 
-> 动手前**必读** `F:\My Code\zcode-dispatch\pitfalls.md`。
+> 动手前**必读** `F:\My Code\dsh-dispatch\pitfalls.md`。
 
 ---
 

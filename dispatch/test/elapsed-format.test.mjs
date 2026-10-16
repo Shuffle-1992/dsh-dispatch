@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { strict as assert } from 'node:assert';
 
-const SRC = 'F:\\My Code\\zcode-dispatch\\dispatch\\client.js';
+const SRC = 'F:\\My Code\\dsh-dispatch\\dispatch\\client.js';
 const src = readFileSync(SRC, 'utf8');
 
 let pass = 0;
@@ -48,7 +48,7 @@ ok(/h\('span', \{ className: 'dsp-dim' \}, fmtSec\(job\.elapsedSec\)\)/.test(src
 ok(/fmtSec\(lk\.heldSec\)/.test(src), 'C3 文件锁持有时长同格式（同一函数，不产生两套风格）');
 {
   // 数据层仍以秒为单位的旁证：core 里按秒计算并保留小数
-  const core = readFileSync('F:\\My Code\\zcode-dispatch\\dispatch\\core\\dispatch-core.mjs', 'utf8');
+  const core = readFileSync('F:\\My Code\\dsh-dispatch\\dispatch\\core\\dispatch-core.mjs', 'utf8');
   ok(/out\.elapsedSec = Number\(\(\(nowMs\(\) - Date\.parse\(out\.startedAt\)\) \/ 1000\)\.toFixed\(3\)\)/.test(core),
     'C4 core 仍按秒存 elapsedSec（契约未变，CLI/台账不受影响）');
 }

@@ -17,13 +17,13 @@ bridge/
 ```
 你是 DSH 派发桥的执行端。严格按以下步骤，不要做多余的事：
 
-1. 列出 F:\My Code\zcode-dispatch\bridge\inbox 下的 .md 文件，按文件名升序取第一个。
+1. 列出 F:\My Code\dsh-dispatch\bridge\inbox 下的 .md 文件，按文件名升序取第一个。
 2. 若目录为空或不存在：只回复 NO_TASK，立即结束，不要读取或执行任何其他内容。
 3. 若有任务文件：完整执行该任务包（它自带「交付物 / 禁止 / 验收方式」三段，全部是硬约束）。
 4. 完成后：
-   a. 把交付文档写到 F:\My Code\zcode-dispatch\bridge\outbox\<任务文件名去掉 .md>.done.md，
+   a. 把交付文档写到 F:\My Code\dsh-dispatch\bridge\outbox\<任务文件名去掉 .md>.done.md，
       内容含：交付清单 / 可复跑命令 + 原始输出 / 未决问题；
-   b. 把 inbox 里的该任务文件移动到 F:\My Code\zcode-dispatch\bridge\archive\。
+   b. 把 inbox 里的该任务文件移动到 F:\My Code\dsh-dispatch\bridge\archive\。
 5. 一次只处理一个任务文件；不要改动 inbox 里其他文件；不要并行开多个任务。
 6. 最终回复只给：任务文件名 + 一句话结论 + outbox 文件名。
 ```
@@ -43,9 +43,9 @@ bridge/
 ## DSH 侧用法
 
 ```bash
-node F:\My Code\zcode-dispatch\tools\bridge.mjs submit <任务包路径>   # 投递
-node F:\My Code\zcode-dispatch\tools\bridge.mjs status              # 看 inbox/outbox
-node F:\My Code\zcode-dispatch\tools\bridge.mjs poll 600            # 等交付（秒）
+node F:\My Code\dsh-dispatch\tools\bridge.mjs submit <任务包路径>   # 投递
+node F:\My Code\dsh-dispatch\tools\bridge.mjs status              # 看 inbox/outbox
+node F:\My Code\dsh-dispatch\tools\bridge.mjs poll 600            # 等交付（秒）
 ```
 
 ## 纪律

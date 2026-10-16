@@ -5,11 +5,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Shuffle-1992/zcode-dispatch.git"
+    "url": "git+https://github.com/Shuffle-1992/dsh-dispatch.git"
   },
-  "homepage": "https://github.com/Shuffle-1992/zcode-dispatch",
+  "homepage": "https://github.com/Shuffle-1992/dsh-dispatch",
   "bugs": {
-    "url": "https://github.com/Shuffle-1992/zcode-dispatch/issues"
+    "url": "https://github.com/Shuffle-1992/dsh-dispatch/issues"
   },
   "keywords": [
     "dsh-plugin",

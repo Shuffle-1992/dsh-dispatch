@@ -44,9 +44,9 @@ paused/终态 job 的 id 集合，`snapshot`/`list` 据此过滤；删掉即恢�
 ### 方式一：从 GitHub 仓库安装（推荐）
 
 ```sh
-dsh plugin --profile web add "github:Shuffle-1992/zcode-dispatch#path:dispatch"
+dsh plugin --profile web add "github:Shuffle-1992/dsh-dispatch#path:dispatch"
 # 或等价 URL 形式
-dsh plugin --profile web add "https://github.com/Shuffle-1992/zcode-dispatch#path:dispatch"
+dsh plugin --profile web add "https://github.com/Shuffle-1992/dsh-dispatch#path:dispatch"
 ```
 
 或在 DSH 的**插件页**点「添加插件」、填上面那条 git 规格。

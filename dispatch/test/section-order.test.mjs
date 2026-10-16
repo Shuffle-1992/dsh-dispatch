@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { strict as assert } from 'node:assert';
 
-const SRC = 'F:\\My Code\\zcode-dispatch\\dispatch\\client.js';
+const SRC = 'F:\\My Code\\dsh-dispatch\\dispatch\\client.js';
 const src = readFileSync(SRC, 'utf8');
 
 let pass = 0;

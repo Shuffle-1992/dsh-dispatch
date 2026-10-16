@@ -36,8 +36,13 @@ web boot: 1 entry did not activate
 插件仍处于**已安装但未启用**状态（`dependencies` 里的软链保留）。重新启用 = 在 `package.json` 的 `dsh.profile.bundles` 里加回一行：
 
 ```json
-"@local/zcode-dispatch"
+"dsh-dispatch"
 ```
+
+> ⚠️ **ZB-41 起包名已变更**：bundle id `zcode-dispatch` → **`dispatch`**、包名 `dsh-zcode-dispatch` → **`dsh-dispatch`**
+> （ZB-41 去品牌化改名；ZB-43 仓库名 `zcode-dispatch` → `dsh-dispatch`）。
+> 本文下方历史记录里的 `@local/zcode-dispatch` / `remote.zcodeDispatch` 是**当时的事实**，已按原文保留；
+> **重新启用请用上面的 `dsh-dispatch`**。
 
 然后**完全重启 DSH**。启用前请确认插件源码已含这两个修复（均已提交）：
 

@@ -57,8 +57,8 @@
 
 ## 目录改名与 profile 重注册
 
-- 插件目录 `zcode-dispatch/` → **`dispatch/`**（仓库根 `F:\My Code\zcode-dispatch` **不改**：它是工作目录 + git 仓库 + GitHub remote，改不了也不该由脚本改）
-- junction 重建：`node_modules\dsh-zcode-dispatch` → **`dsh-dispatch`** 指向 `F:\My Code\zcode-dispatch\dispatch`
+- 插件目录 `zcode-dispatch/` → **`dispatch/`**（仓库根 `F:\My Code\dsh-dispatch` **不改**：它是工作目录 + git 仓库 + GitHub remote，改不了也不该由脚本改）
+- junction 重建：`node_modules\dsh-zcode-dispatch` → **`dsh-dispatch`** 指向 `F:\My Code\dsh-dispatch\dispatch`
   - 删除前已核对 `LinkType=Junction` 且目标存在，用 `cmd rmdir` 删链接（**只删链接**），删后立即验证目标仍在
 - 备份：profile 的 `package.json` / `cordis.patch.yml` 各留了一份 `.zb41-backup`
 
@@ -75,8 +75,8 @@
 
 ### 过程中修掉的两个自身失误（留档，防复发）
 
-1. **根路径被误伤**：保护串写的是**单反斜杠** `F:\My Code\zcode-dispatch`，而源码里的 JS 字面量是**双反斜杠**（`'F:\\My Code\\...'`）⇒ 保护没命中，根路径被一起改成了 `F:\My Code\dispatch\...`（10 个测试文件因此 ENOENT 失败）。已用第三遍脚本按三种形态（双反斜杠 / 单反斜杠 / 正斜杠）还原。
-2. **GitHub 地址被误伤**：`github.com/Shuffle-1992/zcode-dispatch` 被改成 `.../dispatch`（仓库名不可能由脚本改），已还原为 `Shuffle-1992/zcode-dispatch`。
+1. **根路径被误伤**：保护串写的是**单反斜杠** `F:\My Code\dsh-dispatch`，而源码里的 JS 字面量是**双反斜杠**（`'F:\\My Code\\...'`）⇒ 保护没命中，根路径被一起改成了 `F:\My Code\dispatch\...`（10 个测试文件因此 ENOENT 失败）。已用第三遍脚本按三种形态（双反斜杠 / 单反斜杠 / 正斜杠）还原。
+2. **GitHub 地址被误伤**：`github.com/Shuffle-1992/dsh-dispatch` 被改成 `.../dispatch`（仓库名不可能由脚本改），已还原为 `Shuffle-1992/dsh-dispatch`。
    另：`workRoot` 在 YAML 单引号里写成了双反斜杠（YAML 单引号不做转义），已修正为单反斜杠。
 
 ## 生效方式

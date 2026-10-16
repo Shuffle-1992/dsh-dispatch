@@ -8,7 +8,7 @@ import { strict as assert } from 'node:assert';
 /* 从 client.js 里取出 nextTailScroll 的源码并在沙箱里求值。
  * client.js 是 cordis 客户端插件（依赖 React / 槽位），无法直接 import；
  * 但该函数是纯函数，抽源码求值是可靠且不侵入的做法。 */
-const SRC = 'F:\\My Code\\zcode-dispatch\\dispatch\\client.js';
+const SRC = 'F:\\My Code\\dsh-dispatch\\dispatch\\client.js';
 const src = readFileSync(SRC, 'utf8');
 const m = /function nextTailScroll\(s\) \{([\s\S]*?)\n    \}/.exec(src);
 assert.ok(m, '未能在 client.js 里定位 nextTailScroll —— 函数被改名或删除？');

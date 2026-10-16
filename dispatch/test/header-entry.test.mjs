@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { strict as assert } from 'node:assert';
 
-const SRC = 'F:\\My Code\\zcode-dispatch\\dispatch\\client.js';
+const SRC = 'F:\\My Code\\dsh-dispatch\\dispatch\\client.js';
 const src = readFileSync(SRC, 'utf8');
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 const code = stripComments(src);
@@ -199,7 +199,7 @@ console.log('\nE. 真渲染（React 桩）：开合与弹窗内容');
   globalThis.localStorage = { getItem: (k) => (ls.has(k) ? ls.get(k) : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: (k) => ls.delete(k) };
   let captured = null;
   globalThis.window = { __ModuleLoader__: { load: (o) => { captured = o; } }, localStorage: globalThis.localStorage, innerHeight: 900, innerWidth: 1200, addEventListener: () => {}, removeEventListener: () => {} };
-  await import('file:///F:/My Code/zcode-dispatch/dispatch/client.js');
+  await import('file:///F:/My Code/dsh-dispatch/dispatch/client.js');
 
   const el = (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat() });
   const cellStore = new Map();

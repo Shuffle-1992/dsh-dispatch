@@ -57,7 +57,7 @@
 ## 四、复现命令
 
 ```powershell
-cd "F:\My Code\zcode-dispatch\zcode-dispatch"
+cd "F:\My Code\dsh-dispatch\zcode-dispatch"
 node test/shared-wire-liveness.test.mjs        # 18 PASS / 0 FAIL
 node test/header-entry.test.mjs                # 102 PASS / 0 FAIL
 node --check client.js

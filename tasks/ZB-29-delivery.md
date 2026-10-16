@@ -76,7 +76,7 @@
 ## 四、复现命令
 
 ```powershell
-cd "F:\My Code\zcode-dispatch\zcode-dispatch"
+cd "F:\My Code\dsh-dispatch\zcode-dispatch"
 node --test test/thinking-level.test.mjs   # 7/7
 node test/single-source.test.mjs           # 31/31（文案四处同源）
 node collab-kit 不可用；runner 探测：

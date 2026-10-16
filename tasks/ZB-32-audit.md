@@ -1,6 +1,6 @@
 # ZB-32 审计：DSH Plugin Hub 社区插件市场合规核对
 
-> 审计对象：`F:\My Code\zcode-dispatch`（插件目录 `zcode-dispatch/`，仓库 `github.com/Shuffle-1992/zcode-dispatch`）
+> 审计对象：`F:\My Code\dsh-dispatch`（插件目录 `zcode-dispatch/`，仓库 `github.com/Shuffle-1992/dsh-dispatch`）
 > 审计时间：2026-10-10
 > 证据来源：**DSH 本机安装（`D:\DeepSeek\resources\app.asar` 解包）**、profile 内 4 个已装社区插件、pnpm 实测。
 > ⚠️ 本机 web_search 不可用（无 API key），故**未**引用任何网络二手资料；所有结论都来自可复现的本地证据。
@@ -18,7 +18,7 @@
 
 ### 硬伤 A：仓库根没有 `package.json` ⇒ 从仓库安装**装不到插件**
 
-插件在子目录 `zcode-dispatch/`，仓库根只有 `README.md`/`.gitignore` 等。pnpm 实测（`pnpm add github:Shuffle-1992/zcode-dispatch`）：
+插件在子目录 `zcode-dispatch/`，仓库根只有 `README.md`/`.gitignore` 等。pnpm 实测（`pnpm add github:Shuffle-1992/dsh-dispatch`）：
 
 ```
 [WARN] The git-hosted package fetched from ... has to be built but the build scripts were ignored.
@@ -36,7 +36,7 @@
 **修法（用户已选定）**：保持子目录结构，README 用 pnpm 的 `#path:` 语法指向子目录。实测可行：
 
 ```
-pnpm add github:Shuffle-1992/zcode-dispatch#path:zcode-dispatch
+pnpm add github:Shuffle-1992/dsh-dispatch#path:zcode-dispatch
   → + @local/zcode-dispatch 0.1.0        （解析到真包，非占位）
 ```
 

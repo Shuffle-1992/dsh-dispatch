@@ -169,7 +169,7 @@ export const Config = await loadConfig();
 
 /* ─────────────── 官方 defineTool 的解析（ZB-01：裸 import 在本包必然失败）───────────────
  * 事实（2026-09-30 实测 + asar 头解析，见 tasks/ZB-01-delivery.md）：
- *   - 本包位于 F:\My Code\zcode-dispatch，**不在 DSH 安装目录内**；profile 的 node_modules 只有
+ *   - 本包位于 F:\My Code\dsh-dispatch，**不在 DSH 安装目录内**；profile 的 node_modules 只有
  *     @local / dsh-plugin-whale-pet，**没有 @deepseek-ai 作用域**；
  *   - 故裸 import('@deepseek-ai/dsh-tools') 从本文件向上逐级找 node_modules 必然
  *     ERR_MODULE_NOT_FOUND → loadDefineTool() 返回 null → 工具静默不注册（Z13 现场症状）；

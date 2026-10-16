@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { strict as assert } from 'node:assert';
 
-const SRC = 'F:\\My Code\\zcode-dispatch\\dispatch\\client.js';
+const SRC = 'F:\\My Code\\dsh-dispatch\\dispatch\\client.js';
 const src = readFileSync(SRC, 'utf8');
 
 let pass = 0;
@@ -43,15 +43,15 @@ ok(!/repoLock, setRepoLock/.test(src), '★ C1 派发表单锁控件（仓库文
 ok(!/parseFiles/.test(src), '★ C2 parseFiles 仅服务于派发表单，随之移除');
 /* 锁意图契约在 core（工具调用方经 spec.lock / spec.write 声明，core 校验与加锁语义不变）。 */
 {
-  const coreSrc = readFileSync('F:\\My Code\\zcode-dispatch\\dispatch\\core\\dispatch-core.mjs', 'utf8');
+  const coreSrc = readFileSync('F:\\My Code\\dsh-dispatch\\dispatch\\core\\dispatch-core.mjs', 'utf8');
   ok(/spec\.lock 必须是 repo\|none/.test(coreSrc) && /spec\.write/.test(coreSrc),
     'C3 锁意图契约仍在 core：spec.lock / spec.write 校验与加锁（工具调用方声明）');
 }
 
 console.log('\nlocale 中英对称');
 {
-  const zh = JSON.parse(readFileSync('F:\\My Code\\zcode-dispatch\\dispatch\\locale\\zh.json', 'utf8'));
-  const en = JSON.parse(readFileSync('F:\\My Code\\zcode-dispatch\\dispatch\\locale\\en.json', 'utf8'));
+  const zh = JSON.parse(readFileSync('F:\\My Code\\dsh-dispatch\\dispatch\\locale\\zh.json', 'utf8'));
+  const en = JSON.parse(readFileSync('F:\\My Code\\dsh-dispatch\\dispatch\\locale\\en.json', 'utf8'));
   const zu = zh.ui ?? zh, eu = en.ui ?? en;
   ok(Object.keys(zu).length === Object.keys(eu).length, `E1 中英 key 数一致（${Object.keys(zu).length}）`);
   for (const k of ['secLocks', 'noFileLocks', 'lockHeld']) {

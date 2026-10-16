@@ -3,7 +3,7 @@
  * 输出协议与 ZCode 现有 inject-agents-md.js 一致：stdout 返回 {"additionalContext": "..."}。
  * 配置示例（~/.zcode/cli/config.json，需用户同意后添加，本仓库不擅自改用户级配置）：
  *   "SessionStart": [{ "hooks": [{ "type": "process", "command": "node",
- *     "args": ["F:/My Code/zcode-dispatch/collab-kit/inject-inbox.js"], "timeoutMs": 5000 }] }]
+ *     "args": ["F:/My Code/dsh-dispatch/collab-kit/inject-inbox.js"], "timeoutMs": 5000 }] }]
  * 行为：无 inbox-zcode 目录或无待办且无 state 时静默退出；有待办时注入消息预览 + state.json。
  */
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
