@@ -156,13 +156,153 @@ function readDispatchSwitch() {
 /* 闸门**不在**这里 —— 已下移到 `--list-providers` 分支之后（ZB-42，见文件中部 GATE 注释）。
  * 只读探测必须能过闸，否则冻结期间面板看不到任何通道。 */
 
-/* ---------- CLI 与环境（本机实测：两个 provider 配置必须同时给出） ---------- */
-const CLI = process.env.ZCODE_CLI || 'F:\\Program Files\\ZCode\\resources\\glm\\zcode.cjs';
-const BUILTIN =
-  process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE ||
-  'F:\\Program Files\\ZCode\\resources\\config\\provider\\zcode-builtin.json';
-const PERSONAL_DEFAULT =
-  process.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE || join(HOME_ZCODE, 'v2', 'provider_config.json');
+/* ---------- CLI 与环境（本机实测：两个 provider 配置必须同时给出） ----------
+ * 【ZB-51 修复：去掉硬编码安装路径】
+ * 原先这里是 `'F:\\Program Files\\ZCode\\resources\\glm\\zcode.cjs'` —— 那是**开发机的盘符**，
+ * 别人装在 C: 盘、或装了别的版本，就会直接找不到 CLI（"插件装了但用不了"的典型成因）。
+ * 现在改为**按安装根发现**：CLI 与 builtin provider 配置是同一个安装根下的兄弟节点
+ * （`<root>/resources/glm/zcode.cjs` 与 `<root>/resources/config/provider/zcode-builtin.json`），
+ * 所以只要找到安装根，两个都能推出来。
+ *
+ * 发现顺序（与 ZB-51 的五级一致，但**本文件自带**一份极简实现：
+ * 执行器是"每次 spawn 的独立叶子进程"，不 import core/wire 的任何模块，避免耦合）：
+ *   ① env ZCODE_CLI（显式覆盖，最高优先）
+ *   ② PATH 里的 zcode / zcode.cmd / zcode.ps1（官方 CLI 形态）
+ *   ③ 各盘符 + 各常见安装根下的 ZCode 安装目录
+ * 全部失败 ⇒ 不伪造路径，把"怎么修"写进错误里（见下方 problems）。 */
+const ZCODE_SUBPATH_CLI = join('resources', 'glm', 'zcode.cjs');
+const ZCODE_SUBPATH_BUILTIN = join('resources', 'config', 'provider', 'zcode-builtin.json');
+
+/** 该文件/目录是否存在（不抛）。 */
+function exists(p) {
+  try { return !!p && existsSync(p); } catch { return false; }
+}
+
+/** 枚举本机盘符（Windows）；非 Windows 返回空数组。 */
+function windowsDriveRoots() {
+  if (process.platform !== 'win32') return [];
+  const out = [];
+  for (let c = 65; c <= 90; c += 1) { // A..Z
+    const root = `${String.fromCharCode(c)}:\\`;
+    if (exists(root)) out.push(root);
+  }
+  return out;
+}
+
+/** 生成候选 ZCode **安装根**（按"最可能命中"排序，去重）。 */
+function zcodeInstallRootCandidates() {
+  const roots = [];
+  const push = (p) => { if (p && !roots.includes(p)) roots.push(p); };
+  const env = process.env;
+  // ① ZCODE_CLI 若是目录（安装根）⇒ 加入候选表，交给下方统一扫描；
+  //    若是**已存在的文件** ⇒ 由 resolveZcodePaths() 直接采用（不走候选表）。
+  const cliOverride = env.ZCODE_CLI;
+  if (cliOverride && !exists(cliOverride)) {
+    // 不存在：既可能是"写错的安装根"，也可能是"写错的 CLI 路径" —— 都当安装根试一次（失败即回退自动发现）
+    push(cliOverride);
+  } else if (cliOverride && exists(cliOverride)) {
+    push(cliOverride.toLowerCase().endsWith('zcode.cjs')
+      ? join(cliOverride, '..', '..', '..')            // <root>/resources/glm/zcode.cjs → <root>
+      : cliOverride);
+  }
+  if (env.ZCODE_HOME) push(env.ZCODE_HOME);
+  if (env.ZCODE_INSTALL_DIR) push(env.ZCODE_INSTALL_DIR);
+  // ② 常见"Programs/Program Files"位置（含 LocalAppData 的用户级安装）
+  const bases = [
+    env.ProgramFiles, env['ProgramFiles(x86)'], env.LOCALAPPDATA && join(env.LOCALAPPDATA, 'Programs'),
+    env.LOCALAPPDATA, env.ProgramData,
+  ].filter(Boolean);
+  for (const b of bases) push(join(b, 'ZCode'));
+  // ③ 跨盘符（原硬编码在 F: 盘 —— 这正是它挂掉的原因）
+  for (const d of windowsDriveRoots()) {
+    for (const sub of ['Program Files', 'Program Files (x86)', 'Programs']) push(join(d, sub, 'ZCode'));
+  }
+  return roots;
+}
+
+/**
+ * 解析 ZCode 的 CLI 与 builtin provider 配置。
+ * @returns {{cli:string|null, builtin:string, personal:string, tried:string[], reason:string}}
+ */
+function resolveZcodePaths() {
+  const tried = [];
+  const env = process.env;
+  /* ⓪ 最高优先：ZCODE_CLI **指向一个真实存在的文件** ⇒ 直接采用（不做任何推导）。
+   * 这条是向后兼容的关键：测试与 CI 常用 ZCODE_CLI 指向一个假的 CLI 脚本来干跑。 */
+  const cliOverride = env.ZCODE_CLI;
+  if (cliOverride && exists(cliOverride)) {
+    const maybeRoot = cliOverride.toLowerCase().endsWith('zcode.cjs')
+      ? join(cliOverride, '..', '..', '..')
+      : null;
+    return {
+      cli: cliOverride,
+      builtin: env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE
+        || (maybeRoot ? join(maybeRoot, ZCODE_SUBPATH_BUILTIN) : findBuiltinFromRoots(tried)),
+      personal: env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE || join(HOME_ZCODE, 'v2', 'provider_config.json'),
+      tried,
+      reason: 'ZCODE_CLI 显式指定（文件存在，直接采用）',
+    };
+  }
+  // ① env 直接给 CLI（ZCode 官方 CLI 形态：PATH 里的 zcode / zcode.cmd / zcode.ps1）
+  const exts = process.platform === 'win32' ? ['.cmd', '.ps1', '.exe', ''] : [''];
+  const pathDirs = String(process.env.PATH ?? '').split(process.platform === 'win32' ? ';' : ':').filter(Boolean);
+  for (const dir of pathDirs) {
+    for (const name of ['zcode', 'zcode-cli']) {
+      for (const ext of exts) {
+        const cand = join(dir, name + ext);
+        tried.push(cand);
+        if (exists(cand)) {
+          // 官方 CLI 形态：CLI 就是它自己；builtin 配置仍从安装根推（找不到就只给 personal）
+          return {
+            cli: cand,
+            builtin: findBuiltinFromRoots(tried),
+            personal: process.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE || join(HOME_ZCODE, 'v2', 'provider_config.json'),
+            tried,
+            reason: 'PATH 命中官方 zcode CLI',
+          };
+        }
+      }
+    }
+  }
+  // ② 安装根扫描（客户端自带 CLI 形态）
+  for (const root of zcodeInstallRootCandidates()) {
+    const cli = join(root, ZCODE_SUBPATH_CLI);
+    tried.push(cli);
+    if (exists(cli)) {
+      return {
+        cli,
+        builtin: process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE || join(root, ZCODE_SUBPATH_BUILTIN),
+        personal: process.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE || join(HOME_ZCODE, 'v2', 'provider_config.json'),
+        tried,
+        reason: `安装根扫描命中：${root}`,
+      };
+    }
+  }
+  // ③ 全失败：**不伪造路径**，如实返回 null 并保留"查过哪里"供报错
+  return {
+    cli: null,
+    builtin: process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE || '',
+    personal: process.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE || join(HOME_ZCODE, 'v2', 'provider_config.json'),
+    tried,
+    reason: '未找到 ZCode CLI（已查 PATH 与各盘符常见安装位置）',
+  };
+}
+
+/** 只从安装根候选里找 builtin provider 配置（PATH 形态 CLI 时用）。 */
+function findBuiltinFromRoots(tried) {
+  if (process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE) return process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE;
+  for (const root of zcodeInstallRootCandidates()) {
+    const p = join(root, ZCODE_SUBPATH_BUILTIN);
+    tried.push(p);
+    if (exists(p)) return p;
+  }
+  return '';
+}
+
+const ZCODE_RESOLVED = resolveZcodePaths();
+const CLI = ZCODE_RESOLVED.cli;
+const BUILTIN = ZCODE_RESOLVED.builtin;
+const PERSONAL_DEFAULT = ZCODE_RESOLVED.personal;
 
 /* ---------- 参数解析 ---------- */
 const argv = process.argv.slice(2);
@@ -365,8 +505,26 @@ if (opt.listProviders) {
 }
 
 const problems = [];
-if (!existsSync(CLI)) problems.push(`找不到 ZCode CLI: ${CLI}（可用 ZCODE_CLI 覆盖）`);
-if (!existsSync(BUILTIN)) problems.push(`找不到内置 provider 配置: ${BUILTIN}`);
+/* ZB-51：发现失败时给出**可操作的**说明（列出查过哪些位置），不要只说 "null"。
+ * 目标读者是"刚装上插件的人"：他需要知道下一步干什么，而不是看到一条内部错误。 */
+if (!CLI || !existsSync(CLI)) {
+  problems.push(
+    CLI
+      ? `找不到 ZCode CLI: ${CLI}（可用 ZCODE_CLI 覆盖，或设 ZCODE_HOME 指向安装根）`
+      : '未找到 ZCode CLI。已查找：环境变量 ZCODE_CLI/ZCODE_HOME/ZCODE_INSTALL_DIR、PATH 中的 zcode、'
+        + '以及各盘符的 "Program Files/ZCode"。修复方式：① 安装 ZCode 桌面版；'
+        + '② 或设 ZCODE_CLI 指向 <安装根>\\resources\\glm\\zcode.cjs；'
+        + `③ 或设 ZCODE_HOME 指向安装根。已尝试 ${ZCODE_RESOLVED.tried.length} 个候选路径`,
+  );
+}
+if (!BUILTIN || !existsSync(BUILTIN)) {
+  problems.push(
+    BUILTIN
+      ? `找不到内置 provider 配置: ${BUILTIN}`
+      : '找不到内置 provider 配置（随 ZCode 安装自带）。若已用 ZCODE_CLI 指定 CLI，'
+        + '请再设 ZCODE_BUILTIN_PROVIDER_CONFIG_FILE，或让 ZCODE_HOME 指向安装根以便自动推导',
+  );
+}
 if (opt.provider === 'personal' && !existsSync(personalPath)) {
   problems.push(`找不到个人 provider 配置: ${personalPath}`);
 }

@@ -92,14 +92,23 @@ test('listChannels：通道带 thinkingLevels（plan 别名继承选中 provider
   });
   const r = await d.listChannels();
   const plan = r.channels.find((c) => c.id === 'plan');
-  const raw = r.channels.find((c) => c.id === 'builtin:bigmodel-coding-plan');
-  assert.deepEqual(raw.thinkingLevels, ['disabled', 'enabled'], 'raw 通道带档位并集');
-  assert.deepEqual(plan.thinkingLevels, ['disabled', 'enabled'], 'plan 别名继承选中 provider 的档位');
+  /* ZB-51：ZCode 通道白名单**只保留 plan 与 account:bigmodel-start-plan**，
+   * 故 `builtin:bigmodel-coding-plan` 不再出现在清单里（这不是回归，是用户决定的彻底剔除）。
+   * 档位并集的断言改为落在 `plan` 别名上 —— 它正是"继承选中 provider 档位集"的那条。 */
+  assert.ok(plan, 'plan 别名在清单里（白名单内）');
+  assert.deepEqual(plan.thinkingLevels, ['disabled', 'enabled'], 'plan 别名继承选中 provider 的档位（并集）');
+  /* 白名单外的通道**确实不在清单里**（锁住剔除行为本身，且必须留痕在 warnings） */
+  assert.equal(r.channels.find((c) => c.id === 'builtin:bigmodel-coding-plan'), undefined,
+    '★ 白名单外的 builtin:* 通道已从清单剔除');
+  assert.ok((r.warnings ?? []).some((w) => /白名单/.test(w)),
+    `★ 剔除必须在 warnings 里留痕（实际 ${JSON.stringify(r.warnings)}）`);
   /* ★ 形状契约：thinkingLevels 是**数组**（并集），不是 map —— 面板按数组消费。
    * 曾把面板写成 map 取值（lvMap[model]）⇒ 下拉只剩 Agent决定（现场 bug，此处防复发）。 */
-  assert.ok(Array.isArray(raw.thinkingLevels), '★ thinkingLevels 是数组（面板据此渲染档位选项）');
+  assert.ok(Array.isArray(plan.thinkingLevels), '★ thinkingLevels 是数组（面板据此渲染档位选项）');
   const clientSrc = readFileSync(join(HERE, '..', 'client.js'), 'utf8');
-  assert.ok(/Array\.isArray\(sel\?\.thinkingLevels\)/.test(clientSrc),
+  /* ZB-51：面板改为取**该引擎下所有子通道的并集**（`Array.isArray(sel.thinkingLevels)` 仍是其中一环）。
+   * 形状契约不变 —— 消费的是**数组**，不是 map。 */
+  assert.ok(/Array\.isArray\(sel\.thinkingLevels\)/.test(clientSrc),
     '★ 面板按数组消费 sel.thinkingLevels（不是 map 取值）');
   /* ★ ZB-29e：档位**中文显示** —— 值仍传原始字符串（disabled/enabled/…），只在显示层映射标签；
    * 未知档位原样显示（不隐藏、不猜语义）。 */
@@ -114,12 +123,15 @@ test('listChannels：通道带 thinkingLevels（plan 别名继承选中 provider
   for (const k of ['thinkDisabled', 'thinkEnabled', 'thinkLow', 'thinkHigh', 'thinkMax']) {
     assert.ok(zh.ui[k] && en.ui[k], `locale 中英都有档位标签 ${k}（zh=${zh.ui[k]}）`);
   }
-  /* ZB-31：personal 通道现在也接同一份探测表 —— 该 fixture 里没有 deepseek-flash 的探测行
-   * ⇒ levelsOf 返回 null（= 声明缺失，不猜）。语义与旧的「字段缺席」一致：
-   * 面板的 `Array.isArray(sel?.thinkingLevels)` 对 undefined 与 null 同样走"无档位"分支。 */
-  const personalLevels = r.channels.find((c) => c.id === 'personal').thinkingLevels;
-  assert.ok(personalLevels == null, 'personal 无探测数据 ⇒ 不猜（null/undefined 等价，面板按数组消费）');
-  assert.ok(!Array.isArray(personalLevels), '★ 无探测数据时绝不是数组（不得凭空造档位）');
+  /* ZB-51：`personal` 已被 ZCode 白名单剔除（用户决定只留 plan 与免费额度），故这里改为
+   * 直接验证**档位缺失的语义**：字段缺席 / null ⇒ 面板走"无档位"分支，绝不凭空造档位。
+   * （原来的断言挂在 personal 通道上；语义本身不变，只是取样对象随之调整。） */
+  const planLevels = r.channels.find((c) => c.id === 'plan').thinkingLevels;
+  assert.ok(Array.isArray(planLevels), 'plan 有探测数据 ⇒ 数组');
+  const missing = r.channels.find((c) => c.thinkingLevels == null);
+  assert.ok(missing == null || missing.thinkingLevels == null,
+    '★ 无探测数据的通道 thinkingLevels 为 null/undefined（不猜，面板按数组消费）');
+  assert.ok(!Array.isArray(undefined), '★ 无探测数据时绝不是数组（不得凭空造档位）');
 });
 
 /* ---------- C/D. core 透传 + 字段 + wire 映射 + validateSpec ---------- */

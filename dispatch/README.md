@@ -1,6 +1,6 @@
 # dsh-dispatch —— DSH 派发台（cordis bundle）
 
-在 DSH Harness 里派发/监视多个 ZCode 无头进程（`zcode-run.mjs`）：单写者互斥、用量与上下文、套餐通道。
+在 DSH Harness 里派发/监视多个无头 agent 进程（**双引擎**：ZCode `collab-kit/zcode-run.mjs` ＋ OpenCode `collab-kit/opencode-run.mjs`，见「双引擎（ZCode + OpenCode）」一节）：单写者互斥、用量与上下文、套餐通道。
 Host 半边（`index.js` + `wire.host.mjs` + `core/*`）跑进程调度并暴露 agent 工具 `dispatch`；
 Client 半边（`client.js` + `wire.client.mjs`）在 Web 页面**会话标题行**渲染一枚「DSH 派发台」入口（与「N 个子智能体 / 智能体团队 / 创造模式」同一行），点开即在入口下方弹出面板。
 
@@ -75,8 +75,10 @@ dsh plugin --profile web add "https://github.com/Shuffle-1992/dsh-dispatch#path:
 | 字段 | 类型/默认 | 说明 |
 |---|---|---|
 | `demo` | boolean / `false` | UI 演示模式：客户端用内置假数据渲染面板，不触达 dispatcher |
-| `maxConcurrent` | integer / `3` | 同时运行的 run 上限。**注意：它与单写者锁是两道独立的闸，实际并发 = min(两者)**，见下节 |
+| `maxConcurrent` | integer / `3` | 同时运行的 run 上限。**注意：它与单写者锁是两道独立的闸，实际并发 = min(两者)**，见下节。**双引擎下它仍是全局上限**（ZCode 侧独立上限就是它；OpenCode 侧另有 `maxConcurrentOpenCode`） |
+| `maxConcurrentOpenCode` | integer / `2` | **双引擎**：OpenCode 引擎的**独立**并发上限（与 ZCode **分开计数**）。上界依据：① 免费层**按 IP 限流**；② OpenCode 每次 `opencode run` 都会起一个临时服务，冷启动开销大（`glm-5.3-flash-free` 实测首响 ~14s）。**实测澄清**：两个**独立**的 `opencode run` 并发本身**可行**（2026-10-16 本机 2/2 成功，脚本 `tools/oc-concurrency-probe.mjs`）；真正的危险是**同一进程链里在 run 进行中再起一个 opencode**（例如探测）会让前者零输出 exit 1 —— 执行器已把元数据探测改成顺序 + 缓存。故默认 2 是"稳妥"而非"必须 1"，但**不要**把大量任务同时派给 OpenCode。`maxConcurrent` 仍是全局上限（实际并发 = min(两者)） |
 | `runnerPath` | string / `''` | runner 绝对路径（通用工具仓库 `<本仓库>/collab-kit/zcode-run.mjs`，只读使用）。**与 `workRoot` 任一为空则不创建 dispatcher**（UI 走 demo 降级，工具动作返回可读错误） |
+| `opencodeRunnerPath` | string / `''` | **双引擎**：OpenCode 执行器脚本绝对路径（`<本仓库>/collab-kit/opencode-run.mjs`，只读使用，兼作 `--list-models` / `--version` 只读探测）。留空则用**默认推断**（env `DSP_OPENCODE_RUNNER` → 仓库内 `collab-kit/opencode-run.mjs`）。指向不存在的文件**不会**阻止 dispatcher 创建（只 warn；OpenCode 通道为空、ZCode 通道照常） |
 | `runnerCwd` | string / `''` | runner 子进程的工作目录（通常设为宿主项目根）。runner 已迁出通用工具仓库、无法从自身位置推项目根，故它与「从绝对 `--task` 反推」构成**双保险**；留空 = 用 DSH 进程 cwd |
 | `ledgerPath` | string / `''` | 台账 `dispatch-runs.jsonl` 绝对路径；留空则跳过台账回读与用量聚合 |
 | `workRoot` | string / `''` | 派发器工作根目录（`locks/`、`state/jobs.json`、`logs/` 落在这里）。留空即落到本包 `.data/` |
@@ -100,6 +102,39 @@ dsh plugin --profile web add "https://github.com/Shuffle-1992/dsh-dispatch#path:
 >
 > 三个路径全空时插件照常激活，只是不创建 dispatcher（面板 demo 降级、工具动作返回可读错误）——
 > 不会猜一个位置静默跑错。
+
+## 双引擎（ZCode + OpenCode）
+
+派发台按**通道即执行目标**的既有抽象接入了第二个引擎：**ZCode**（`collab-kit/zcode-run.mjs`）与
+**OpenCode**（`collab-kit/opencode-run.mjs`）共用同一套进程列表 / 锁 / 队列 / 用量 / 唤醒 / 降级链 ——
+**不拆 tab**，因为拆开会把进程列表与降级链割裂，失去**跨引擎降级**这个主要增量。
+
+| 项 | 说明 |
+|---|---|
+| 引擎 id | `zcode` / `opencode`。`action=channels` 的**每个通道带 `engine`**，顶层 `engines` 列出当前可用引擎 |
+| OpenCode 通道 id | `opencode/<model>`，如 `opencode/deepseek-v4.1-flash-free`、`opencode/glm-5.3-flash-free`。传 `provider: "opencode/<model>"` 即**自动识别**为 OpenCode 引擎（也可显式传 `engine`） |
+| 执行器 | `collab-kit/opencode-run.mjs`（与 `zcode-run.mjs` 同构：按需 spawn、用完即走、无常驻进程）；输出行协议唯一权威 = `collab-kit/run-line-protocol.mjs`（OpenCode 前缀 `[opencode-run]`） |
+| 免费模型 | **探测式**：每次跑 `opencode models` 的真实结果（无需账号），**代码里不写死枚举**（否则会重演 ZB-31「表变了但代码写死」的坑）。探测失败 ⇒ OpenCode 通道为空 + warnings，**ZCode 通道照常**，绝不猜 |
+| 并发 | **每引擎独立**：ZCode = `maxConcurrent`（默认 3）；OpenCode = `maxConcurrentOpenCode`（默认 2），**与 ZCode 分开计数**；`maxConcurrent` 仍是全局上限（实际并发 = min(两者)）。**实测澄清（2026-10-16）**：两个**独立**的 `opencode run` 并发本身可行（本机 2/2 成功，脚本 `tools/oc-concurrency-probe.mjs`）；零输出 exit 1 的真实触发条件是**同一进程链里在 run 进行中再起一个 opencode**（如探测）——执行器已把探测改成顺序 + 缓存。默认 2 取"稳妥"，不是"必须 1" |
+| 跨引擎降级 | 同一条降级链里可**混排** ZCode / OpenCode 通道；**换引擎 ＝ 新会话**，不会尝试 resume 原引擎的 session |
+| 思考强度 | OpenCode 侧叫 **variant**（`--variant`，模型相关，如 `high`/`max`/`minimal`）：`thinking` 参数在 OpenCode 通道上映射为 `--variant`；档位以 `channels[].thinkingLevels` 为准（缺失 = 未探测到，传 `agent` 即可） |
+| 不适用参数 | `mode` / `memoryBench` 是 ZCode 专属：对 OpenCode 引擎 `validateSpec` 会**可读报错拒绝**（不静默忽略） |
+| 权限放行 `auto` | **默认关**（安全默认）。OpenCode 的工具调用**可能**需要审批 —— 需要放行时用显式 `auto: true`（执行器 `--auto`，会放行所有未显式拒绝的权限）；仅对 `engine=opencode` 有意义（对 zcode 传 true 直接可读报错），开启后 job.`autoApproved` 可审计，且**跨 retry 沿用**同一放行级别（`retry` 时可用 `auto:false` 显式关掉） |
+| 续会话 `cwd` | OpenCode 的 session **按工作目录作用域**：同一 sessionId 换目录续跑会挂/静默失败。故 `retry` 的同通道 resume 与显式 `dispatch(..., {resume, cwd})` **都逐字沿用 `cwd`** |
+| 用户配置隔离 | **不读写用户自己的 OpenCode 配置与数据**（`~/.config/opencode/`、`~/.local/share/opencode/opencode.db`）。需要隔离环境时用**独立 XDG 根目录**（硬约束） |
+
+CLI 对照（`bin/dispatch.mjs`）：
+
+```bash
+node bin/dispatch.mjs channels                          # 通道行带 [zcode] / [opencode] 引擎标记
+node bin/dispatch.mjs dispatch --kind prompt --prompt "只回答 OK" \
+  --provider opencode/deepseek-v4.1-flash-free          # provider 形态即自动识别引擎
+node bin/dispatch.mjs dispatch --kind prompt --prompt "只回答 OK" --engine opencode \
+  --provider opencode/glm-5.3-flash-free                # 也可显式 --engine（provider 仍以 channels 清单为准）
+# 执行器路径覆盖：--opencode-runner <abs path> 或 DSP_OPENCODE_RUNNER；缺省推断 <本仓库>/collab-kit/opencode-run.mjs
+```
+
+> ⚠️ **改 Host 半边（`index.js`）后需完全重启 DSH**；执行器（`collab-kit/*.mjs`）**下次派发即生效**（见文末「生效语义」）。
 
 ## ⚠️ 凭据从哪来 + 报「身份验证失败 / 401」怎么办
 
@@ -170,9 +205,11 @@ return Array.isArray(body?.data) && body.data.length > 0;
   `prompt`=完整指令（一次性问答/明确步骤）；`target`=**目标描述**（只说"要达成什么"，
   ZCode 自主规划并自续跑直到达成，适合无人值守委托；与 prompt/task 互斥是 CLI 限制）；
   `task`=任务包文件绝对路径（含交付物/验收标准的正式任务，由 runner 读文件内联）。
-  可选 `model(GLM-5.3|GLM-5.3-Flash)`、`provider(plan|personal)`、`mode(build|edit|plan|yolo，默认 edit)`、
-  **`thinking(思考强度，默认 agent=Agent决定，见「思考强度（thinking）」小节)`**、
-  `timeoutMin(>0，无上限；runner 生效下限 1 分钟)`、`memoryBench(仅 kind=prompt)`、`tag`、
+  可选 `model(GLM-5.3|GLM-5.3-Flash)`、`provider(plan|personal)`、`engine(zcode|opencode，**通常不用传**——
+  传 `provider: "opencode/<model>"` 即自动识别，见「双引擎」)`、`mode(build|edit|plan|yolo，默认 edit；**OpenCode 不适用**)`、
+  **`thinking(思考强度，默认 agent=Agent决定，见「思考强度（thinking）」小节；OpenCode 侧映射为 --variant)`**、
+  `timeoutMin(>0，无上限；runner 生效下限 1 分钟)`、`memoryBench(仅 kind=prompt，**OpenCode 不适用**)`、
+  **`auto(true = 显式放行 OpenCode 未显式拒绝的权限，默认 false；仅 engine=opencode 有意义；跨 retry 沿用)`**、`tag`、
   `lock(repo|none，**默认 repo**；none=明确不取锁)`、`write(预计写入的文件列表)`、`cwd`、`resume`。
 - `list` / `kill(id)` / `dismiss(id)` / `tail(id, n=30)` / `quota`（本地台账 5h 滚动 / 本周 / 今日聚合 +
   引擎本周已用；`bin/dispatch.mjs quota --json` 同时含 `local` 与 `planQuota` 两段，
@@ -408,9 +445,12 @@ CLI 硬限制：`--resume` + `--model` 必失败（ZCode 机制实测 F2），�
 - **自动降级**（默认关，ZB-30 起是**开关 + 单目标**）：面板「通道」分区里一个带指示灯的开关
   （与标题栏派发总开关同一套视觉语言：点击开/关、`aria-pressed` 反映状态）；**打开后**才显示
   通道 / 模型 / 思考强度三个下拉，**关闭时不显示**。
-  **三个下拉与上面「通道」分区完全一致的选项逻辑**（ZB-30b，用户要求）：同样的通道清单、
-  同样的模型首项 `（通道默认模型）`（值 `''`）、同样的档位首项 `Agent决定（按任务判断）`
-  （值 `'agent'`）、同样的档位并集与中文标签、同样的禁用判据。
+  **三个下拉与上面「通道」分区的选项逻辑一致**（ZB-30b，用户要求）：同样的通道清单、
+  同样的档位首项 `Agent决定（按任务判断）`（值 `'agent'`）、同样的档位并集与中文标签、同样的禁用判据。
+  ⚠️ **一处刻意的文案差异**（ZB-51）：上面「模型」下拉的首项是 **`Agent决定`**（值 `''`，表示
+  **不绑定模型、由派发 Agent 按任务自选**，选中后 Agent 可自由换成任意可用模型）；
+  降级目标的首项仍是 **`（通道默认模型）`**（值 `''`）—— 降级是**自动触发**的，那一刻并没有
+  Agent 在做决定，用「Agent决定」会**谎报**（同 ZB-29c 移除派发栏 Agent决定的理由）。
   语义：仅当暂停原因属于 {额度耗尽 / 未开通 / 需签名} 时，按交接语义自动跳到选定目标；
   模型留空 ⇒ 该 provider 的默认模型；档位 `agent` ⇒ runner 按 ZCode 默认规则解析（模型声明
   档位的最后一档），与上面「Agent决定」在未显式指定档位时走同一条规则。⚠ 开启即授权
@@ -420,8 +460,8 @@ CLI 硬限制：`--resume` + `--model` 必失败（ZCode 机制实测 F2），�
     （`setFallbackTarget`），CLI/工具仍可设多目标（`setFallbackChain`）。
     `getFallbackChain()` 返回 `{enabled, chain（旧形状 id 列表）, targets, target（首项）}` —— 旧读者照旧可读。
   - `model` / `reasoningLevel` 的 **`null` = 沿用原任务**（core/CLI 兼容语义，旧调用方照旧）；
-    面板**不再产生 `null`** —— 它始终写 `''`（通道默认模型）/ `'agent'`（Agent决定），
-    与上面「通道」分区的默认值逐字一致。
+    面板**不再产生 `null`** —— 它始终写 `''`（上面模型下拉显示为 `Agent决定`；降级区显示为
+    `（通道默认模型）`）/ `'agent'`（Agent决定）。
 - CLI 对照：`zcd channels [--json]` / `zcd channel set <provider> [--model]` /
   `zcd retry <jobId> [--provider --model]` /
   `zcd fallback [list|set a,b,c|set <id> --model <m> --thinking <lv>|off]`；
@@ -631,6 +671,7 @@ paused/pausedAt 与 unknown 分支、timeoutMin 校验）。
 | `node test/shared-wire-liveness.test.mjs` | 18 | **共享 wire 存活哨兵**（ZB-28b：功能重放「面板开→关不得处决入口的 live wire」+ 配对释放/REMOTE_READY 补投/kind 标签源码不变量——修「状态灯冻结、切换会话才显示」） |
 | `node test/single-source.test.mjs` | 31 | **单源哨兵**（ZB-25：动作清单 ≡ switch、状态集合引用同一性、三表方法集相等、协议常量逐字相等、STRINGS ↔ locale 逐值） |
 | `node test/hardening.test.mjs` | 5 | **核对硬化**（ZB-26：B1 锁 realpath / B2 ownerPid 不改写活 job / B3 多进程不丢更新 / B4 tail 不读越界 / A2 非法 config 只 warn 不阻断激活） |
+| `node test/host-config.test.mjs` | 59 | **双引擎 Host 侧配置/契约哨兵**：`FIELDS` 新增 `maxConcurrentOpenCode`（def 2）/ `opencodeRunnerPath`（def `''`）且仍单源派生；非法值 warn + 安全默认**不抛/不返回 issues**；`~standard.validate` 契约；工具 schema `engine` **非 enum** + `provider` 描述含 `opencode/`；CLI `--engine` / `[opencode]` 标记 / 空路径不传；README 双引擎段落 |
 | `node test/z2-verify.mjs` | — | 端到端验收（越界检查需 `Z2_HOST_REPO`，未设则 SKIP 并如实标注） |
 
 > `file-lock` 与 `wait-action` 用 `node:test` 语义（`node --test test/xxx.test.mjs`），

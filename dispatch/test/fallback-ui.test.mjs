@@ -43,23 +43,27 @@ globalThis.localStorage = { getItem: (k) => (ls.has(k) ? ls.get(k) : null), setI
 const fallbackCalls = [];
 const CHANNELS = [
   { id: 'plan', name: '默认套餐', enabled: true, reason: null, models: ['GLM-5.3', 'GLM-5.3-Flash'], thinkingLevels: ['disabled', 'enabled'] },
-  { id: 'personal', name: '个人 API', enabled: true, reason: null, models: ['deepseek-flash'], thinkingLevels: ['disabled', 'low', 'high', 'max'] },
+  /* ZB-51：ZCode 白名单**只留 plan 与免费额度**，故 fixture 必须用这两条的真实形状
+   * （原先用的 `personal`/`builtin:*` 已被白名单剔除 ⇒ 折叠后两侧选项集不一致，测试失去意义）。
+   * 免费额度这条带四档，用于验证「档位中文标签」与「降级区选项与上面对齐」。 */
+  { id: 'account:bigmodel-start-plan', name: '免费额度（Start Plan）', enabled: true, reason: null, models: ['GLM-5.3', 'GLM-5.3-Flash'], thinkingLevels: ['disabled', 'low', 'high', 'max'] },
   /* ZB-33b：**不可用通道**（真实形状：runner 会给出 enabled=false + reason）——
-   * 用于断言"下拉里不再列出不可用项"。 */
+   * 用于断言"下拉里不再列出不可用项"。它现在**不在白名单内**（core 会剔除），
+   * 但本测试直接喂给面板（不过 core），故仍能验证"面板不列不可用项"。 */
   { id: 'builtin:zai-coding-plan', name: 'Z.ai - Coding Plan', enabled: false, reason: 'oauth_provider_inactive', models: ['GLM-5.3'], thinkingLevels: ['low', 'high', 'max'] },
 ];
 const EXT = {
   getSnapshot: () => ({ generatedAt: 'x', counts: { running: 0, queued: 0 }, jobs: [], locks: {}, queue: [] }),
   getQuota: () => null,
   channels: async () => ({ ok: true, channels: CHANNELS, warnings: [] }),
-  channel: async () => ({ ok: true, channel: { provider: 'personal', model: 'deepseek-flash', reasoningLevel: 'agent' } }),
+  channel: async () => ({ ok: true, channel: { provider: 'plan', model: 'GLM-5.3', reasoningLevel: 'agent' } }),
   fallback: async (arg) => {
     fallbackCalls.push(arg);
     if (arg && arg.chain === null) return { ok: true, enabled: false, chain: [], targets: [], target: null };
     return {
-      ok: true, enabled: true, chain: ['personal'],
-      targets: [{ provider: 'personal', model: 'deepseek-flash', reasoningLevel: 'high' }],
-      target: { provider: 'personal', model: 'deepseek-flash', reasoningLevel: 'high' },
+      ok: true, enabled: true, chain: ['plan'],
+      targets: [{ provider: 'plan', model: 'GLM-5.3', reasoningLevel: 'high' }],
+      target: { provider: 'plan', model: 'GLM-5.3', reasoningLevel: 'high' },
     };
   },
 };
@@ -143,9 +147,15 @@ const collect = (tree) => {
   walk(tree);
   return { selects, buttons };
 };
-/* option 的 children 在桩里是数组（el 把 children 展平后仍包一层）——统一折成字符串标签。 */
-const optLabels = (sel) => (sel.children ?? [])
-  .filter((c) => c && c.type === 'option')
+/* option 的 children 在桩里是数组（el 把 children 展平后仍包一层）——统一折成字符串标签。
+ * 双引擎（OpenCode 接入）：通道下拉现在按引擎包了一层 `optgroup`，故这里**展开 optgroup**
+ * 再取 option —— 否则断言会以为下拉是空的（本文件曾经现场踩过这个坑，故抽成单一 helper）。 */
+const flattenOptions = (sel) => (sel.children ?? []).flatMap((c) => {
+  if (!c || typeof c !== 'object') return [];
+  if (c.type === 'optgroup') return (c.children ?? []).filter((x) => x && x.type === 'option');
+  return c.type === 'option' ? [c] : [];
+});
+const optLabels = (sel) => flattenOptions(sel)
   .map((c) => (Array.isArray(c.children) ? c.children.join('') : String(c.children ?? '')));
 
 /* 分区默认「通道」是收起的（SEC_DEFAULT_OPEN.channel=false）——本测试要渲染通道分区，
@@ -155,7 +165,10 @@ ls.set('dispatch:section:channel', 'true');
 /* ---------- ① 首帧（ext 的 fallback 返回 enabled=true，但 effect 跑完才进 state） ---------- */
 let tree = render(true);
 let { selects, buttons } = collect(tree);
-const toggleOf = (b) => b.find((x) => typeof x.props?.className === 'string' && x.props.className.includes('dsp-toggle'));
+/* 找「自动降级」那个开关：面板里现在有**多个** .dsp-toggle（用户新增的通道过滤开关也是这个类），
+ * 故按**标签文本**取（降级开关的文案以 fallbackTitle 开头），不靠"第一个"这种脆弱判据。 */
+const toggleOf = (b) => b.find((x) => typeof x.props?.className === 'string' && x.props.className.includes('dsp-toggle')
+  && String((x.children ?? []).join('')).includes('自动降级'));
 
 /* 首帧 effect 尚未跑 → fallback 初值 {enabled:false} ⇒ 只有开关、没有目标下拉。
  * （这一步同时证明"关闭时不显示"。） */
@@ -177,9 +190,21 @@ ok(selects.length === 6, `② 开启后出现目标三下拉（通道/模型/思
 /* 本测试让**上面「通道」与下面降级目标选中同一个通道**（personal/deepseek-flash）——
  * 这样"选项逻辑完全一致"可以用「两侧 option 列表逐字相等」直接证明。 */
 const labels = selects.flatMap(optLabels);
-ok(labels.includes('关闭思考') && labels.includes('低强度') && labels.includes('高强度') && labels.includes('最高强度'),
-  '③ 档位 option 中文标签（deepseek 四档：关闭思考/低强度/高强度/最高强度）');
-ok(selects.some((s) => (s.children ?? []).some((c) => c && c.type === 'option' && c.props.value === 'high')),
+/* ⚠️ 档位选项跟随**当前选中路由**：本 fixture 的两条 ZCode 路由都是 GLM-5.3 系（low/high/max 三档），
+ * 故断言"档位渲染成中文、且至少出现低/高强度"。四档（关闭/开启思考）语义由
+ * `thinking-level.test.mjs` 覆盖（原先这里依赖 personal/deepseek 通道，而它已被白名单剔除）。 */
+ok(labels.includes('低强度') && labels.includes('高强度'),
+  `③ 档位 option 中文标签（实际标签：${JSON.stringify(labels)}）`);
+ok(!labels.some((l) => ['disabled', 'enabled', 'low', 'high', 'max'].includes(l)),
+  '★ 档位在 UI 上**只出现中文**（原始字符串仅作为 option value 传输）');
+/* ★ ZB-51（用户要求）：ZCode 的模型下拉必须列出**具体模型**
+ * （"原本是有 GLM5.3 和 GLM5.3 Flash 的"），且免费额度只列它真正提供的模型
+ * （用户实测：Start Plan 只给 GLM-5.3-Flash）。 */
+ok(labels.includes('GLM-5.3'), '★ ZCode 模型下拉含 GLM-5.3（套餐）');
+ok(labels.includes('GLM-5.3-Flash'), '★ ZCode 模型下拉含 GLM-5.3-Flash（套餐）');
+ok(labels.includes('GLM-5.3-Flash「免费」'), '★ 免费额度列 GLM-5.3-Flash 并标「免费」（与套餐项不混淆）');
+ok(!labels.includes('GLM-5.3「免费」'), '★ 免费额度**不该**出现 GLM-5.3（Start Plan 只给 Flash）');
+ok(selects.some((s) => flattenOptions(s).some((c) => c.props.value === 'high')),
   '③ option value 仍是原始档位字符串（high）—— 中文只在 label');
 ok(labels.includes('（通道默认模型）') && labels.includes('Agent决定（按任务判断）'),
   '★ 模型/档位首项与上面「通道」分区**逐字一致**（通道默认模型 / Agent决定）');
@@ -190,10 +215,31 @@ ok(fbLabels.includes('Agent决定（按任务判断）'),
   '★ 降级档位下拉首项 = Agent决定（与上面「通道」分区同一套选项逻辑）');
 ok(!fbLabels.some((l) => l.includes('沿用原任务')),
   '★ 降级目标下拉里不再出现「沿用原任务…」（用户明确要求去掉）');
-/* 两个分区的选项集**逐项相等**（通道/模型/档位）：这是"完全一致"的硬证据。 */
+/* 两个分区的选项集**逐项相等**：这是"完全一致"的硬证据。
+ * ⚠️ ZB-51 收窄：**通道 + 模型两个下拉必须逐字相同**；
+ * 档位下拉允许一处**合法差异** —— 降级区会为"存值里的失效档位"额外列一项（`XX（已失效）`），
+ * 那是 ZB-31 的既定行为（显式列出真相，避免 select 掉到首项显示成 Agent决定）。
+ * 故档位改为断言"两侧都包含对方的基础档位"，而不是要求逐字相等。 */
 const chanLabels = selects.slice(0, 3).flatMap(optLabels);
-ok(JSON.stringify(fbLabels) === JSON.stringify(chanLabels),
-  `★ 降级三下拉的选项与「通道」三下拉逐字相同（实际 ${JSON.stringify(fbLabels)}）`);
+/* ZB-51：**通道下拉必须逐字相同**；模型下拉允许**一处刻意差异**（用户要求）：
+ *   上面「模型」首项 = `Agent决定`（值 ''，不绑定模型、派发 Agent 可自选并随时更换）；
+ *   降级区「模型」首项 = `（通道默认模型）`（值 ''）—— 降级是自动触发的，那一刻没有 Agent 在决定。
+ * 除此之外模型项必须一致。 */
+const chanSel = selects.slice(0, 1).flatMap(optLabels);
+const fbChanSel = selects.slice(3, 4).flatMap(optLabels);
+ok(JSON.stringify(fbChanSel) === JSON.stringify(chanSel),
+  `★ 降级「通道」下拉与上方逐字相同（实际 ${JSON.stringify(fbChanSel)}）`);
+const chanModel = selects.slice(1, 2).flatMap(optLabels);
+const fbModel = selects.slice(4, 5).flatMap(optLabels);
+ok(chanModel[0] === 'Agent决定', `★ 上面「模型」首项 = Agent决定（实际 ${JSON.stringify(chanModel[0])}）`);
+ok(fbModel[0] === '（通道默认模型）', `★ 降级「模型」首项 = 通道默认模型（实际 ${JSON.stringify(fbModel[0])}）`);
+ok(JSON.stringify(chanModel.slice(1)) === JSON.stringify(fbModel.slice(1)),
+  `★ 除首项外，模型项两侧一致（上 ${JSON.stringify(chanModel.slice(1))} / 降 ${JSON.stringify(fbModel.slice(1))}）`);
+const thinkingOf = (list) => list.filter((l) => l.startsWith('关闭思考') || l.startsWith('开启思考') || l.startsWith('低强度') || l.startsWith('高强度') || l.startsWith('最高强度'));
+const chanTh = thinkingOf(chanLabels);
+const fbTh = thinkingOf(fbLabels);
+ok(chanTh.every((l) => fbTh.includes(l)) && fbTh.every((l) => chanTh.includes(l) || l.includes('已失效')),
+  `★ 档位选项两侧一致（上方 ${JSON.stringify(chanTh)} / 降级 ${JSON.stringify(fbTh)}；降级允许多一项"已失效"）`);
 
 /* ---------- ④ 点开关 → 关闭（wire 收到 null） ---------- */
 const before = fallbackCalls.length;
@@ -249,14 +295,25 @@ ok(/let demoTargets = \[\];/.test(src) && !/let demoChain/.test(src), '⑤ 旧�
   const providerSels = [selects[0], fbSelects[0]].filter(Boolean);
   ok(providerSels.length === 2, `⑦ 主通道 + 降级目标两个 provider 下拉都被检查（实际 ${providerSels.length}）`);
   for (const s of providerSels) {
-    const vals = (s.children ?? []).filter((c) => c && c.type === 'option').map((c) => c.props.value);
+    const vals = flattenOptions(s).map((c) => c.props.value);
     ok(!vals.includes('builtin:zai-coding-plan'), '⑦ 不可用通道不在 option value 里');
-    ok(vals.includes('plan') && vals.includes('personal'), '⑦ 可用通道仍在（plan / personal）');
+      /* ZB-51：折叠后通道下拉的 option value 是**引擎名**（`zcode`），不再是原始路由 id。
+     * 原始路由 id 改在「模型」下拉里出现（`plan` / `account:bigmodel-start-plan`）。 */
+    ok(vals.includes('zcode'), `⑦ 可用通道仍在（折叠后为 zcode；实际 ${JSON.stringify(vals)}）`);
+    ok(!vals.includes('personal'), '★ 白名单外的 personal 不在清单里（core 已剔除）');
   }
-  ok(/enabled: false, reason: channels\.find/.test(src),
+  /* 通道过滤（用户新增）把"当前值掉线补一条"抽成了 pinnedReasonText + _reasons，
+   * 语义不变（掉线仍标注不可用原因、且不静默显示首项）⇒ 断言跟着形态改名。 */
+  ok(/const pinnedReasonText = \(c\) =>/.test(src) && /_reasons: \[pinnedReasonText\(cur\)\]/.test(src),
     '⑦ 源码形态：当前值掉线时会单独补一条（标注不可用），不静默显示首项');
-  ok(/const usableChannels = channels\.filter\(\(c\) => c\.enabled\)/.test(src) && /channelOptionsFor/.test(src),
-    '⑦ 源码形态：两个下拉共用同一份"只列可用"的过滤（单一源 channelOptionsFor）');
+  /* 双引擎（OpenCode 接入）：原先的单一源 `channelOptionsFor` / `usableChannels` 改名为
+   * `groupedChannelOptions`（按引擎 optgroup 分组）；用户新增的两个过滤开关又把它内部
+   * 统一到 `applyChanFilters`。**"两个下拉共用同一份过滤"这一不变量必须保留** ——
+   * 故断言跟着改名，语义不变（谁再各写一份过滤立刻红）。 */
+  ok(/const applyChanFilters = \(list\) => list\.filter\(/.test(src) && /const groupedChannelOptions = \(current\)/.test(src),
+    '⑦ 源码形态：两个下拉共用同一份过滤（单一源 applyChanFilters + groupedChannelOptions）');
+  ok((src.match(/groupedChannelOptions\(/g) ?? []).length >= 2,
+    '⑦ 源码形态：定义 1 处 + 主通道与降级目标共用同一函数（实际调用面 ≥2）');
 }
 
 console.log(`\n===== ZB-30 UI 渲染：${pass} PASS / 0 FAIL =====`);

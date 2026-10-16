@@ -323,23 +323,25 @@ test('listChannels：样例表格解析字段正确（personal 模型取自配�
     personalProviderPath: personalPath,
   });
   const { channels, warnings } = await d.listChannels();
-  assert.deepEqual(warnings, []);
-  assert.equal(channels.length, 4, 'plan 别名 + personal + 两行 provider');
-  const plan = channels[0];
-  assert.equal(plan.id, 'plan');
+  /* ZB-51：ZCode 走**白名单**（只留 plan 与 account:bigmodel-start-plan）⇒
+   * 样例里的 personal 与 builtin:* 两行都被剔除，只剩 plan 别名 + 免费额度合成通道。
+   * 留痕警告是**预期**的（剔除不静默），故此处的 warnings 断言按新语义调整。 */
+  assert.ok(warnings.some((w) => /白名单/.test(w)), `白名单剔除必须留痕（实际 ${JSON.stringify(warnings)}）`);
+  assert.equal(warnings.filter((w) => !/白名单/.test(w)).length, 0, '除白名单留痕外没有其它 warning');
+  assert.equal(channels.length, 1, '★ 白名单后 = plan 别名（本 fixture 里没有免费额度行，故只剩它）');
+  const plan = channels.find((c) => c.id === 'plan');
+  assert.ok(plan, 'plan 别名在清单里');
   assert.equal(plan.enabled, true);
   assert.equal(plan.aliasOf, 'builtin:bigmodel-coding-plan');
-  assert.deepEqual(plan.models, ['glm-4.6', 'GLM-5.3-Flash']);
-  const personal = channels[1];
-  assert.equal(personal.id, 'personal');
-  assert.equal(personal.enabled, true);
-  assert.equal(personal.name, 'DeepSeek 个人接入');
-  assert.equal(personal.endpoint, 'https://api.deepseek.example');
-  assert.deepEqual(personal.models, ['deepseek-flash', 'deepseek-chat'], 'personal 模型必须来自配置声明');
-  const start = channels.find((c) => c.id === 'builtin:bigmodel-start-plan');
-  assert.equal(start.enabled, false);
-  assert.equal(start.reason, 'coding_plan_not_entitled');
-  assert.equal(start.endpoint, null);
+  assert.deepEqual(plan.models, ['glm-4.6', 'GLM-5.3-Flash'], 'plan 别名的模型来自被选中的 provider 行');
+  /* 白名单外的三行**确实不在清单里**（锁住剔除行为） */
+  for (const id of ['personal', 'builtin:bigmodel-coding-plan', 'builtin:bigmodel-start-plan']) {
+    assert.equal(channels.find((c) => c.id === id), undefined, `★ 白名单外的 ${id} 已剔除`);
+  }
+  /* 兜底不变式：清单里**只可能出现白名单内的 zcode 通道**（比"恰好几条"更稳，不依赖 fixture 是否含免费额度行） */
+  assert.ok(channels.every((c) => ['plan', 'account:bigmodel-start-plan'].includes(String(c.id))),
+    `★ ZCode 通道恒在白名单内（实际 ${JSON.stringify(channels.map((c) => c.id))}）`);
+  assert.ok(channels.every((c) => c.engine === 'zcode'), 'zcode 通道都标了引擎');
 
   // 解析失败：不抛、空数组、有 warning
   const d2 = createDispatcher({

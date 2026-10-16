@@ -104,9 +104,11 @@ test('F. ★ 面板：冻结时在「通道」分区渲染 switchOffBlocked（�
   assert.ok(/sw && sw\.enabled === false/.test(src), '★ 通道分区按 sw.enabled===false 判定冻结');
   assert.ok(/h\('div', \{ className: 'dsp-note', role: 'status', title: t\('switchOffBlocked'\) \}, t\('switchOffBlocked'\)\)/.test(src),
     '★ 渲染冻结说明（复用 switchOffBlocked）');
-  assert.ok(/function ChannelSection\(\{ channelsInfo, channel, fallback, onSwitch, onFallbackSet, offline, offlineReason, sw \}\)/.test(src),
+  /* 参数列表尾部形状会随后续需求增补（本轮加了 chanError）——断言**包含**而非逐字全等，
+   * 只钉住"sw 确实作为 prop 传进来了"这个不变量。 */
+  assert.ok(/function ChannelSection\(\{ channelsInfo, channel, fallback, onSwitch, onFallbackSet, offline, offlineReason, sw(,| \})/.test(src),
     '★ sw 已作为 prop 传入 ChannelSection');
-  assert.ok(/offlineReason, sw: dispatchSwitch \}\)\)/.test(src), '★ 渲染点把 snapshot 的开关状态传下去');
+  assert.ok(/offlineReason, sw: dispatchSwitch/.test(src), '★ 渲染点把 snapshot 的开关状态传下去');
   /* 单源哨兵：键必须中英都有（client STRINGS 与 locale 一致） */
   const zh = JSON.parse(readFileSync(join(HERE, '..', 'locale', 'zh.json'), 'utf8')).ui;
   const en = JSON.parse(readFileSync(join(HERE, '..', 'locale', 'en.json'), 'utf8')).ui;

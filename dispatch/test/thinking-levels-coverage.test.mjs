@@ -128,10 +128,16 @@ test('C. ★ core listChannels：plan 别名与 personal 通道都带上同一�
   });
   const r = await d.listChannels();
   const plan = r.channels.find((c) => c.id === 'plan');
-  const personal = r.channels.find((c) => c.id === 'personal');
+  /* ZB-51：`personal` 已被 ZCode 白名单剔除（用户决定：只留 plan 与免费额度）⇒ 不再出现在清单里。
+   * ⚠️ 本 fixture 没有免费额度行，故白名单后只剩 plan —— 不再断言"另一条 ZCode 通道"存在，
+   * 改为断言**不变式**：清单里的 zcode 通道恒在白名单内。personalProviderPath 仍照传，
+   * 用来验证"即使配置齐全，白名单也把它挡住"。 */
   assert.deepEqual(plan.thinkingLevels, ['low', 'high', 'max'], '★ plan 别名 = GLM-5.3 系三档');
-  assert.deepEqual(personal.thinkingLevels, ['disabled', 'low', 'high', 'max'],
-    '★ personal 通道接上探测表（根因 ② 的 core 侧；原先该字段根本不存在）');
+  const zcIds = r.channels.filter((c) => c.engine === 'zcode').map((c) => c.id);
+  assert.ok(zcIds.every((id) => ['plan', 'account:bigmodel-start-plan'].includes(id)),
+    `★ ZCode 通道恒在白名单内（实际 ${JSON.stringify(zcIds)}）`);
+  assert.equal(r.channels.find((c) => c.id === 'personal'), undefined,
+    '★ 白名单外的 personal 即使配置齐全也被剔除（白名单优先于配置）');
   /* 探测行缺失时仍不猜（回归：不得凭空造档位） */
   const d2 = createDispatcher({
     runnerPath: RUNNER,

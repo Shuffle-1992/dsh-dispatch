@@ -14,6 +14,9 @@ import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 
 import { createDispatcher, parseRunnerLine } from '../core/dispatch-core.mjs';
+/* ZB-44（双引擎）：**新增 import（独立一行，不改上面既有 import 行）** —— 用于钉住
+ * 档位表行的引擎差异（zcode `reasoning-levels` / opencode `variants` 走同一段实现）。 */
+import { parseProviderTable } from '../core/dispatch-core.mjs';
 import { aggregate, fetchPlanQuota } from '../core/quota.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -33,6 +36,12 @@ function sleep(ms) {
 }
 async function waitForTerminal(d, id, timeoutMs = 20000) {
   return new Promise((res, rej) => {
+    /* ⚠️ 必须先查当前状态，再订阅事件。
+     * 原因（ZB-51 实测）：某些失败是**同步**的 —— 例如"执行器不存在"会在 dispatch() 内立刻
+     * finalizeJob ⇒ `job-updated` 在调用方拿到 id 之前就发完了。只靠订阅会永远等不到（20s 超时）。
+     * 这也说明这个更快失败的路径是好事，测试助手补上状态检查即可。 */
+    const cur = d.get(id);
+    if (cur && ['done', 'failed', 'killed', 'interrupted'].includes(cur.state)) { res(cur); return; }
     const timer = setTimeout(() => {
       un();
       rej(new Error(`waitForTerminal(${id}) 超时 ${timeoutMs}ms，最后状态: ${JSON.stringify(d.get(id))}`));
@@ -415,4 +424,74 @@ test('parseRunnerLine 单元：真实 runner 各种行格式（含 - 值与三�
 test('清理临时目录', () => {
   for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
   assert.ok(true);
+});
+
+/* ══════════════ 以下为 ZB-44（双引擎）**追加**的用例，不改动上面任何既有断言 ══════════════ */
+
+test('ZB-44 parseRunnerLine(line, engine)：按引擎取前缀；省略 ⇒ 两个已知前缀都试；zcode 逐字不变', () => {
+  /* ① 省略 engine ⇒ opencode 的 `[opencode-run]` 也能解析（老 jobs.json / 手工调用仍可用） */
+  const ocDone = '[opencode-run] done exit=0 elapsed=0.2s session=ses_oc model=opencode/deepseek-v4.1-flash-free responseChars=4';
+  const a = parseRunnerLine(ocDone);
+  assert.equal(a.summarySeen, true, '省略引擎时 opencode 前缀照样识别');
+  assert.equal(a.sessionId, 'ses_oc');
+  assert.equal(a.model, 'opencode/deepseek-v4.1-flash-free');
+  assert.equal(a.exitCode, 0);
+
+  /* ② 显式引擎 ⇒ 只用该引擎的正则；**另一个前缀的行按普通输出返回 {}（不是 null）** */
+  assert.deepEqual(parseRunnerLine('[zcode-run] done exit=0 elapsed=1.0s session=s1', 'opencode'), {},
+    '显式 opencode 时，[zcode-run] 行是普通输出（不得记 parseWarning）');
+  assert.deepEqual(parseRunnerLine('[opencode-run] done exit=0 elapsed=1.0s', 'zcode'), {},
+    '显式 zcode 时，[opencode-run] 行是普通输出');
+  assert.equal(parseRunnerLine('[opencode-run] done exit=0 elapsed=1.0s session=s2', 'opencode').sessionId, 's2');
+
+  /* ③ 语义不变：带**已知前缀**但识别失败 ⇒ null；无已知前缀的普通行 ⇒ {} */
+  assert.equal(parseRunnerLine('[opencode-run] 未知形状 xyz', 'opencode'), null);
+  assert.equal(parseRunnerLine('[opencode-run] 未知形状 xyz'), null, '省略引擎时同样按"已知前缀+识别失败"记 null');
+  assert.deepEqual(parseRunnerLine('[zcode-run] 未知形状 xyz', 'opencode'), {}, '另一个引擎的前缀不算"识别失败"');
+  assert.deepEqual(parseRunnerLine('普通输出', 'opencode'), {});
+  assert.deepEqual(parseRunnerLine('普通输出'), {});
+
+  /* ④ zcode 关键形状复钉一遍（逐字不变） */
+  assert.equal(parseRunnerLine('[zcode-run] done exit=0 elapsed=1.0s session=s1', 'zcode').sessionId, 's1');
+  assert.equal(parseRunnerLine('[zcode-run] 未知行格式 xyz', 'zcode'), null);
+
+  /* ⑤ opencode 的 usage / progress / variant 行各一条（variant ⇒ 复用既有 Applied/Target 字段） */
+  assert.deepEqual(
+    parseRunnerLine('[opencode-run] usage requests=1 in=10 out=2 cacheRead=0', 'opencode').usage,
+    { requests: 1, inputTokens: 10, outputTokens: 2, cacheReadTokens: 0 },
+  );
+  assert.equal(
+    parseRunnerLine('[opencode-run] progress stage=run elapsed=3s chars=8 tools=1 stageAgo=1s', 'opencode').progress.stage,
+    'run',
+  );
+  const applied = parseRunnerLine('[opencode-run] variant=high model=opencode/glm-5.3-flash-free', 'opencode');
+  assert.equal(applied.reasoningLevelApplied, 'high');
+  assert.equal(applied.reasoningTarget, 'opencode/glm-5.3-flash-free', 'OpenCode 无 provider 注入 ⇒ target 用 model 填');
+
+  /* ⑥ `variants` 是探测/声明行：识别为已知信息行（返回 {}），不落"无人识别"的 warning */
+  assert.deepEqual(parseRunnerLine('[opencode-run] variants opencode/x=low,high', 'opencode'), {});
+});
+
+test('ZB-44 parseProviderTable(text, engine)：opencode 的 variants 与 zcode 的 reasoning-levels 走同一段实现', () => {
+  const text = [
+    'id'.padEnd(34) + 'enabled   端点/模型',
+    'builtin:bigmodel-coding-plan'.padEnd(34) + 'true      https://x | GLM-5.3',
+    '[zcode-run] reasoning-levels GLM-5.3=disabled,enabled',
+    '[opencode-run] variants opencode/deepseek-v4.1-flash-free=low,high,max',
+  ].join('\n');
+
+  /* 省略引擎 ⇒ 两种档位表行都认（既有调用方零改动，且不挑引擎） */
+  const both = parseProviderTable(text);
+  assert.deepEqual(both.modelLevels['GLM-5.3'], ['disabled', 'enabled']);
+  assert.deepEqual(both.modelLevels['opencode/deepseek-v4.1-flash-free'], ['low', 'high', 'max']);
+  assert.equal(both.rows.length, 1, 'provider 表格行不受档位行影响');
+  assert.equal(both.warnings.length, 0);
+
+  /* 指定引擎 ⇒ 只认该引擎的档位行（不看错另外一个引擎的表） */
+  const onlyZ = parseProviderTable(text, 'zcode');
+  assert.deepEqual(onlyZ.modelLevels['GLM-5.3'], ['disabled', 'enabled']);
+  assert.equal(onlyZ.modelLevels['opencode/deepseek-v4.1-flash-free'], undefined);
+  const onlyO = parseProviderTable(text, 'opencode');
+  assert.deepEqual(onlyO.modelLevels['opencode/deepseek-v4.1-flash-free'], ['low', 'high', 'max']);
+  assert.equal(onlyO.modelLevels['GLM-5.3'], undefined);
 });

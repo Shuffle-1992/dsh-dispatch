@@ -18,11 +18,18 @@
  *   node bin/dispatch.mjs fallback [list|set a,b,c|set <id> --model <m> --thinking <lv>|off]   # 自动降级（默认关；set 即开启）
  *
  * dispatch 附加：--kind task|prompt|target --prompt/--task/--target --model --provider
- *   --mode build|edit|plan|yolo --tag --timeout-min --cwd --resume --memory-bench
+ *   --engine zcode|opencode --mode build|edit|plan|yolo --tag --timeout-min --cwd --resume --memory-bench
  *   --lock repo|memory|both --max-concurrent <n> --no-wait
+ *
+ * 双引擎（ZCode + OpenCode）：
+ *   provider 传 `opencode/<model>`（如 opencode/deepseek-v4.1-flash-free）即自动识别为 OpenCode 引擎，
+ *   也可显式 `--engine opencode`；通道行带 `[zcode]` / `[opencode]` 标记（清单以 channels 为准，
+ *   免费模型是探测式的，**不写死枚举**）。OpenCode 不支持 mode / memoryBench / --auto。
+ *   例：node bin/dispatch.mjs dispatch --kind prompt --prompt "只回答 OK" --provider opencode/deepseek-v4.1-flash-free
  *
  * 路径默认值（可用环境变量或参数覆盖）：
  *   DSP_RUNNER / --runner        runner 脚本（通用工具仓库 <本仓库>/collab-kit/zcode-run.mjs，只读使用）
+ *   DSP_OPENCODE_RUNNER / --opencode-runner  OpenCode 执行器（默认推断 <本仓库>/collab-kit/opencode-run.mjs，只读使用）
  *   DSP_LEDGER / --ledger        台账 dispatch-runs.jsonl
  *   DSP_WORK_ROOT / --work-root  派发器工作根目录（默认 <dispatch>/work）
  *   DSP_RUNNER_CWD / --runner-cwd  子进程工作目录（默认当前目录）
@@ -80,12 +87,16 @@ function usage(exitCode = 0) {
 }
 
 function makeDispatcher() {
+  /* OpenCode 执行器：**空则整项不传**（core 默认推断 env DSP_OPENCODE_RUNNER → 仓库内
+   * collab-kit/opencode-run.mjs）；传空串会被 core 当成"配了但没有" ⇒ 通道为空。 */
+  const opencodeRunnerPath = opt['opencode-runner'] ?? process.env.DSP_OPENCODE_RUNNER ?? '';
   return createDispatcher({
     runnerPath: opt.runner ?? process.env.DSP_RUNNER ?? DEFAULTS.runner,
     ledgerPath: opt.ledger ?? process.env.DSP_LEDGER ?? DEFAULTS.ledger,
     workRoot: opt['work-root'] ?? process.env.DSP_WORK_ROOT ?? DEFAULTS.workRoot,
     runnerCwd: opt['runner-cwd'] ?? process.env.DSP_RUNNER_CWD ?? process.cwd(),
     maxConcurrent: numOf(opt['max-concurrent']),
+    ...(opencodeRunnerPath ? { opencodeRunnerPath } : {}),
   });
 }
 
@@ -148,6 +159,9 @@ async function cmdDispatch() {
   else spec.prompt = opt.prompt;
   if (opt.model) spec.model = opt.model;
   if (opt.provider) spec.provider = opt.provider;
+  /* 双引擎：--engine zcode|opencode 显式透传（`--provider opencode/<model>` 由 core 自动识别，
+   * CLI 侧**不写死 provider 枚举** —— 权威来源是 `channels` 的实时清单）。 */
+  if (opt.engine) spec.engine = opt.engine;
   if (opt.mode) spec.mode = opt.mode;
   if (opt.tag) spec.tag = opt.tag;
   if (opt['timeout-min'] != null) spec.timeoutMin = numOf(opt['timeout-min']);
@@ -317,10 +331,10 @@ function cmdTail() {
 
 async function cmdChannels() {
   const d = makeDispatcher();
-  const { channels, warnings } = await d.listChannels();
+  const { channels, warnings, engines } = await d.listChannels();
   for (const w of warnings) console.error(`[zcd] warning: ${w}`);
   if (boolOf(opt.json)) {
-    console.log(JSON.stringify({ channels, warnings }, null, 2));
+    console.log(JSON.stringify({ channels, warnings, ...(engines ? { engines } : {}) }, null, 2));
     return;
   }
   if (channels.length === 0) {
@@ -328,15 +342,19 @@ async function cmdChannels() {
     process.exitCode = 1;
     return;
   }
-  console.log('id                             enabled  endpoint                       models / 原因');
+  console.log('id                             enabled  engine      endpoint                       models / 原因');
   for (const c of channels) {
+    /* 双引擎：通道带 engine（'zcode'|'opencode'）；旧 core 无该字段时按默认引擎显示，不猜别的。 */
+    const eng = c.engine === 'opencode' ? '[opencode]' : '[zcode]';
     const line =
-      `${c.id.padEnd(30)} ${String(c.enabled).padEnd(8)} ${String(c.endpoint ?? '-').padEnd(30)} ` +
+      `${c.id.padEnd(30)} ${String(c.enabled).padEnd(8)} ${eng.padEnd(11)} ${String(c.endpoint ?? '-').padEnd(30)} ` +
       `${(c.models ?? []).join(', ') || '-'}${c.reason ? ` (${c.reason})` : ''}`;
     console.log(line + (c.aliasOf ? `  [plan→${c.aliasOf}]` : ''));
   }
+  const eng = Array.isArray(engines) && engines.length ? engines.join(', ') : 'zcode（旧 core 未上报 engines）';
+  console.log(`\n引擎: ${eng}`);
   const cur = d.getChannel();
-  console.log(`\n默认通道: ${cur.provider}${cur.model ? ` / ${cur.model}` : ''}（channel set 可改）`);
+  console.log(`默认通道: ${cur.provider}${cur.model ? ` / ${cur.model}` : ''}（channel set 可改）`);
 }
 
 async function cmdChannel() {

@@ -52,11 +52,34 @@
  *   两者写**同一份状态**（<workRoot>/state/fallback.json，version 2；旧 version 1 的 chain 自动迁移）。
  *   getFallbackChain() 返回 {enabled, chain(旧形状 id 列表), targets, target(首项)}。
  *
+ * ── 双引擎（ZB-44）─────────────────────────────────────────────────────────────
+ * 本核心只负责**调度**，执行**引擎**可替换。「通道」（channel）这一既有抽象现在携带 engine：
+ *   · zcode    → 执行器 `collab-kit/zcode-run.mjs`，行前缀 `[zcode-run]`（既有语义，逐字不变）
+ *   · opencode → 执行器 `collab-kit/opencode-run.mjs`，行前缀 `[opencode-run]`（探测与执行同用一个脚本）
+ * 行协议（前缀 / 行语法 / 引擎差异字段）的**唯一权威**是 `collab-kit/run-line-protocol.mjs`：
+ * core 与各执行器都 import 它，绝不各抄一份 —— 否则会重演 ZB-31「档位表变了但代码写死」的坑。
+ * 引擎判据（先显式后推断，绝不猜）：
+ *   ① 显式 spec.engine（合法值）② provider 形如 `opencode/<model>` ③ 通道→引擎**快照**
+ *   （listChannels 成功时落盘 <workRoot>/state/channels.json —— dispatch/startJob 是**同步**函数，
+ *   需要在不能 await 的情况下识别引擎；读不到一律 fail-open 按默认引擎 zcode）
+ *   ④ 都不满足 ⇒ 默认引擎 zcode（既有调用方零改动）。
+ * 并发：全局 maxConcurrent + **每引擎**上限（opencode 默认 2）。为什么 OpenCode 要单独限低：
+ *   本机实测（OpenCode 1.19.2）**同一时刻并发的 opencode 进程会导致 `opencode run` 静默失败**
+ *   （零输出 exit 1，stdout/stderr 各 0 字节；串行正常）—— 免费层另有按 IP 限流，但**不是唯一理由**。
+ *   引擎名额满只跳过该任务，**不阻塞**其它引擎可运行的任务（队头阻塞见 pump 注释）。
+ * OpenCode 是**增量能力**：执行器缺失 / 探测失败 / 超时，都只让它自己的通道为空 + 一条可读 warning，
+ *   绝不影响 ZCode 通道与 ZCode 派发；OpenCode **没有** ZCode 侧台账（dispatch-runs.jsonl），
+ *   故对它不做台账回读、不产生「台账未命中」类噪音。
+ * 权限放行（ZB-45）：`spec.auto`（默认 false）= **显式**放行 OpenCode 未显式拒绝的权限（执行器 `--auto`）。
+ *   OpenCode 的工具调用可能需要审批，默认不放行是安全默认；需要时显式开启，并**跨 retry 沿用**同一放行级别。
+ *
  * 测试注入：env `DSP_FAKE_RUNNER` 覆盖 runner 路径；`options.spawnImpl` 替换 spawn；
  *   `options.now` 注入时钟（返回 ms 数值或 Date 的函数）；
  *   `options.channelsProbeImpl` 替换 `--list-providers` 探测（返回 stdout 文本）；
  *   `options.channelsImpl` 整体替换 listChannels（降级链测试注入通道可用性）；
- *   `options.zcodeConfigPath / planCachePath / personalProviderPath` 覆盖通道相关文件路径。
+ *   `options.zcodeConfigPath / planCachePath / personalProviderPath` 覆盖通道相关文件路径；
+ *   `options.opencodeRunnerPath`（或 env `DSP_OPENCODE_RUNNER`）覆盖 OpenCode 执行器路径，
+ *   `options.maxConcurrentOpenCode` 设 OpenCode 独立并发上限，`options.opencodeMaxModels` 限制探测出的模型数。
  */
 import { spawn as nodeSpawn } from 'node:child_process';
 import {
@@ -65,7 +88,21 @@ import {
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url'; // ZB-44：默认推断 OpenCode 执行器路径（<core 目录>/../../collab-kit/）
 import { createHash, randomBytes } from 'node:crypto'; // ZB-08：createHash 供文件锁路径哈希用
+/* ZB-44（双引擎）：行协议与引擎判据的**唯一权威**（core 与各执行器共用，见该文件顶部注释）。
+ * 原先写死的 `[zcode-run]` 正则、引擎名归一、`opencode/<model>` 通道形态判定，全部改从这里取。 */
+import {
+  DEFAULT_ENGINE, ENGINES, RUN_PREFIX, prefixFor, normalizeEngine,
+  normalizeEngineSpec, inferEngine, isOpenCodeId, isQoderId, isQoderModelName,
+} from '../../collab-kit/run-line-protocol.mjs';
+/* ZB-51（T2）：三引擎**自动发现** —— 让"别人装上插件就能用"成立。
+ * 发现层负责回答"这台机器上 ZCode / OpenCode / Qoder 各自有没有 CLI、在哪、什么版本、是否已登录、什么形态"，
+ * core 只消费它的结论（探测细节与候选表都在那个叶子模块里，见其顶部注释）。 */
+import { discoverAll, describeDiscovery } from '../../collab-kit/engine-discover.mjs';
+
+/** 本文件所在目录（**只**用于默认推断 OpenCode 执行器路径，不参与业务路径拼接）。 */
+const CORE_DIR = dirname(fileURLToPath(import.meta.url));
 
 const LOCK_STALE_MS = 2 * 60 * 60 * 1000; // 锁过期阈值：2h（任务包规定）
 const LOCK_ACQUIRE_RETRIES = 5;
@@ -73,36 +110,106 @@ const TAIL_CAP = 200; // 内存 tailLines 上限
 const JOBS_FILE_CAP = 1000; // jobs.json 持久化条数上限（防无限增长）
 const RENAME_RETRIES = 4;
 
-/* ---------------- [zcode-run] 汇总行解析（格式以 runner 源码为准） ---------------- */
-const RES = {
-  start: /^\[zcode-run\] tag=(\S+) mode=(\S+) cwd=(.+)$/,
-  provider: /^\[zcode-run\] provider=(\S+)(?: model=(\S+)| models=(\S+))?(?: \((.+)\))?$/,
-  resume: /^\[zcode-run\] resume=(\S+)$/,
-  // done exit=0 (超时)? elapsed=9.7s session=…? provider=…? model=…? responseChars=…?（除 exit/elapsed 外均可选）
-  done: /^\[zcode-run\] done exit=(\d+)(?: \(超时\))? elapsed=([\d.]+)s(?: session=(\S+))?(?: provider=(\S+))?(?: model=(\S+))?(?: responseChars=(\d+))?\s*$/,
-  endpoint: /^\[zcode-run\] endpoint=(\S+)$/,
-  usage: /^\[zcode-run\] usage requests=(\d+|-) in=(\d+|-) out=(\d+|-) cacheRead=(\d+|-)\s*$/,
-  context: /^\[zcode-run\] context used=(\d+) \((?:[\d.]+)% of (\d+)\) turnCount=(\d+|-)\s*$/,
-  // 任务包示例把 out/err/result 写在一行；真实 runner 是三行分开。两种都兼容。
-  outCombined: /^\[zcode-run\] out=(.+?) err=(.+?) result=(.+)$/,
-  out: /^\[zcode-run\] out=(.+)$/,
-  err: /^\[zcode-run\] err=(.+)$/,
-  result: /^\[zcode-run\] result=(.+)$/,
-  // ZB-28：runner 打印 `memory-ban=on` = 它接受了 --memory-ban 并已注入禁令（job.memoryBanRunner 确认位）
-  memoryBan: /^\[zcode-run\] memory-ban=on\b/,
-  /* ZB-40：**心跳/进度**（免费额度通道每 10s 一行）—— 让面板能显示"当前在做什么 + 多久没动静"，
-   * 而不是只有沉默（真机事故：轮次失败后 runner 死等，外部看像"卡住"）。
-   * 例：`[zcode-run] progress stage=waiting-turn elapsed=120s chars=1024 tools=3 lastTool=Write stageAgo=8s session=sess_x` */
-  progress: /^\[zcode-run\] progress stage=(\S+) elapsed=(\d+)s chars=(\d+) tools=(\d+)(?: lastTool=(\S+))? stageAgo=(\d+)s(?: session=(\S+))?\s*$/,
+/* ---------------- 执行器汇总行解析（格式权威 = collab-kit/run-line-protocol.mjs） ----------------
+ * ZB-44：前缀不再写死 `[zcode-run]`，而是**按引擎渲染**（zcode `[zcode-run]` / opencode `[opencode-run]`）。
+ * 除两条**引擎差异行**（思考强度档位表 / 生效确认行，见下方注释）外，两种前缀的行语法逐字相同，
+ * 所以正则模板只写一份、按引擎代入前缀 —— 复制两份必然漂移（ZB-31 的坑）。
+ * ⚠️ 改这里的任一条正则，必须同步 collab-kit/run-line-protocol.mjs 顶部「行语法」注释块。 */
+const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** 引擎差异行①：思考强度**档位表**的关键字
+ *  （zcode=`reasoning-levels`；opencode=`variants`；qoder=`reasoning-efforts`）。 */
+const LEVELS_KEYWORD = { zcode: 'reasoning-levels', opencode: 'variants', qoder: 'reasoning-efforts' };
+/** 引擎差异行②：注入/生效**确认行**的正则（zcode 带 provider 注入 ⇒ target=provider/model；
+ *  opencode / qoder 无 provider 注入 ⇒ 只有 model=）与「落到 job 同一组字段」的映射函数。
+ *
+ * ⚠️ 教训（ZB-51）：给 ENGINES 加引擎时**必须同时**加这三张表。漏了 `APPLIED_RE_OF` 会让
+ * `resFor()` 在 `APPLIED_RE_OF[e](p)` 处抛 `is not a function` —— 而它是**热路径**（每行日志都走），
+ * 一崩就是整条通道清单/解析全废。故下面取值时加了兜底：未知引擎退回"永不匹配"的正则，不抛。 */
+const APPLIED_RE_OF = {
+  zcode: (p) => new RegExp(`^${p} reasoning-level=(\\S+) target=(\\S+)\\/(\\S+)\\s*$`),
+  opencode: (p) => new RegExp(`^${p} variant=(\\S+) model=(\\S+)\\s*$`),
+  qoder: (p) => new RegExp(`^${p} reasoning-effort=(\\S+) model=(\\S+)\\s*$`),
 };
+const APPLIED_MAPPER = {
+  zcode: (m) => ({ reasoningLevelApplied: m[1], reasoningTarget: `${m[2]}/${m[3]}` }),
+  opencode: (m) => ({ reasoningLevelApplied: m[1], reasoningTarget: m[2] }),
+  qoder: (m) => ({ reasoningLevelApplied: m[1], reasoningTarget: m[2] }),
+};
+
+/** 引擎 → 该引擎的行正则表（缓存：解析是热路径，不能每行都重建正则）。 */
+const RES_CACHE = new Map();
+function resFor(engine) {
+  const e = normalizeEngine(engine);
+  const hit = RES_CACHE.get(e);
+  if (hit) return hit;
+  const p = escapeRe(RUN_PREFIX[e]);
+  const res = {
+    start: new RegExp(`^${p} tag=(\\S+) mode=(\\S+) cwd=(.+)$`),
+    provider: new RegExp(`^${p} provider=(\\S+)(?: model=(\\S+)| models=(\\S+))?(?: \\((.+)\\))?$`),
+    resume: new RegExp(`^${p} resume=(\\S+)$`),
+    // done exit=0 (超时)? elapsed=9.7s session=…? provider=…? model=…? responseChars=…?（除 exit/elapsed 外均可选）
+    done: new RegExp(`^${p} done exit=(\\d+)(?: \\(超时\\))? elapsed=([\\d.]+)s(?: session=(\\S+))?(?: provider=(\\S+))?(?: model=(\\S+))?(?: responseChars=(\\d+))?\\s*$`),
+    endpoint: new RegExp(`^${p} endpoint=(\\S+)$`),
+    usage: new RegExp(`^${p} usage requests=(\\d+|-) in=(\\d+|-) out=(\\d+|-) cacheRead=(\\d+|-)\\s*$`),
+    /* Qoder 的用量是**credits**，不是 token（真机实测 token 字段恒为 0）——
+     * 故它另有一条专用行；token 恒为 0 时 `usage` 行只有请求数有意义。 */
+    credits: new RegExp(`^${p} credits total=(\\S+) contextRatio=(\\S+) durationMs=(\\S+) turns=(\\S+)\\s*$`),
+    /* Qoder 的 context 行：它的上下文窗口大小不由 CLI 报告（真机未给），故 used 与窗口都是 `-`，
+     * 真实信号是**占比**。这里刻意放宽为"可能全是占位符"，避免把它记成无法识别的行。 */
+    contextRatioLine: new RegExp(`^${p} context used=(\\S+) \\(([\\d.]+|-)% of (\\S+)\\) turnCount=(\\S+)\\s*$`),
+    context: new RegExp(`^${p} context used=(\\d+) \\((?:[\\d.]+)% of (\\d+)\\) turnCount=(\\d+|-)\\s*$`),
+    // 任务包示例把 out/err/result 写在一行；真实 runner 是三行分开。两种都兼容。
+    outCombined: new RegExp(`^${p} out=(.+?) err=(.+?) result=(.+)$`),
+    out: new RegExp(`^${p} out=(.+)$`),
+    err: new RegExp(`^${p} err=(.+)$`),
+    result: new RegExp(`^${p} result=(.+)$`),
+    // ZB-28：runner 打印 `memory-ban=on` = 它接受了 --memory-ban 并已注入禁令（job.memoryBanRunner 确认位）
+    memoryBan: new RegExp(`^${p} memory-ban=on\\b`),
+    /* ZB-40：**心跳/进度**（免费额度通道每 10s 一行）—— 让面板能显示"当前在做什么 + 多久没动静"，
+     * 而不是只有沉默（真机事故：轮次失败后 runner 死等，外部看像"卡住"）。
+     * 例：`[zcode-run] progress stage=waiting-turn elapsed=120s chars=1024 tools=3 lastTool=Write stageAgo=8s session=sess_x` */
+    progress: new RegExp(`^${p} progress stage=(\\S+) elapsed=(\\d+)s chars=(\\d+) tools=(\\d+)(?: lastTool=(\\S+))? stageAgo=(\\d+)s(?: session=(\\S+))?\\s*$`),
+    // 已知信息行（识别但不入库）：cli=<path> / task=<path> / 权限模式回显 / 工具计数 / 引擎侧 stderr
+    /* ZB-51：Qoder 执行器的这几条都是**已知信息行**（诊断用，不入库、不落 warning）：
+     *   `permission-mode=accept_edits（…）`        ← 开头声明本次用的权限模式
+     *   `permission-mode-requested=… reported=…`   ← 权限回落核对结论
+     *   `tools count=31`                           ← 工具计数
+     *   `stderr 非空（前 300 字）：…`              ← **引擎侧 stderr 摘录**
+     * 它们此前落进 `parseWarnings`（"unparsed line"），看起来像解析失败 —— 其实是已知信息。
+     *
+     * ⚠️ 用**宽松子串**（`\b` 开头 + 不锚定结尾）而不是 `.+$`：那条 stderr 行自身带括号且带截断，
+     * 用严格结尾匹配会因"截断文本里含 `)`"而失配（实测踩到）。已知信息行不需要结构化取数，
+     * 宽松匹配更能容忍执行器文案变化。 */
+    knownInfo: new RegExp(`^${p} (?:cli|task|permission-mode|permission-mode-requested|tools count|model|resume)\\b`
+      + `|^${p} stderr 非空`),
+    // 引擎差异行①（探测/声明行；parseProviderTable 的 modelLevels 走同一份正则）
+    levels: new RegExp(`^${p} ${LEVELS_KEYWORD[e] ?? 'reasoning-levels'} (\\S+?)=(\\S+)\\s*$`),
+    // 引擎差异行②（生效确认行）—— 未知引擎退回"永不匹配"，绝不抛（见上面 APPLIED_RE_OF 的教训）
+    applied: (APPLIED_RE_OF[e] ?? (() => /(?!)/))(p),
+  };
+  RES_CACHE.set(e, res);
+  return res;
+}
 
 const num = (s) => (s == null || s === '-' ? null : Number(s));
 
-/* ZB-29：思考强度 —— runner `--list-providers` 的 `[zcode-run] reasoning-levels <model>=<a,b,c>` 行。
- * 取值随模型声明不同（GLM-5 系 disabled|enabled；deepseek-v4 系 disabled|low|high|max），不写死枚举。 */
-const REASONING_LEVELS_RE = /^\[zcode-run\] reasoning-levels (\S+?)=(\S+)\s*$/;
-/* ZB-29：运行注入确认行（`reasoning-level=<档位> target=<providerId>/<modelId>`，派发时打印一次）。 */
-const REASONING_APPLIED_RE = /^\[zcode-run\] reasoning-level=(\S+) target=(\S+)\/(\S+)\s*$/;
+/**
+ * 档位表行的**唯一**解析实现（zcode / opencode 共用，避免抄两份漂移）：
+ *   zcode    `[zcode-run] reasoning-levels <model>=<a,b,c>`
+ *   opencode `[opencode-run] variants <model>=<a,b>`
+ * 取值随模型声明不同（GLM-5 系 disabled|enabled；deepseek-v4 系 disabled|low|high|max），不写死枚举。
+ * engine 省略/未知 ⇒ 两个已知前缀都试（老 jobs.json 与手工调用仍能解析）；返回 {model, levels} 或 null。
+ */
+function parseLevelsLine(line, engine) {
+  const explicit = typeof engine === 'string' ? engine.trim().toLowerCase() : '';
+  const order = ENGINES.includes(explicit) ? [explicit] : ENGINES;
+  for (const e of order) {
+    const m = resFor(e).levels.exec(line);
+    if (m) return { model: m[1], levels: m[2].split(',').map((s) => s.trim()).filter(Boolean) };
+  }
+  return null;
+}
 
 /* ---------------- 暂停原因识别（Z6；签名为 DSH 实测的错误输出关键词） ----------------
  * 顺序即优先级：entitlement / signing / config 属精确原因，先于较宽的 quota 组，
@@ -141,8 +248,10 @@ export function classifyPause(lines) {
  * 绝不猜测。 */
 const LIST_ROW_RE = /^(.+?)(true|false)\s+(\S+)\s+\|\s+(.+)$/;
 
-/** 解析 `--list-providers` 输出 → {rows:[{id,enabled,reason,endpoint,models}], modelLevels:{modelId:[levels]}, warnings}。 */
-export function parseProviderTable(text) {
+/** 解析 `--list-providers` 输出 → {rows:[{id,enabled,reason,endpoint,models}], modelLevels:{modelId:[levels]}, warnings}。
+ *  engine 省略/未知 ⇒ zcode 与 opencode 两种**档位表行**都识别；传具体引擎 ⇒ 只认该引擎的（不看错别的引擎的行）。
+ *  provider 表格行本身与引擎无关（无前缀），故两种引擎共用同一段解析。 */
+export function parseProviderTable(text, engine = null) {
   const warnings = [];
   const rows = [];
   const modelLevels = {};
@@ -151,10 +260,11 @@ export function parseProviderTable(text) {
   }
   for (const raw of String(text).split('\n')) {
     const line = raw.replace(/\r$/, '');
-    /* ZB-29：思考强度档位行（runner 探测内置配置 modelRules 得出，随模型声明不同）。 */
-    const lvl = REASONING_LEVELS_RE.exec(line);
+    /* ZB-29 / ZB-44：思考强度档位行（runner 探测内置配置 modelRules 得出，随模型声明不同）。
+     * zcode 打 `reasoning-levels`、opencode 打 `variants` —— 同一段实现（parseLevelsLine）解析。 */
+    const lvl = parseLevelsLine(line, engine);
     if (lvl) {
-      modelLevels[lvl[1]] = lvl[2].split(',').map((s) => s.trim()).filter(Boolean);
+      modelLevels[lvl.model] = lvl.levels;
       continue;
     }
     const m = LIST_ROW_RE.exec(line);
@@ -180,33 +290,64 @@ export function parseProviderTable(text) {
   return { rows, modelLevels, warnings };
 }
 
-/** 解析单行，返回字段更新对象；带 [zcode-run] 前缀但识别失败返回 null（调用方记 warning），普通行返回 {}。 */
-export function parseRunnerLine(line) {
+/* 单引擎行解析内核的三态返回值：
+ *   对象      = 命中（可能是 {} = 已知信息行，识别但不入库）
+ *   null      = **带本引擎前缀但识别失败**（调用方记 parseWarnings）
+ *   NOT_MINE  = 这不是本引擎的行（换下一个引擎/按普通输出处理） */
+const NOT_MINE = Symbol('not-this-engine');
+
+/** 用**指定引擎**的正则解析一行（检查顺序与既有实现逐字一致，保证 zcode 的解析结果不变）。 */
+function parseLineForEngine(text, engine) {
+  const e = normalizeEngine(engine);
+  const res = resFor(e);
   let m;
-  if ((m = RES.done.exec(line))) {
+  if ((m = res.done.exec(text))) {
     /* ZB-28：`(超时)` 标记（runner --timeout-min 到点，exit=124）此前被非捕获组吞掉 ——
      * 「runner 超时的 failed」与「任务真失败的 failed」在 job 上无法区分。现在带出 timedOut。 */
     return {
       exitCode: Number(m[1]), runnerElapsedSec: Number(m[2]), sessionId: m[3] ?? null,
       provider: m[4] ?? null, model: m[5] ?? null, responseChars: num(m[6]),
       authoritative: true, summarySeen: true,
-      ...(line.includes('(超时)') ? { timedOut: true } : {}),
+      ...(text.includes('(超时)') ? { timedOut: true } : {}),
     };
   }
-  if ((m = RES.usage.exec(line))) {
+  if ((m = res.usage.exec(text))) {
     return { usage: { requests: num(m[1]), inputTokens: num(m[2]), outputTokens: num(m[3]), cacheReadTokens: num(m[4]) } };
   }
-  if ((m = RES.context.exec(line))) {
+  /* ZB-51：Qoder 的 credits 行 —— 落进 `job.credits`（与 ZCode/OpenCode 的 token 用量并存）。
+   * 真机实测该引擎 token 字段恒为 0，credits 才是真计量，故单独留字段，不硬塞进 usage。 */
+  if ((m = res.credits.exec(text))) {
+    return {
+      credits: num(m[1]),
+      contextRatio: num(m[2]),
+      durationMs: num(m[3]),
+      ...(num(m[4]) != null ? { turnCount: num(m[4]) } : {}),
+    };
+  }
+  /* Qoder 的 context 行（used / 窗口可能是 `-`，真实信号是占比）—— 放在严格的 context 之后匹配，
+   * 保证既有 zcode/opencode 的严格行行为**逐字不变**。
+   * ⚠️ 这里必须与 `context` 行同契约：`-` ⇒ **null**（而不是"字段缺失 = undefined"）。
+   * 既有测试按 `turnCount: null` 断言，用 `undefined` 会让"没上报"与"上报为空"再也分不开。 */
+  if ((m = res.contextRatioLine.exec(text))) {
+    const pct = num(m[2]);
+    return {
+      contextUsed: num(m[1]),
+      contextWindow: num(m[3]),
+      ...(pct != null ? { contextRatio: pct / 100 } : {}),
+      turnCount: num(m[4]),
+    };
+  }
+  if ((m = res.context.exec(text))) {
     return { contextUsed: Number(m[1]), contextWindow: Number(m[2]), turnCount: num(m[3]) };
   }
-  if ((m = RES.endpoint.exec(line))) return { endpoint: m[1] };
-  if ((m = RES.provider.exec(line))) {
+  if ((m = res.endpoint.exec(text))) return { endpoint: m[1] };
+  if ((m = res.provider.exec(text))) {
     return { provider: m[1], ...(m[2] ? { model: m[2] } : {}), ...(m[3] ? { models: m[3] } : {}), providerLabel: m[4] ?? null };
   }
-  if ((m = RES.start.exec(line))) return { runnerTag: m[1], runnerMode: m[2], runnerCwd: m[3] };
-  if ((m = RES.resume.exec(line))) return { resume: m[1] };
-  if ((m = RES.memoryBan.exec(line))) return { memoryBanSeen: true }; // ZB-28：runner 确认禁令已注入
-  if ((m = RES.progress.exec(line))) {
+  if ((m = res.start.exec(text))) return { runnerTag: m[1], runnerMode: m[2], runnerCwd: m[3] };
+  if ((m = res.resume.exec(text))) return { resume: m[1] };
+  if ((m = res.memoryBan.exec(text))) return { memoryBanSeen: true }; // ZB-28：runner 确认禁令已注入
+  if ((m = res.progress.exec(text))) {
     /* ZB-40：心跳 → job.progress（面板/工具据此显示"当前工作内容"与"是否可能卡住"） */
     return {
       progress: {
@@ -221,16 +362,50 @@ export function parseRunnerLine(line) {
       lastProgressAt: Date.now(),
     };
   }
-  if ((m = REASONING_APPLIED_RE.exec(line))) {
-    // ZB-29：确认思考强度已写入临时 provider 配置（job 上可观测Applied 值与目标）
-    return { reasoningLevelApplied: m[1], reasoningTarget: `${m[2]}/${m[3]}` };
+  if ((m = res.applied.exec(text))) {
+    /* ZB-29 / ZB-44：思考强度生效确认。
+     * zcode = 确认已写入临时 provider 配置（reasoning-level=<档> target=<provider>/<model>）；
+     * opencode = 确认实际生效的模型变体（variant=<档> model=<modelId>，无 provider 注入）。
+     * 两者落到**同一组** job 字段（reasoningLevelApplied / reasoningTarget）。 */
+    return APPLIED_MAPPER[e](m);
   }
-  if (/^\[zcode-run\] cli=(?:.+)$/.test(line) || /^\[zcode-run\] task=(?:.+)$/.test(line)) return {}; // 已知信息行，无需入库
-  if ((m = RES.outCombined.exec(line))) return { runnerOut: m[1], runnerErr: m[2], runnerResult: m[3] };
-  if ((m = RES.out.exec(line))) return { runnerOut: m[1] };
-  if ((m = RES.err.exec(line))) return { runnerErr: m[1] };
-  if ((m = RES.result.exec(line))) return { runnerResult: m[1] };
-  return line.includes('[zcode-run]') ? null : {};
+  if (res.knownInfo.test(text)) return {}; // 已知信息行（cli= / task=），无需入库
+  /* ZB-44：opencode 的 `variants <model>=<a,b>` 是**探测/声明行**（与 zcode 的 reasoning-levels 同义），
+   * 任务流里也可能出现 ⇒ 识别为已知信息行（返回 {}，不落「无人识别的行」warning）。
+   * zcode 的 reasoning-levels 只在 --list-providers 输出里出现，故保持既有语义（此处置为未识别）。 */
+  if (e === 'opencode' && res.levels.test(text)) return {};
+  /* ZB-45：opencode 执行器在**显式放行**时打的 `auto=on（…）` 可审计告知行
+   * （见 collab-kit/opencode-run.mjs 的 --auto 实现）。识别为"已知信息行 + autoSeen"：
+   * 既不留「无人识别的行」warning，也让 job.autoApproved 有**执行器侧确认**（与下发位交叉核对）。
+   * 协议文件（run-line-protocol.mjs）尚未登记该形状 ⇒ 等它补登后本节应改成与 memoryBan 同形的正式条目。 */
+  if (e === 'opencode' && /^\[opencode-run\] auto=on\b/.test(text)) return { autoSeen: true };
+  if ((m = res.outCombined.exec(text))) return { runnerOut: m[1], runnerErr: m[2], runnerResult: m[3] };
+  if ((m = res.out.exec(text))) return { runnerOut: m[1] };
+  if ((m = res.err.exec(text))) return { runnerErr: m[1] };
+  if ((m = res.result.exec(text))) return { runnerResult: m[1] };
+  return text.includes(RUN_PREFIX[e]) ? null : NOT_MINE;
+}
+
+/**
+ * 解析单行 → 字段更新对象。
+ *
+ * ZB-44：`engine` 省略/未知时**两个已知前缀都尝试**（zcode 的 `[zcode-run]` 与 opencode 的
+ * `[opencode-run]`）—— 老 jobs.json、手工调用、以及「不知道引擎」的调用方因此仍能解析；
+ * 传了具体引擎则只用该引擎的正则，**另一个前缀的行按普通输出返回 `{}`（不是 null）**。
+ *
+ * 语义（与接入 OpenCode 前一致）：**带已知前缀但识别失败 → null**（调用方记 parseWarnings）；
+ * **无已知前缀的普通行 → `{}`**。
+ */
+export function parseRunnerLine(line, engine) {
+  const text = typeof line === 'string' ? line : String(line ?? '');
+  const explicit = typeof engine === 'string' ? engine.trim().toLowerCase() : '';
+  const order = ENGINES.includes(explicit) ? [explicit] : ENGINES;
+  for (const e of order) {
+    const parsed = parseLineForEngine(text, e);
+    if (parsed === null) return null; // 该引擎的前缀 + 识别失败
+    if (parsed !== NOT_MINE) return parsed; // 命中（含已知信息行的 {}）
+  }
+  return {}; // 无任何已知前缀 = 普通输出
 }
 
 /* ---------------- 文件锁（跨进程互斥；'wx' 独占创建即原子仲裁） ---------------- */
@@ -429,7 +604,13 @@ function fileLockPath(dirLocks, p) {
  *   runnerCwd     子进程工作目录（默认 process.cwd()；spec.cwd 会作为 runner 的 --cwd 传入）
  *   ledgerPath    台账 dispatch-runs.jsonl（缺省则跳过台账回读）
  *   workRoot      工作根目录（locks/state/logs 都在它下面）
- *   maxConcurrent 最大并发（默认 3）
+ *   maxConcurrent 最大并发（默认 3；**全局**上限，所有引擎合计）
+ *   maxConcurrentOpenCode  OpenCode 引擎的独立并发上限（默认 2；与 ZCode 分开计数）——
+ *                       实测依据见函数体内注释：并发的 opencode 进程会让 `opencode run` 零输出 exit 1
+ *   opencodeRunnerPath  OpenCode 执行器脚本绝对路径（默认 env DSP_OPENCODE_RUNNER，
+ *                       再默认 <core 目录>/../../collab-kit/opencode-run.mjs）；探测与派发同用一个脚本。
+ *                       显式传 '' = 明确「配了但没有」（OpenCode 通道为空）
+ *   opencodeMaxModels  探测出的 OpenCode 模型数上限（默认 0 = 不限）
  *   repoLockPath  整仓库锁文件路径（默认 <workRoot>/locks/repo.lock）；memory 锁已于 ZB-16 删除
  *   timeoutGraceSec  dispatcher 看门狗在 runner 自身超时之后的宽限秒数（默认 120）
  *   spawnImpl / now  测试注入
@@ -450,6 +631,16 @@ export function createDispatcher(options = {}) {
   const legacyMemoryLockPath = join(dirLocks, 'memory.lock');
   const ledgerPath = options.ledgerPath ? resolve(options.ledgerPath) : null;
   const maxConcurrent = Math.max(1, Number(options.maxConcurrent) || 3);
+  /* ZB-44：OpenCode 引擎的**独立**并发上限。为什么默认低且与 ZCode 分开计数（**准确理由**）：
+   * OpenCode 1.19.2 本机实测 —— 同一时刻有**第二个 opencode 进程**在跑时，`opencode run` 会**零输出
+   * exit 1**（stdout/stderr 各 0 字节）；串行（探测在 run 之前、不并发）则正常。免费层另有按 IP 限流，
+   * 那是第二重理由，**不是**唯一理由；用户仍可自行调高（不拦截，但请知情）。
+   * 全局 maxConcurrent 仍是所有引擎合计的上限，故实际并发 = min(全局, 本引擎上限)。 */
+  const maxConcurrentOpenCode = Math.max(1, Number(options.maxConcurrentOpenCode ?? 2) || 2);
+  /* ZB-51：Qoder 独立并发上限，**默认 1**。理由：Qoder 免费/basic 额度有限（真机实测一次
+   * 简单问答即消耗 credits），并发跑多个会更快撞限额；且真机教训是"并发多个 CLI agent 会互相干扰"。
+   * 额度充足时可显式调大。 */
+  const maxConcurrentQoder = Math.max(1, Number(options.maxConcurrentQoder ?? 1) || 1);
   const runnerCwd = options.runnerCwd ? resolve(options.runnerCwd) : process.cwd();
   const timeoutGraceMs = Math.max(0, Number(options.timeoutGraceSec ?? 120) * 1000);
   const spawnImpl = options.spawnImpl || nodeSpawn;
@@ -459,6 +650,40 @@ export function createDispatcher(options = {}) {
   const personalProviderPath = options.personalProviderPath ? resolve(options.personalProviderPath) : join(homedir(), '.zcode', 'v2', 'provider_config.json');
   const channelsProbeImpl = options.channelsProbeImpl ?? null; // async () => '--list-providers' stdout 文本
   const channelsImpl = options.channelsImpl ?? null; // async () => ({channels, warnings})，整体替换
+  /* ZB-51（T2）：引擎自动发现的注入点（async () => ({zcode,opencode,qoder})）。
+   * 与上面两个钩子同一条纪律：**替身在场时不做真探测** —— 否则既有确定性测试会变慢/变脆，
+   * 更可能真去 spawn 用户机器上的 CLI（硬约束：不碰用户自己的 agent 配置与数据）。 */
+  const discoverImpl = options.discoverImpl ?? null;
+  const discoveryEnabled = !!discoverImpl || (!channelsProbeImpl && !channelsImpl);
+  /* ZB-51（T4）：Qoder 执行器路径。默认推断 <CORE_DIR>/../../collab-kit/qoder-run.mjs
+   * （与 OpenCode 同构）；显式空串 '' ⇒ 明确"配了但没有"⇒ Qoder 通道为空 + 可读 warning。 */
+  const qoderExplicitEmpty = options.qoderRunnerPath === '';
+  const qoderRunnerPath = qoderExplicitEmpty
+    ? null
+    : resolve(String(options.qoderRunnerPath ?? process.env.DSP_QODER_RUNNER ?? join(CORE_DIR, '..', '..', 'collab-kit', 'qoder-run.mjs')));
+  /* 与 OpenCode 同一条纪律：显式配置 ⇒ 总是探测；只有默认推断 ⇒ 仅在"真实运行"时探测
+   * （替身在场时真 spawn 会让确定性测试变慢/变脆）。 */
+  const qoderProbeEnabled = !qoderExplicitEmpty
+    && (options.qoderRunnerPath != null || !!process.env.DSP_QODER_RUNNER || (!channelsProbeImpl && !channelsImpl));
+  /* ZB-44：OpenCode 执行器路径 —— **探测与派发同用一个 Node 脚本**（`--list-models` / `--version` 只读子命令 + 执行）。
+   * 取值优先级（与 index.js 的约定一致）：
+   *   显式空串 ''（= 明确「配了但没有」⇒ OpenCode 通道为空） > options.opencodeRunnerPath
+   *   > env DSP_OPENCODE_RUNNER > 默认推断 <core 目录>/../../collab-kit/opencode-run.mjs。
+   * 不写死模型枚举：模型清单一律来自 `--list-models` 探测（避免重演 ZB-31「档位表变了但代码写死」的坑）。 */
+  const opencodeExplicitEmpty = options.opencodeRunnerPath === '';
+  const opencodeRunnerPath = opencodeExplicitEmpty
+    ? null
+    : resolve(String(options.opencodeRunnerPath ?? process.env.DSP_OPENCODE_RUNNER ?? join(CORE_DIR, '..', '..', 'collab-kit', 'opencode-run.mjs')));
+  const opencodeMaxModels = Math.max(0, Number(options.opencodeMaxModels) || 0); // 0 = 不限
+  /* 是否真去探测 OpenCode（async spawn）。为什么要有这道闸：
+   *   ① 显式配置了执行器（option 或 env）⇒ 总是探测（含测试注入场景 —— 那时是调用方自己指定的路径）；
+   *   ② 只有**默认推断**出来的路径 ⇒ 仅在「真实运行」时探测：没有注入 channelsProbeImpl / channelsImpl
+   *      （那两个是测试与宿主替身钩子）。替身在场时真 spawn 子进程会让既有确定性测试变脆/变慢，
+   *      更可能真去启动用户机器上的 OpenCode（违反硬约束「不碰用户自己的 OpenCode 配置与数据」）；
+   *   ③ 显式空串 ⇒ 不探测（通道为空 + 一条可读 warning）。 */
+  const opencodeProbeEnabled = !opencodeExplicitEmpty
+    && (options.opencodeRunnerPath != null || !!process.env.DSP_OPENCODE_RUNNER || (!channelsProbeImpl && !channelsImpl));
+
   const nowMs = () => {
     const v = options.now ? options.now() : Date.now();
     return v instanceof Date ? v.getTime() : Number(v);
@@ -480,6 +705,13 @@ export function createDispatcher(options = {}) {
   // Z6：默认通道与自动降级链（持久化于 workRoot/state，绝不写 $DSH_HOME）
   const channelFile = join(dirState, 'channel.json');
   const fallbackFile = join(dirState, 'fallback.json');
+  /* ZB-44：通道 → 引擎**快照**（listChannels 成功后落盘 <workRoot>/state/channels.json）。
+   * 为什么要落盘：`dispatch()` / `startJob()` 是**同步**函数，需要在不能 await listChannels() 的前提下
+   * 把「用户选的 provider id」映射到引擎（例如面板上的 opencode 通道 id）。读失败一律 fail-open
+   * （engineById={} ⇒ 全部按默认引擎 zcode），绝不因为它抛错。 */
+  const channelsFile = join(dirState, 'channels.json');
+  let engineById = {};
+  let engineMapFingerprint = null;
   let channel = { provider: 'plan', model: null, reasoningLevel: 'agent' }; // ZB-29d：通道默认思考强度（'agent'=Agent决定，给派发 Agent 的规定）
   /* ZB-30：自动降级**目标**（有序）。旧形状只是通道 id 列表，新形状每项还带 model/reasoningLevel
    * （面板开启降级后可选模型与思考强度，与「通道」分区同形）。null 字段 = 沿用原任务该维度。 */
@@ -538,8 +770,11 @@ export function createDispatcher(options = {}) {
     return {
       workRoot,
       maxConcurrent,
+      /* ZB-44：每引擎并发上限与当前运行数（既有字段全部保留，只**增补**）。 */
+      maxConcurrentOpenCode,
       queued: [...queue],
       running: [...jobs.values()].filter((j) => j.state === 'running').map((j) => j.id),
+      runningByEngine: { zcode: runningCountByEngine('zcode'), opencode: runningCountByEngine('opencode') },
     };
   }
 
@@ -961,6 +1196,21 @@ export function createDispatcher(options = {}) {
     return n;
   }
 
+  /* ZB-44：**每引擎**并发（OpenCode 必须与 ZCode 分开计数 —— 见上面 maxConcurrentOpenCode 的实测理由）。
+   *   引擎判据 = job.spec.engine（缺省/未知 ⇒ 默认引擎 zcode，含升级前的老 jobs.json）。
+   *   上限 = opencode ⇒ maxConcurrentOpenCode；其余 ⇒ maxConcurrent（全局）。
+   *   全局 maxConcurrent 仍然生效（pump 的 while 条件），故实际并发 = min(全局, 本引擎上限)。 */
+  const engineOfJob = (job) => normalizeEngine(job?.spec?.engine);
+  const engineLimit = (engine) => (normalizeEngine(engine) === 'opencode' ? maxConcurrentOpenCode
+    : normalizeEngine(engine) === 'qoder' ? maxConcurrentQoder
+      : maxConcurrent);
+  function runningCountByEngine(engine) {
+    const want = normalizeEngine(engine);
+    let n = 0;
+    for (const j of jobs.values()) if (j.state === 'running' && engineOfJob(j) === want) n += 1;
+    return n;
+  }
+
   /* ZB-17：**文件锁任务优先放行**（用户要求）。
    *
    * 旧实现是严格 FIFO + 队头阻塞：`if (!tryAcquire(head, …)) break;`
@@ -979,6 +1229,11 @@ export function createDispatcher(options = {}) {
    * ⚠️ 已知取舍（如实登记）：若文件锁任务持续不断地到来，队里的整仓库锁任务
    * 可能被长期推后（饥饿）。本轮按用户明确要求只做优先级、未加 aging；
    * 若实际出现饥饿，再加"等待超时后提升优先级"即可。
+   *
+   * ZB-44（**队头阻塞，硬约束**）：每引擎名额（opencode 独立上限）也在这一轮扫描里判定 ——
+   * 名额满的任务**跳过**（`continue`）继续找下一个可启动的，**绝不 break**。
+   * 否则一个满员的 OpenCode 任务会把队列后面本可运行的 ZCode 任务一起堵死
+   * （本轮最关键的新断言，见 test/engine-routing.test.mjs ④）。
    */
   function pump() {
     while (queue.length > 0 && runningCount() < maxConcurrent) {
@@ -994,9 +1249,12 @@ export function createDispatcher(options = {}) {
       for (const id of ordered) {
         const j = jobs.get(id);
         if (!j) { picked = { id, dead: true }; break; }
+        /* ZB-44：本引擎名额已满 ⇒ 跳过它（不 break），继续尝试后面的任务。 */
+        const eng = engineOfJob(j);
+        if (runningCountByEngine(eng) >= engineLimit(eng)) continue;
         if (tryAcquire(j, locksFor(j.spec))) { picked = { id, job: j }; break; }
       }
-      if (!picked) break; // 没有任何任务能拿到锁 ⇒ 等释放
+      if (!picked) break; // 没有任何任务能拿到锁/拿到名额 ⇒ 等释放
       queue = queue.filter((x) => x !== picked.id);
       if (picked.dead) continue; // 顺手清掉失效 id，继续尝试下一个
       startJob(picked.job);
@@ -1069,9 +1327,79 @@ export function createDispatcher(options = {}) {
     return args;
   }
 
+  /**
+   * ZB-44：OpenCode 执行器的参数（与 `buildRunnerArgs` 同形，但**只拼 OpenCode 认识的东西**）。
+   *
+   * OpenCode **没有** `--mode` / `--provider` / `--memory-bench`（其校验在 validateSpec 就拦掉了，
+   * 见「engine=opencode 不支持 mode」与「memoryBench 仅 ZCode」），所以这里绝不拼它们。
+   * `--auto`：OpenCode 的工具调用**可能**需要权限审批；默认**不放行**是安全默认（它会放行所有
+   * 未显式拒绝的权限）。需要时由调用方用显式的 `auto: true` 开启 —— 只有 true 才加，绝不默认加。
+   *
+   * kind 处理与 buildRunnerArgs 一致：task ⇒ `--task <abs>` + `--memory-ban`（禁令由执行器注入）；
+   * prompt/target ⇒ 插件直接拼禁令进内容（同一个 withMemoryBan：禁令文本里的「不写 ~/.zcode 记忆库」
+   * 对 OpenCode 同样成立 —— 派发子任务都不该写主会话/引擎的记忆库）。
+   * 思考强度：`--variant <档>` **仅当档位是具体值**；`'agent'`（Agent决定）= 不覆盖，交给执行器按模型默认档。
+   */
+  function buildOpenCodeArgs(spec, opts = {}) {
+    const args = [];
+    if (spec.kind === 'task') {
+      args.push('--task', resolve(String(spec.task))); // 绝对路径，防执行器相对自身根解析
+      if (!opts.noMemoryBan) args.push('--memory-ban');
+    } else {
+      const injected = opts.noMemoryBan ? null : withMemoryBan(spec);
+      const body = injected ?? (spec.kind === 'target' ? String(spec.target ?? '') : String(spec.prompt ?? ''));
+      args.push(spec.kind === 'target' ? '--target' : '--prompt', body);
+    }
+    if (spec.resume) args.push('--resume', spec.resume); // OpenCode 侧 `-s <sessionID>` 的等价长参数
+    /* ZB-45：**显式**放行（默认关 —— 硬约束「不默认开 --auto」）。
+     * 只有 `spec.auto === true` 才加；其它任何取值（缺省/false/undefined）一律不加。
+     * 执行器侧会打 `[opencode-run] auto=on（…）` 告知行，job.autoApproved 亦已落库（可审计）。 */
+    if (spec.auto === true) args.push('--auto');
+    if (spec.model) args.push('--model', spec.model);
+    if (spec.reasoningLevel && spec.reasoningLevel !== 'agent') args.push('--variant', spec.reasoningLevel);
+    if (spec.tag) args.push('--tag', spec.tag);
+    if (spec.timeoutMin != null) args.push('--timeout-min', String(spec.timeoutMin));
+    if (spec.cwd) args.push('--cwd', spec.cwd);
+    return args;
+  }
+
+  /**
+   * ZB-51（T4 前置）：Qoder 执行器的参数（与 `buildOpenCodeArgs` 同形，只拼 Qoder 认识的东西）。
+   *
+   * 参数依据是**真机抓包**（Qoder CLI CN v1.1.73，见 tasks/ZB-50-qoder-integration-spec.md §8）：
+   *   · Qoder **没有** `--mode` / `--provider` / `--memory-bench` / `--variant`（校验在 validateSpec 拦掉）
+   *   · 思考强度是 `--reasoning-effort <档>`（OpenCode 叫 `--variant`，ZCode 叫 `--reasoning-level`）
+   *   · `auto:true` ⇒ 执行器侧映射为 `--permission-mode bypass_permissions`（**默认不放行**，
+   *     由执行器补 `--permission-mode accept_edits` —— 权限模式的默认值与回落报警都在执行器里，
+   *     core 只负责把"是否显式放行"这个事实传下去，与 OpenCode 的 `--auto` 同构）。
+   * 记忆禁令的处理与另两个引擎一致（task ⇒ 执行器 `--memory-ban`；prompt/target ⇒ 直接拼进内容）。
+   */
+  function buildQoderArgs(spec, opts = {}) {
+    const args = [];
+    if (spec.kind === 'task') {
+      args.push('--task', resolve(String(spec.task)));
+      if (!opts.noMemoryBan) args.push('--memory-ban');
+    } else {
+      const injected = opts.noMemoryBan ? null : withMemoryBan(spec);
+      const body = injected ?? (spec.kind === 'target' ? String(spec.target ?? '') : String(spec.prompt ?? ''));
+      args.push(spec.kind === 'target' ? '--target' : '--prompt', body);
+    }
+    if (spec.resume) args.push('--resume', spec.resume);
+    if (spec.auto === true) args.push('--auto');
+    if (spec.model) args.push('--model', spec.model);
+    if (spec.reasoningLevel && spec.reasoningLevel !== 'agent') args.push('--reasoning-effort', spec.reasoningLevel);
+    if (spec.tag) args.push('--tag', spec.tag);
+    if (spec.timeoutMin != null) args.push('--timeout-min', String(spec.timeoutMin));
+    if (spec.cwd) args.push('--cwd', spec.cwd);
+    return args;
+  }
+
   function startJob(job) {
     job.state = 'running';
     job.startedAt = new Date(nowMs()).toISOString();
+    /* ZB-44：引擎决定「spawn 哪个脚本 + 拼哪些参数」。缺省/未知（含升级前的老 jobs.json）= zcode。 */
+    const engine = normalizeEngine(job.spec?.engine);
+    job.engine = engine;
     const captureOut = join(dirLogs, `${job.id}.out.log`);
     const captureErr = join(dirLogs, `${job.id}.err.log`);
     job.captureOut = captureOut;
@@ -1079,9 +1407,35 @@ export function createDispatcher(options = {}) {
     writeFileSync(captureOut, '');
     writeFileSync(captureErr, '');
 
+    /* 执行器缺失/未配置 ⇒ **可读失败**：不 spawn、不崩（增量引擎的缺失绝不该影响 ZCode 派发与 DSH 本体）。
+     * spawn 一个不存在的脚本只会得到一句 "Cannot find module"，对排障毫无帮助，故这里前置判定。
+     *
+     * ZB-51（T2）：把原来的**二元判断**改成按引擎查表 —— 原先写的是
+     *   `engine === 'opencode' ? opencodeRunnerPath : runnerPath`
+     * 这是个真陷阱：一旦把第三个引擎（qoder）列进 ENGINES，它会**静默回落到 ZCode 执行器**，
+     * 于是"派给 Qoder"实际跑了 ZCode，且没有任何报错。现在每个引擎有自己的执行器与"缺失"文案。 */
+    const engineRunner = engine === 'opencode' ? opencodeRunnerPath
+      : engine === 'qoder' ? qoderRunnerPath
+        : runnerPath;
+    if (!(engineRunner && existsSync(engineRunner))) {
+      const label = engine === 'opencode' ? 'OpenCode' : engine === 'qoder' ? 'Qoder' : 'ZCode';
+      const hint = engine === 'opencode'
+        ? '请设置 opencodeRunnerPath 或 env DSP_OPENCODE_RUNNER 后重试'
+        : engine === 'qoder'
+          ? 'Qoder 执行器尚未接入（见 tasks/ZB-50-qoder-integration-spec.md）；在它落地前请改用 zcode/opencode 引擎'
+          : '请设置 runnerPath 或 env DSP_FAKE_RUNNER 后重试';
+      job.parseWarnings.push(`${engine}-executor-missing: ${label} 执行器${engineRunner ? `不存在：${engineRunner}` : '未配置'}；${hint}`);
+      finalizeJob(job, { state: 'failed', exitCode: null });
+      return;
+    }
+
     let child;
     try {
-      child = spawnImpl(process.execPath, [runnerPath, ...buildRunnerArgs(job.spec)], {
+      const enginePath = engineRunner;
+      const engineArgs = engine === 'opencode' ? buildOpenCodeArgs(job.spec)
+        : engine === 'qoder' ? buildQoderArgs(job.spec)
+          : buildRunnerArgs(job.spec);
+      child = spawnImpl(process.execPath, [enginePath, ...engineArgs], {
         cwd: runnerCwd,
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -1178,14 +1532,18 @@ export function createDispatcher(options = {}) {
 
   function handleLine(job, line) {
     if (!line) return;
+    /* ZB-44：行解析按**该 job 的引擎**取前缀（缺省/未知 = zcode）。
+     * 老 jobs.json 没有 engine 字段 ⇒ 在这里按 spec.engine 补齐并落库（面板可见）。 */
+    const engine = normalizeEngine(job.engine ?? job.spec?.engine);
+    if (job.engine !== engine) job.engine = engine;
     const tl = tails.get(job.id) ?? [];
     tl.push(line);
     if (tl.length > TAIL_CAP) tl.splice(0, tl.length - TAIL_CAP);
     tails.set(job.id, tl);
 
-    const parsed = parseRunnerLine(line);
+    const parsed = parseRunnerLine(line, engine);
     if (parsed === null) {
-      job.parseWarnings.push(`unparsed [zcode-run] line: ${line.slice(0, 120)}`);
+      job.parseWarnings.push(`unparsed ${prefixFor(engine)} line: ${line.slice(0, 120)}`);
       return;
     }
     if (!parsed || Object.keys(parsed).length === 0) return;
@@ -1209,6 +1567,8 @@ export function createDispatcher(options = {}) {
      *   （task 类型的禁令在 runner 侧拼装，见 collab-kit/zcode-run.mjs ZB-28 注释）。 */
     if (parsed.timedOut) { job.timedOut = true; if (job.timedOutBy == null) job.timedOutBy = 'runner'; }
     if (parsed.memoryBanSeen) job.memoryBanRunner = true;
+    /* ZB-45：执行器确认已放行权限（`auto=on` 告知行）⇒ 置 job.autoApproved（下发时通常已置位）。 */
+    if (parsed.autoSeen) job.autoApproved = true;
     /* ZB-29：runner 确认思考强度已注入（defaultModelSelection 写入临时 provider 配置）。 */
     if (parsed.reasoningLevelApplied != null) {
       job.reasoningLevelApplied = parsed.reasoningLevelApplied;
@@ -1221,6 +1581,11 @@ export function createDispatcher(options = {}) {
     if (parsed.contextUsed != null) job.contextUsed = parsed.contextUsed;
     if (parsed.contextWindow != null) job.contextWindow = parsed.contextWindow;
     if (parsed.turnCount != null) job.turnCount = parsed.turnCount;
+    /* ZB-51：Qoder 的 credits / 上下文占比 / 引擎侧耗时 —— 落到 job 上（面板与工具可见）。
+     * 只在这些行**确实出现**时才写（zcode/opencode 不上报它们，保持字段为 undefined 而不是 0）。 */
+    if (parsed.credits != null) job.credits = parsed.credits;
+    if (parsed.contextRatio != null) job.contextRatio = parsed.contextRatio;
+    if (parsed.durationMs != null) job.durationMs = parsed.durationMs;
     if (parsed.responseChars != null) job.responseChars = parsed.responseChars;
     if (parsed.runnerOut) job.outLog = parsed.runnerOut;
     if (parsed.runnerErr) job.errLog = parsed.runnerErr;
@@ -1231,7 +1596,9 @@ export function createDispatcher(options = {}) {
   }
 
   /** job 结束：台账回读合并 → 终态字段 → 持久化/广播 → 放锁 → 泵队列。paused 时不占锁、
-   *  队列照常继续（paused 不在 running 计数里）；若是可降级原因且链已启用，异步接续下一跳。 */
+   *  队列照常继续（paused 不在 running 计数里）；若是可降级原因且链已启用，异步接续下一跳。
+   *  ZB-44：**OpenCode 没有台账**（dispatch-runs.jsonl 是 ZCode 侧产物）⇒ 对它跳过台账回读，
+   *  不让「台账未命中」类噪音落到它的 parseWarnings 上（它的 `done` 行由执行器保证打印）。 */
   function finalizeJob(job, { state, exitCode = null, signal = null, pause = null }) {
     job.state = state;
     if (exitCode != null) job.exitCode = exitCode;
@@ -1245,9 +1612,9 @@ export function createDispatcher(options = {}) {
     job.elapsedSec = Number(((Date.parse(job.finishedAt) - Date.parse(job.startedAt ?? job.finishedAt)) / 1000).toFixed(3));
     job.tailLines = tails.get(job.id) ?? [];
 
-    mergeFromLedger(job);
+    if (normalizeEngine(job.spec?.engine) !== 'opencode') mergeFromLedger(job);
     if (!job.summarySeen && !job.ledgerMatched) {
-      job.parseWarnings.push('no [zcode-run] summary parsed and no ledger record matched');
+      job.parseWarnings.push(`no ${prefixFor(job.spec?.engine)} summary parsed and no ledger record matched`);
     }
 
     clearTimeout(watchdogs.get(job.id));
@@ -1361,6 +1728,43 @@ export function createDispatcher(options = {}) {
         };
       }
     } catch { /* 无文件/损坏：用默认通道 */ }
+  }
+
+  /* ---------- ZB-44：通道 → 引擎快照（同步可读，供 dispatch/startJob 用） ---------- */
+
+  /** 读快照。文件缺失/损坏/字段非法一律 fail-open：engineById={} ⇒ 所有通道按默认引擎 zcode 处理。 */
+  function loadEngineMap() {
+    try {
+      const data = JSON.parse(readFileSync(channelsFile, 'utf8'));
+      const raw = data?.engineById;
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        const map = {};
+        for (const [id, e] of Object.entries(raw)) {
+          const s = typeof e === 'string' ? e.trim().toLowerCase() : '';
+          if (id && ENGINES.includes(s)) map[id] = s; // 非法引擎名直接丢弃（不猜）
+        }
+        engineById = map;
+        engineMapFingerprint = JSON.stringify({ engineById, engines: [...ENGINES] });
+        return;
+      }
+    } catch { /* 见上：fail-open */ }
+    engineById = {};
+    engineMapFingerprint = null;
+  }
+
+  /** 用最新通道清单刷新快照并落盘；**内容无变化则不重写**（listChannels 会被频繁调用）。
+   *  engine 缺省按默认引擎（= 与 parser 的缺失语义一致）。写盘异常由调用方兜（不影响清单返回）。 */
+  function setEngineMap(channels) {
+    const map = {};
+    for (const c of channels ?? []) {
+      if (!c || typeof c.id !== 'string' || !c.id) continue;
+      map[c.id] = normalizeEngine(c.engine);
+    }
+    engineById = map;
+    const fingerprint = JSON.stringify({ engineById, engines: [...ENGINES] });
+    if (fingerprint === engineMapFingerprint) return;
+    atomicWrite(channelsFile, `${JSON.stringify({ version: 1, engineById, engines: [...ENGINES], updatedAt: nowMs() }, null, 2)}\n`);
+    engineMapFingerprint = fingerprint;
   }
 
   /* ZB-30：降级**目标**归一 —— 每项 {provider, model, reasoningLevel}（model/reasoningLevel 可为 null
@@ -1498,10 +1902,213 @@ export function createDispatcher(options = {}) {
     }
   }
 
-  /** 通道清单：runner --list-providers 真实输出为骨架，叠加权益缓存/展示名/personal 通道。
-   *  解析失败 → {channels:[], warnings}，绝不猜测。首条是 runner 文档化的 plan 别名。 */
+  /* ---------- ZB-44：OpenCode 只读探测（`--list-models` / `--version`，与派发**同用一个脚本**） ---------- */
+
+  /** 跑一次只读子命令，返回 {ok, stdout, code, error}。**永不抛**（spawn 失败/超时都降级成 error 文案）。 */
+  function runOpenCodeProbe(args) {
+    return new Promise((done) => {
+      let child;
+      try {
+        child = spawnImpl(process.execPath, [opencodeRunnerPath, ...args], { cwd: runnerCwd, env: { ...process.env } });
+      } catch (e) {
+        done({ ok: false, stdout: '', code: null, error: `spawn 失败：${e.message}` });
+        return;
+      }
+      let out = '';
+      let err = '';
+      let settled = false;
+      const finish = (payload) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        done(payload);
+      };
+      const timer = setTimeout(() => {
+        try { child.kill(); } catch { /* 已退出 */ }
+        finish({ ok: false, stdout: out, code: null, error: '探测超时（15s）' });
+      }, 15000);
+      child.stdout?.setEncoding('utf8');
+      child.stdout?.on('data', (d) => { out += d; });
+      child.stderr?.setEncoding('utf8');
+      child.stderr?.on('data', (d) => { err += d; });
+      child.on('error', (e) => finish({ ok: false, stdout: out, code: null, error: e.message }));
+      child.on('close', (code) => finish({
+        ok: code === 0,
+        stdout: out,
+        code,
+        error: code === 0 ? null : (String(err).trim().split('\n')[0] || `exit ${code}`),
+      }));
+    });
+  }
+
+  /**
+   * ZB-51（T2）：三引擎**自动发现**（带缓存 + 后台刷新 + 在途去重）。
+   *
+   * 为什么要有缓存：发现层的 `--version` / `--list-models` 会 **spawn 子进程**（冷启可能数秒），
+   * 而 `listChannels()` 会被面板反复调用。若每次都同步探测，就会重演 ZB-47 那个事故
+   * （快照路径等慢探测 ⇒ 面板卡「连接中」）。故：
+   *   · 有缓存（含过期缓存）⇒ **立刻返回缓存**，过期时**后台**刷新，绝不阻塞调用方；
+   *   · 无缓存 ⇒ 只等这一次（首次调用必须给出结论），并做在途去重（并发调用共用同一次探测）。
+   * 发现失败**绝不抛**（返回 {} + warning）—— 第三个引擎不能拖垮整份清单。
+   */
+  let engineDiscoveryCache = null;      // { at, value }
+  let engineDiscoveryInFlight = null;
+  const ENGINE_DISCOVERY_TTL_MS = 5 * 60 * 1000;
+
+  function refreshEngineDiscovery() {
+    if (engineDiscoveryInFlight) return engineDiscoveryInFlight;
+    engineDiscoveryInFlight = (async () => {
+      try {
+        const r = await (discoverImpl ? discoverImpl() : discoverAll({ timeoutMs: 15000 }));
+        engineDiscoveryCache = { at: nowMs(), value: r };
+        return r;
+      } catch (e) {
+        /* 保留旧缓存（有旧值总比没有好），只在下一次刷新再试 */
+        return engineDiscoveryCache?.value ?? {};
+      } finally {
+        engineDiscoveryInFlight = null;
+      }
+    })();
+    return engineDiscoveryInFlight;
+  }
+
+  async function engineDiscovery() {
+    /* 替身在场（也含被显式关闭的情形）⇒ 不做真探测，返回空结论。
+     * 上层把空结论当"未探测"处理（engineDetail 里每个引擎 found:false + reason:'未探测'），不报错。 */
+    if (!discoveryEnabled) return engineDiscoveryCache?.value ?? {};
+    if (engineDiscoveryCache) {
+      if (nowMs() - engineDiscoveryCache.at >= ENGINE_DISCOVERY_TTL_MS) void refreshEngineDiscovery();
+      return engineDiscoveryCache.value;
+    }
+    return refreshEngineDiscovery();
+  }
+
+  /**
+   * 把发现结果整理成**给面板/工具看的形状**（`engineDetail`）。
+   * 每个引擎回答四件事：找到哪个文件 / 版本 / 是否已登录 / 什么形态 —— 便于"为什么这个引擎不见了"自查。
+   */
+  function summarizeEngineDiscovery(disc) {
+    const out = {};
+    for (const e of ENGINES) {
+      const d = disc?.[e];
+      if (!d) { out[e] = { found: false, form: null, entry: null, version: null, loggedIn: null, reason: '未探测', summary: `${e}: 未探测` }; continue; }
+      out[e] = {
+        found: !!d.found,
+        form: d.form ?? null,
+        entry: d.entry ?? null,
+        entryKind: d.entryKind ?? null,
+        version: d.version ?? null,
+        loggedIn: d.loggedIn ?? null,
+        variant: d.variant ?? null,
+        reason: d.reason ?? '',
+        loginEvidence: d.loginEvidence ?? null,
+        summary: describeDiscovery(d),
+      };
+    }
+    return out;
+  }
+
+  /**
+   * ZB-51（T4）：探测 **Qoder 通道来源**。与 OpenCode 那条同构、同样**绝不抛**：
+   * 探测失败只让 Qoder 通道为空 + 一条可读 warning（ZCode/OpenCode 照常）。
+   * 模型清单来自 `qoder-run --list-models` 的真实输出（**不写死枚举**）。返回 {models, version, warning}。
+   */
+  async function detectQoderChannels() {
+    if (!qoderRunnerPath) return { models: [], version: null, warning: null };
+    if (!existsSync(qoderRunnerPath)) {
+      return { models: [], version: null, warning: `Qoder 执行器不存在：${qoderRunnerPath} —— Qoder 通道为空（不影响其它引擎）` };
+    }
+    const list = await runQoderProbe(['--list-models']);
+    if (!list.ok) {
+      const detail = list.error ?? `exit ${list.code}`;
+      /* 未登录是最常见原因：把"怎么登"直接写进 warning（教学优先）。 */
+      const hint = /not logged in/i.test(String(list.stdout ?? '') + String(list.stderr ?? ''))
+        ? '（Qoder CLI 未登录：运行 `qoderclicn login`，或设 QODER_PERSONAL_ACCESS_TOKEN）'
+        : '';
+      return { models: [], version: null, warning: `Qoder 模型探测失败（${detail}）${hint} —— Qoder 通道为空（不影响其它引擎）` };
+    }
+    /* 每行一个**裸模型名**（真机可能含空格与点：`Qwen3.8-Max` / `GLM-5.3`）；不合法形态的行忽略（不猜）。 */
+    const all = [...new Set(String(list.stdout).split('\n').map((s) => s.trim())
+      .filter((s) => isQoderModelName(s)))];
+    let version = null;
+    const v = await runQoderProbe(['--version']);
+    if (v.ok) {
+      const m = String(v.stdout).match(/\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/);
+      version = m ? m[1] : (String(v.stdout).trim().split('\n')[0].trim() || null);
+    }
+    return {
+      models: all,
+      version,
+      warning: all.length === 0 ? 'Qoder 模型探测未返回任何合法模型名 —— Qoder 通道为空（不影响其它引擎）' : null,
+    };
+  }
+
+  /** Qoder 只读探测（spawn 一次，带超时；永不抛）。 */
+  async function runQoderProbe(args) {
+    return new Promise((done) => {
+      let child;
+      try {
+        child = spawnImpl(process.execPath, [qoderRunnerPath, ...args], { cwd: runnerCwd, env: { ...process.env } });
+      } catch (e) {
+        done({ ok: false, error: e?.message ?? String(e) });
+        return;
+      }
+      let stdout = ''; let stderr = '';
+      const timer = setTimeout(() => { try { child.kill(); } catch { /* 尽力 */ } done({ ok: false, error: 'timeout' }); }, 30000);
+      child.stdout?.setEncoding?.('utf8');
+      child.stderr?.setEncoding?.('utf8');
+      child.stdout?.on('data', (c) => { stdout += c; });
+      child.stderr?.on('data', (c) => { stderr += c; });
+      child.on('error', (e) => { clearTimeout(timer); done({ ok: false, error: e?.message ?? String(e) }); });
+      child.on('close', (code) => { clearTimeout(timer); done({ ok: code === 0, code, stdout, stderr }); });
+    });
+  }
+
+  /**
+   * 探测 OpenCode 通道来源。**绝不抛**，且**探测失败只让自己为空 + 一条可读 warning** ——
+   * 绝不能因为 OpenCode 不可用就让整份通道清单失败（OpenCode 是增量能力）。
+   * 模型清单来自 `--list-models` 的真实输出，**不写死枚举**（避免重演 ZB-31「表变了但代码写死」）。
+   * 返回 {models, version, warning}。
+   */
+  async function detectOpenCodeChannels() {
+    if (!opencodeProbeEnabled) return { models: [], version: null, warning: null };
+    if (!opencodeRunnerPath) {
+      return { models: [], version: null, warning: 'OpenCode 执行器未配置（opencodeRunnerPath 为空）—— OpenCode 通道为空（ZCode 通道不受影响）' };
+    }
+    if (!existsSync(opencodeRunnerPath)) {
+      return { models: [], version: null, warning: `OpenCode 执行器不存在：${opencodeRunnerPath} —— OpenCode 通道为空（ZCode 通道不受影响）` };
+    }
+    const list = await runOpenCodeProbe(['--list-models']);
+    if (!list.ok) {
+      return { models: [], version: null, warning: `OpenCode 模型探测失败（${list.error ?? `exit ${list.code}`}）—— OpenCode 通道为空（ZCode 通道不受影响）` };
+    }
+    /* 每行一个模型 id（形如 `opencode/deepseek-v4.1-flash-free`）；不合形态的行忽略（不猜）。 */
+    const all = [...new Set(String(list.stdout).split('\n').map((s) => s.trim()).filter((s) => isOpenCodeId(s)))];
+    const models = opencodeMaxModels > 0 ? all.slice(0, opencodeMaxModels) : all;
+    let version = null;
+    const v = await runOpenCodeProbe(['--version']);
+    if (v.ok) version = String(v.stdout).trim().split('\n')[0].trim() || null;
+    return {
+      models,
+      version,
+      warning: all.length === 0
+        ? 'OpenCode 模型探测未返回任何合法模型 id（形态 opencode/<model>）—— OpenCode 通道为空（ZCode 通道不受影响）'
+        : null,
+    };
+  }
+
+  /** 通道清单：runner --list-providers 真实输出为骨架，叠加权益缓存/展示名/personal 通道，
+   *  再接上**探测式**的 OpenCode 免费模型通道。解析失败 → {channels:[], warnings}，绝不猜测。
+   *  首条是 runner 文档化的 plan 别名；数组顺序恒为「先 zcode 全部，再 opencode 全部」。
+   *  ZB-44：每个通道都带 `engine`（zcode 显式标出，绝不留 undefined）；顶层带 `engines`（供客户端分组）。 */
   async function listChannels() {
-    if (channelsImpl) return channelsImpl();
+    if (channelsImpl) {
+      /* 注入式清单（测试/宿主替身）：原样返回，只补一个 engines（形状契约，不覆盖注入方自己的值）。 */
+      const injected = await channelsImpl();
+      return injected && typeof injected === 'object' && !Array.isArray(injected)
+        ? { engines: [...ENGINES], ...injected }
+        : injected;
+    }
     const warnings = [];
     let text = null;
     if (channelsProbeImpl) {
@@ -1538,7 +2145,9 @@ export function createDispatcher(options = {}) {
     const parsed = parseProviderTable(text);
     warnings.push(...parsed.warnings);
     if (parsed.rows.length === 0) {
-      return { channels: [], warnings: [...warnings, '无法解析通道清单，不猜测（检查 runner 与 ~/.zcode/v2/config.json）'] };
+      /* 既有语义（有测试锁定）：zcode 骨架解析不出任何 provider 行 ⇒ 空清单 + 可读原因，不猜。
+       * 此时**不**再去探测 OpenCode：清单的骨架来自 ZCode runner，骨架都没有就无从谈"当前可用通道"。 */
+      return { channels: [], engines: [...ENGINES], opencodeVersion: null, warnings: [...warnings, '无法解析通道清单，不猜测（检查 runner 与 ~/.zcode/v2/config.json）'] };
     }
     const names = readConfigNames();
     const cache = readPlanCache(warnings);
@@ -1584,15 +2193,124 @@ export function createDispatcher(options = {}) {
      * runner 现已把个人通道模型也纳入 `reasoning-levels` 输出（ZB-31 runner 侧修），
      * 这里只需把它接上（原先 personal 通道根本没有 thinkingLevels 字段 ⇒ 面板退回通用提示）。 */
     const personal = readPersonalChannel(warnings);
+    /* ZB-44：zcode 侧通道全部显式标 engine:'zcode'（不再留 undefined，客户端可直接按 engine 分组）。 */
+    const zcodeChannels = [
+      { engine: 'zcode', ...planAlias },
+      {
+        engine: 'zcode',
+        ...personal,
+        ...(Object.keys(modelLevels).length ? { thinkingLevels: levelsOf(personal.models) } : {}),
+      },
+      ...channels.map((c) => ({ engine: 'zcode', ...c })),
+    ];
+
+    /* ── ZB-51：ZCode 通道**白名单**（用户决定，2026-10-17）──
+     * 只保留两条：
+     *   · `plan`                     默认套餐（runner 自动选择 provider）
+     *   · `account:bigmodel-start-plan`  免费额度（Start Plan）
+     * 其余全部剔除（`personal` / `builtin:*` / 各 UUID 路由）。
+     *
+     * 为什么用**白名单**而不是黑名单：ZCode 的通道来自 runner 的 `--list-providers` 解析，
+     * 清单随账号/版本变化（本次实测 10 条，含多条 `oauth_provider_inactive` 的死路由）。
+     * 白名单能保证"面板上永远只有用户要的那两条"，新出现的路由不会自己冒出来。
+     *
+     * ⚠️ 只过滤**派发台清单**，绝不改用户 ZCode 自己的配置文件（`~/.zcode/v2/config.json`）——
+     * 那是 ZCode 客户端的配置，删了会影响 ZCode 本体。
+     * ⚠️ 剔除是**彻底**的：面板、agent 工具 `action=channels`、降级链候选都看不到它们；
+     * 若某条仍在别处被显式指定（如历史存值/工具直接传 id），`dispatch()` 仍照常工作 ——
+     * 白名单只约束"清单里列什么"，不拦截显式调用（与既有过滤开关同一语义）。 */
+    const ZCODE_CHANNEL_ALLOWLIST = ['plan', 'account:bigmodel-start-plan'];
+    const zcodeChannelsFiltered = zcodeChannels.filter((c) => ZCODE_CHANNEL_ALLOWLIST.includes(String(c.id)));
+    const zcodeDropped = zcodeChannels.filter((c) => !ZCODE_CHANNEL_ALLOWLIST.includes(String(c.id)));
+    if (zcodeDropped.length) {
+      /* 在 warnings 里留痕（不静默）：让"为什么少了通道"永远可查。
+       * ⚠️ 前缀 `[info]` 是**约定**：客户端据此把它渲染成**中性提示**，而不是红色"加载失败"
+       * （真机反馈：这条信息被渲染成 `通道清单加载失败: …` ⇒ 用户以为插件坏了）。
+       * 凡是"按配置剔除/过滤"这类**预期**留痕，都带这个前缀。 */
+      warnings.push(`[info] ZCode 通道按白名单只保留 ${ZCODE_CHANNEL_ALLOWLIST.join(' / ')}；已剔除 ${zcodeDropped.length} 条：${zcodeDropped.map((c) => c.id).join(', ')}`);
+    }
+
+    /* ZB-44：OpenCode 通道 = **探测结果**（每次跑 --list-models，不写死枚举）。每个模型一个通道，
+     * 通道 id 就用 `opencode/<model>` 原样 —— 面板/工具选它即选中该免费模型（通道即执行目标）。 */
+    const oc = await detectOpenCodeChannels();
+    if (oc.warning) warnings.push(oc.warning);
+    const opencodeChannels = oc.models.map((id) => ({
+      id,
+      name: id.startsWith('opencode/') ? id.slice('opencode/'.length) : id, // 短名（去掉 provider 前缀）
+      engine: 'opencode',
+      enabled: true,
+      reason: null,
+      endpoint: null,
+      models: [id],
+    }));
+
+    /* ZB-51（T4）：Qoder 通道 = **探测结果**（`qoder-run --list-models`，不写死枚举）。
+     * 通道 id 形如 `qoder/<模型名>`（真机模型名含空格与点，如 `qoder/Qwen3.8-Max`）。 */
+    const qd = qoderProbeEnabled ? await detectQoderChannels() : { models: [], version: null, warning: null };
+    if (qd.warning) warnings.push(qd.warning);
+    const qoderChannels = qd.models.map((name) => ({
+      id: `qoder/${name}`,
+      name,
+      engine: 'qoder',
+      enabled: true,
+      reason: null,
+      endpoint: null,
+      models: [`qoder/${name}`],
+    }));
+
+    /* ZB-51：**免费额度（Start Plan）实际可用的模型**必须在这里收窄 —— 这里是**单一权威**
+     * （面板与 agent 工具 `action=channels` 都读这份清单）。
+     *
+     * 为什么必须在 core 收窄，而不是只做在面板上：否则 `action=channels` 会告诉 agent
+     * "免费额度有 GLM-5.3 与 GLM-5.3-Flash"，agent 据此派发就可能选到**该额度并不提供**的模型
+     * （`plan` 与免费额度**提供同样的模型名**，但两者是**两套独立实现**：provider 不同、
+     * 端点不同、计费不同）。用户实测：Start Plan 只给 `GLM-5.3-Flash`。
+     * 权益变化时改这一行（面板侧 `ZC_FREE_MODELS` 是同一份约定的镜像）。 */
+    const ZC_FREE_MODELS = ['GLM-5.3-Flash'];
+    const zcodeChannelsFinal = zcodeChannelsFiltered.map((c) => {
+      if (!/^account:.*start-plan$/.test(String(c.id))) return c;
+      const allowed = (Array.isArray(c.models) ? c.models : []).filter((m) => ZC_FREE_MODELS.includes(m));
+      return allowed.length ? { ...c, models: allowed } : c; // 白名单写空时 fail-open（不清空）
+    });
+
+    const all = [...zcodeChannelsFinal, ...opencodeChannels, ...qoderChannels];
+    /* 通道→引擎快照落盘（dispatch/startJob 同步读它把通道 id 映射到引擎）。
+     * 写盘失败只记一条 warning，绝不影响本次清单返回；内容无变化时 setEngineMap 内部不重写。 */
+    try {
+      setEngineMap(all);
+    } catch (e) {
+      warnings.push(`通道→引擎快照写入失败（不影响本次清单）：${e?.message ?? e}`);
+    }
+    /* ZB-51（T2）：把**自动发现**的结论一并返回 —— 面板/工具据此显示"引擎形态/版本/登录态"，
+     * 并能在某个引擎不可用时给出**可操作**的原因（而不是让用户对着空通道猜）。
+     * 替身场景（discoveryEnabled=false）⇒ 保持 `engineDetail: null`，不产出满屏"未探测"的假条目。 */
+    let engineDetail = null;
+    try {
+      if (discoveryEnabled) {
+        const disc = await engineDiscovery();
+        engineDetail = summarizeEngineDiscovery(disc);
+        for (const e of ENGINES) {
+          const d = disc?.[e];
+          if (!d) continue;
+          if (!d.found) {
+            /* 找不到引擎 ≠ 插件坏了：把原因与修法一起说出来（reason 里已含查过多少处 + 怎么修） */
+            warnings.push(`未检测到 ${e} 引擎：${d.reason}`);
+          } else if (d.loggedIn === false) {
+            /* 有 CLI 但未登录是**最容易被误判成"执行器坏了"**的状态 —— 显式提示登录方式 */
+            warnings.push(`${e} 已找到但未登录（${d.loginEvidence ?? ''}）：${(d.warnings ?? [])[0] ?? '请先登录'}`);
+          }
+        }
+      }
+    } catch (e) {
+      /* 发现层出问题绝不影响通道清单本身（它只是诊断信息） */
+      warnings.push(`引擎自动发现失败（不影响通道清单）：${e?.message ?? e}`);
+    }
+
     return {
-      channels: [
-        planAlias,
-        {
-          ...personal,
-          ...(Object.keys(modelLevels).length ? { thinkingLevels: levelsOf(personal.models) } : {}),
-        },
-        ...channels,
-      ],
+      channels: all,
+      engines: [...ENGINES],
+      engineDetail,
+      opencodeVersion: oc.version,
       warnings,
     };
   }
@@ -1648,8 +2366,46 @@ export function createDispatcher(options = {}) {
   }
 
   /* ---------- 公开 API ---------- */
+
+  /**
+   * ZB-44：spec 的**有效引擎**（不猜：显式 → `opencode/<model>` 通道形态 → 通道→引擎快照 → 默认引擎）。
+   * 快照由 listChannels 落盘（<workRoot>/state/channels.json），故这里是**同步**可判的 ——
+   * 这正是 dispatch/startJob 这类同步入口能识别引擎的原因。
+   */
+  function resolveEngineOf(spec) {
+    const explicit = typeof spec?.engine === 'string' ? spec.engine.trim().toLowerCase() : '';
+    if (ENGINES.includes(explicit)) return explicit;                    // ① 显式合法值优先
+    if (isOpenCodeId(spec?.provider)) return 'opencode';                 // ② opencode/<model> 通道
+    /* ZB-51：`qoder/<model>` 通道形态同样是**判据**。漏掉这条会让 Qoder 通道回落成 zcode
+     * （真机验收到：`provider:'qoder/Fast'` 被推断为 engine=zcode ⇒ 派给了错的引擎）。 */
+    if (isQoderId(spec?.provider)) return 'qoder';
+    /* ③ 裸引擎名（规整后的形态）：`provider:'qoder'` / `'opencode'` 也是引擎判据。
+     * 这些值**不是**通道 id（真通道是 `qoder/<model>`），但调用方可能已经规整过或直接指定。 */
+    const bareProvider = typeof spec?.provider === 'string' ? spec.provider.trim().toLowerCase() : '';
+    if (bareProvider === 'opencode') return 'opencode';
+    if (bareProvider === 'qoder' || bareProvider === 'qoder-cn' || bareProvider === 'qoder-global') return 'qoder';
+    const mapped = engineById[String(spec?.provider ?? '')];             // ④ 通道→引擎快照
+    if (ENGINES.includes(mapped)) return mapped;
+    return inferEngine(spec);                                            // ⑤ 协议模块的默认判据（= zcode）
+  }
+
+  /** 引擎规整（dispatch / dispatchRaw 共用）：解析引擎 → 用协议模块把 `opencode/<model>` 通道
+   *  规整成 `{engine:'opencode', provider:'opencode', model:'opencode/<model>'}`（幂等）。 */
+  function effEngineSpec(spec) {
+    const out = { ...(spec ?? {}) };
+    out.engine = resolveEngineOf(out);
+    return normalizeEngineSpec(out);
+  }
+
   function validateSpec(spec) {
     if (!spec || !KINDS.has(spec.kind)) throw new TypeError(`dispatch(spec): spec.kind 必须是 ${[...KINDS].join('|')}`);
+    /* ZB-44：显式 engine 必须是合法值（列出合法值）—— 拼错的引擎名必须报错，绝不静默回落成 zcode。
+     * null/undefined/空串视为「未指定」（面板/工具的可选参数经常传空串）。 */
+    const rawEngine = spec.engine == null ? '' : String(spec.engine).trim().toLowerCase();
+    if (rawEngine && !ENGINES.includes(rawEngine)) {
+      throw new TypeError(`dispatch(spec): spec.engine 必须是 ${ENGINES.join('|')}（收到 ${JSON.stringify(spec.engine)}）`);
+    }
+    const engine = resolveEngineOf(spec);
     const body = { task: spec.task, prompt: spec.prompt, target: spec.target }[spec.kind];
     if (body == null || body === '') throw new TypeError(`dispatch(spec): kind=${spec.kind} 需要对应的 ${spec.kind} 字段`);
     if (spec.lock != null && !LOCK_MODES.has(spec.lock)) throw new TypeError("dispatch(spec): spec.lock 必须是 repo|none（ZB-16 起 memory/both 已删除；锁哪些文件用 spec.write）");
@@ -1661,11 +2417,34 @@ export function createDispatcher(options = {}) {
         if (typeof p !== 'string' || !p.trim()) throw new TypeError('dispatch(spec): spec.write 里不能有空路径或非字符串');
       }
     }
-    if (spec.memoryBench && spec.kind !== 'prompt') throw new TypeError('dispatch(spec): memoryBench 仅支持 kind=prompt（runner 限制）');
+    /* ZB-44：引擎专属约束。
+     *  · OpenCode **没有** --mode（它自己按 agent/权限模型跑）⇒ mode 非空即报错，绝不静默丢弃用户的意图；
+     *  · memoryBench 是 ZCode runner 的旗标（且仅 kind=prompt）⇒ OpenCode 一律拒绝。 */
+    if (engine === 'opencode' || engine === 'qoder') {
+      /* ZB-51：qoder 与 opencode 在这三点上同构（都**没有** mode / memoryBench；
+       * 思考强度走各自的旗标，由执行器校验）。故两者共用同一组约束，只是文案按引擎区分。 */
+      const label = engine === 'opencode' ? 'OpenCode' : 'Qoder';
+      if (spec.mode != null && String(spec.mode).trim() !== '') {
+        throw new TypeError(`dispatch(spec): engine=${engine} 不支持 mode（${label} 无 --mode；如需放开权限用 auto，不要用 mode）`);
+      }
+      if (spec.memoryBench) throw new TypeError(`dispatch(spec): memoryBench 仅支持 ZCode 引擎（${label} 无 --memory-bench）`);
+    } else if (spec.memoryBench && spec.kind !== 'prompt') {
+      throw new TypeError('dispatch(spec): memoryBench 仅支持 kind=prompt（runner 限制）');
+    }
+    /* ZB-45 / ZB-51：`auto` = **显式**放行引擎未显式拒绝的权限（默认关，硬约束「不默认开」）。
+     *  · 非布尔值一律拒 —— 否则 `auto: "true"` 会被静默当成"不放行"（静默失真，比报错更糟）；
+     *  · 只对 opencode / qoder 有意义（两者都有等价的放行旗标：`--auto` / `--permission-mode`）；
+     *    zcode 没有等价的放行旗标 ⇒ 传 true 直接可读报错，绝不静默丢参。 */
+    if (spec.auto != null && typeof spec.auto !== 'boolean') {
+      throw new TypeError('dispatch(spec): spec.auto 必须是布尔（true = 显式放行引擎未显式拒绝的权限；默认 false）');
+    }
+    if (spec.auto === true && engine !== 'opencode' && engine !== 'qoder') {
+      throw new TypeError('dispatch(spec): auto 仅对 engine=opencode / engine=qoder 有意义（它放行引擎未显式拒绝的权限）；zcode 没有等价的放行旗标，请去掉 auto');
+    }
     if (spec.timeoutMin != null && !(Number(spec.timeoutMin) > 0)) throw new TypeError('dispatch(spec): timeoutMin 必须为正数');
-    /* ZB-29：思考强度。'agent'（Agent决定，默认）在 core 层就不透传（= 不覆盖，ZCode 按模型默认档）；
-     * 具体档位随模型声明不同（GLM-5 系 disabled|enabled、deepseek-v4 系 disabled|low|high|max），
-     * core 不写死枚举 —— runner 按 builtin 声明校验，非法档位 fail-fast（不静默降级）。 */
+    /* ZB-29：思考强度。'agent'（Agent决定，默认）在 core 层就不透传（= 不覆盖，引擎按模型默认档）；
+     * 具体档位随模型声明不同（GLM-5 系 disabled|enabled、deepseek-v4 系 disabled|low|high|max，
+     * OpenCode 侧叫 variant），core 不写死枚举 —— 执行器按模型声明校验，非法档位 fail-fast（不静默降级）。 */
     if (spec.reasoningLevel != null) {
       if (typeof spec.reasoningLevel !== 'string' || !spec.reasoningLevel.trim()) {
         throw new TypeError('dispatch(spec): reasoningLevel 必须是非空字符串（或 "agent" = Agent决定）');
@@ -1674,15 +2453,19 @@ export function createDispatcher(options = {}) {
   }
 
   /** 原始派发：spec 已是完全确定的形式（retry 内部走这里，保证 --resume 时不被注入 --model）。
+   *  ZB-44：入口先做**引擎规整**（显式 engine / opencode 通道 / 通道快照 ⇒ engine+provider+model 三元组），
+   *  再按规整后的 spec 校验并建 job —— 这样 job.spec.engine 恒为合法值，pump/startJob 不必再猜。
    *  {raw:true} 返回 jobs 里的真实对象——retry 的簿记必须写在存储态上；默认仍返回 get() 克隆，
    *  防外部调用方改坏内部态。 */
   function dispatchRaw(spec, { raw = false } = {}) {
-    validateSpec(spec);
+    const effSpec = effEngineSpec(spec);
+    validateSpec(effSpec);
     const id = nextId();
     const job = {
       id,
-      tag: spec.tag ?? null,
-      spec: { ...spec },
+      tag: effSpec.tag ?? null,
+      spec: { ...effSpec },
+      engine: normalizeEngine(effSpec.engine), // ZB-44：引擎落库（面板可见；老 jobs.json 无该字段 ⇒ handleLine 补齐）
       lock: null,
       state: 'queued',
       queuedAt: new Date(nowMs()).toISOString(),
@@ -1694,8 +2477,8 @@ export function createDispatcher(options = {}) {
       sessionId: null,
       provider: null,
       endpoint: null,
-      model: spec.model ?? null,
-      reasoningLevel: spec.reasoningLevel ?? null, // ZB-29：思考强度请求（'agent'=Agent决定：不覆盖，ZCode 按模型默认档；具体档位见 channels[].thinkingLevels）
+      model: effSpec.model ?? null,
+      reasoningLevel: effSpec.reasoningLevel ?? null, // ZB-29：思考强度请求（'agent'=Agent决定：不覆盖，引擎按模型默认档；具体档位见 channels[].thinkingLevels）
       usage: { requests: null, inputTokens: null, outputTokens: null, cacheReadTokens: null },
       contextUsed: null,
       contextWindow: null,
@@ -1713,6 +2496,9 @@ export function createDispatcher(options = {}) {
        * 不再出现「memoryBanApplied=false = 裸奔」的 task 任务。 */
       memoryBanApplied: true,
       memoryBanRunner: null, // ZB-28：runner 打印 memory-ban=on 后置 true（禁令在 runner 侧确认注入）
+      /* ZB-45：本次派发是否**显式放行**了 OpenCode 的权限（`spec.auto === true` ⇒ 执行器带 --auto）。
+       * 下发即置位（面板/CLI 立刻能看到"这个任务放行了权限"）；执行器打 `auto=on` 行时再确认一次。 */
+      autoApproved: effSpec.auto === true,
       timedOut: false,
       timedOutBy: null, // ZB-28：'runner'（--timeout-min 到点，exit 124 → failed）| 'watchdog'（看门狗 kill → killed）
       pausedAt: null, // ZB-28：进入 paused 的时刻（ISO；非 paused 恒 null）
@@ -1745,8 +2531,10 @@ export function createDispatcher(options = {}) {
 
   /** 公共派发入口：未显式指定 provider/model 时采用默认通道（getChannel）。
    *  ZB-29d：未显式指定 reasoningLevel 时按**通道默认思考强度**执行——通道设置就是给派发
-   *  Agent 的规定（'agent'=Agent决定：runner 按 ZCode 默认规则 values.at(-1) 解析成实际档；
-   *  具体档位=硬性规定）。放在 core 层 ⇒ 工具/CLI/面板三条入口统一生效。 */
+   *  Agent 的规定（'agent'=Agent决定：执行器按默认规则解析成实际档；具体档位=硬性规定）。
+   *  放在 core 层 ⇒ 工具/CLI/面板三条入口统一生效。
+   *  ZB-44：**引擎在补完通道默认值之后才判**（默认通道本身可能就是 opencode 通道），
+   *  规整与校验统一在 dispatchRaw 里做（同一段逻辑，不复制）。 */
   function dispatch(spec) {
     validateSpec(spec);
     const effSpec = { ...spec };
@@ -1756,8 +2544,18 @@ export function createDispatcher(options = {}) {
      * （runner 侧报 `Error: Model creation failed`，exit=1，resultFile 不产出）。
      * 故**续接时绝不注入通道默认 model** —— 与 retry 里的 `delete spec.model`（:1101）同一条纪律。
      * 显式传入的 model 不在此拦截（那是调用方的选择，由 runner 的报错兜底）；这里只保证
-     * 「没显式传就不注入」。曾经的缺口：dispatch + resume 会注入通道默认 model → 必然失败。 */
-    if (effSpec.model == null && channel.model && !effSpec.resume) effSpec.model = channel.model;
+     * 「没显式传就不注入」。曾经的缺口：dispatch + resume 会注入通道默认 model → 必然失败。
+     *
+     * ZB-51（真机验收抓到的 bug）：**指定了别的通道时，绝不注入默认通道的 model**。
+     * 现场：用户在面板把默认通道设成 `opencode/<model>`，然后派给 `provider:'qoder/Fast'`
+     * —— provider 换成了 qoder，却把默认通道的 opencode 模型塞进 spec ⇒ **provider/model 错配**，
+     * Qoder 报 `Model "opencode/…" is not available` 后**静默退回 Auto**（任务照样 done，
+     * 用户以为用的是 Fast）。模型永远必须与 provider **同属一个通道**。 */
+    const providerChanged = effSpec.provider != null && channel.provider != null
+      && String(effSpec.provider) !== String(channel.provider);
+    if (effSpec.model == null && channel.model && !effSpec.resume && !providerChanged) {
+      effSpec.model = channel.model;
+    }
     return dispatchRaw(effSpec);
   }
 
@@ -1822,6 +2620,11 @@ export function createDispatcher(options = {}) {
    * 续跑/交接。目标通道 == 原通道且有 sessionId → 同会话续跑（--resume，绝不带 --model，机制事实 F2）；
    * 换通道或无 sessionId → 交接重跑（新会话 + buildHandoffPrompt），新 job 记 parentJobId/attempts/hopCount，
    * 旧 job 标 handedOffTo（同通道续跑标 resumedBy）。
+   *
+   * ZB-44：目标**引擎**判据 = `opts.engine`（显式，wire/CLI 透传）> 目标 provider 推断（换通道时）
+   * > 原 spec.engine（仅同通道时）。**引擎变了绝不 resume**（跨引擎 session 不通用，resume 必错）⇒ 退化成交接重跑。
+   * ZB-45：`auto`（显式放行 OpenCode 权限）**跨 retry 沿用**原任务的放行级别，`opts.auto` 可显式覆盖；
+   * auto 只对 opencode 有意义，故交接目标不是 opencode 时**不带**（否则 validateSpec 会直接拒掉整个 retry）。
    * @returns 新 job（get() 序列化形状；簿记已写在存储态，d.get()/d.list()/jobs.json 均可读回）
    */
   function retry(jobId, opts = {}) {
@@ -1839,6 +2642,17 @@ export function createDispatcher(options = {}) {
       : String(opts.reasoningLevel);
     const origProvider = job.spec.provider ?? 'plan'; // runner 缺省即 plan
     const sameChannel = targetProvider == null || targetProvider === origProvider;
+    /* ZB-44：目标引擎（见函数头注释的判据顺序）。显式 opts.engine 只认合法值（非法值静默忽略 = 沿用推断，
+     * 因为这是"重试目标"而非用户主派发入口，报错会打断降级链；主入口 dispatch 的校验仍是严格报错的）。 */
+    const explicitEngine = typeof opts.engine === 'string' && ENGINES.includes(opts.engine.trim().toLowerCase())
+      ? opts.engine.trim().toLowerCase()
+      : null;
+    const origEngine = normalizeEngine(job.spec.engine);
+    const targetEngine = explicitEngine
+      ?? (sameChannel ? origEngine : resolveEngineOf({ provider: targetProvider, ...(targetModel ? { model: targetModel } : {}) }));
+    const engineChanged = targetEngine !== origEngine;
+    /* ZB-45：放行级别沿用（opts.auto 显式优先）；只对 opencode 有意义。 */
+    const autoRequested = opts.auto != null ? opts.auto === true : job.spec.auto === true;
     const at = new Date(nowMs()).toISOString();
     const prevAttempts = Array.isArray(job.attempts) ? job.attempts : [];
     const reason = opts.autoFallback
@@ -1847,8 +2661,15 @@ export function createDispatcher(options = {}) {
         ? job.pauseReason
         : `manual-retry:${job.state}`;
 
-    if (sameChannel && job.sessionId) {
+    /* 同通道 + 有 sessionId + **引擎没变** ⇒ 同会话续跑（`{...job.spec}` 天然带上 auto）。 */
+    if (sameChannel && !engineChanged && job.sessionId) {
       const spec = { ...job.spec, resume: job.sessionId };
+      /* ZB-45：`opts.auto` 显式优先 —— false 表示"这次明确不放行"，true 表示"这次放行"
+       * （沿用 job.spec 是缺省行为，只有调用方显式给了 opts.auto 才覆盖）。 */
+      if (opts.auto != null) {
+        if (opts.auto === true) spec.auto = true;
+        else delete spec.auto;
+      }
       delete spec.model; // F2：--resume 时传 --model 必失败
       if (job.tag) spec.tag = `${job.tag}-r${prevAttempts.length + 1}`;
       const nj = dispatchRaw(spec, { raw: true }); // 簿记必须写在存储态真实对象上（get() 返回克隆，写它会丢）
@@ -1871,9 +2692,18 @@ export function createDispatcher(options = {}) {
       kind: 'prompt',
       prompt,
       provider: targetProvider ?? origProvider,
+      /* ZB-44：目标**引擎**在这里落定 —— opts.engine > 目标 provider 推断 > 原引擎（仅同通道）。
+       * 必须显式写：OpenCode 的 spec.provider 已被规整成裸 'opencode'（不再含 `opencode/<model>`），
+       * 单靠 provider 判不出引擎；而"换引擎 ＝ 新会话"正是跨引擎降级的落点。 */
+      engine: targetEngine,
       ...(targetModel ? { model: targetModel } : {}),
+      /* ZB-45 / ZB-51：`auto`（显式放行权限）**跨 retry 沿用**原任务的放行级别，opts.auto 显式优先；
+       * 只对 opencode / qoder 有意义 ⇒ 目标引擎两者都不是时不带（否则 validateSpec 会拒掉整个 retry）。 */
+      ...((targetEngine === 'opencode' || targetEngine === 'qoder') && autoRequested ? { auto: true } : {}),
       ...(job.spec.mode ? { mode: job.spec.mode } : {}),
       ...(job.spec.lock ? { lock: job.spec.lock } : {}),
+      /* ⚠️ cwd 必须逐字沿用：OpenCode 的 session **按工作目录作用域**（同一 sessionId 换 --dir 续跑必挂，
+       * 实测 45s 被强杀）。交接重跑是新会话，但工作目录仍应保持原任务的目标仓库，否则"接着干"会跑到别处。 */
       ...(job.spec.cwd ? { cwd: job.spec.cwd } : {}),
       ...(job.spec.timeoutMin != null ? { timeoutMin: job.spec.timeoutMin } : {}),
       /* ZB-29：交接重跑是新会话，沿用原任务的思考强度档位（'agent' 照传 = 继续不覆盖）。
@@ -1881,9 +2711,15 @@ export function createDispatcher(options = {}) {
       ...((targetReasoning ?? job.spec.reasoningLevel) ? { reasoningLevel: targetReasoning ?? job.spec.reasoningLevel } : {}),
       ...(job.tag ? { tag: `${job.tag}-h${prevAttempts.length + 1}` } : {}),
     };
+    /* 换通道到不支持 mode 的引擎（opencode / qoder）时，原任务带的 mode 必须丢掉（ZCode 支持）。 */
+    if (targetEngine === 'opencode' || targetEngine === 'qoder') delete spec.mode;
     const nj = dispatchRaw(spec, { raw: true }); // 簿记必须写在存储态真实对象上（get() 返回克隆，写它会丢）
     nj.parentJobId = job.id;
     nj.hopCount = Number(job.hopCount ?? 0) + 1;
+    /* 交接把显式放行降级掉了（原任务是 opencode+auto，目标引擎不是 opencode）⇒ 留痕，别静默。 */
+    if (autoRequested && targetEngine !== 'opencode') {
+      nj.parseWarnings.push('retry: 原任务为 OpenCode 显式放行（auto=true），但本次交接的目标引擎不是 opencode ⇒ 未放行（auto 只对 opencode 有意义）');
+    }
     nj.attempts = [
       ...prevAttempts,
       { jobId: job.id, provider: origProvider, model: job.spec.model ?? null, reason, at },
@@ -1979,6 +2815,9 @@ export function createDispatcher(options = {}) {
       generatedAt: new Date(nowMs()).toISOString(),
       workRoot,
       maxConcurrent,
+      /* ZB-44：OpenCode 独立并发上限 + 每引擎运行数（既有字段保留，只增补）。 */
+      maxConcurrentOpenCode,
+      runningByEngine: { zcode: runningCountByEngine('zcode'), opencode: runningCountByEngine('opencode') },
       counts,
       locks: {
         repo: existsSync(repoLockPath) ? readLockFile(repoLockPath) : null,
@@ -1991,11 +2830,12 @@ export function createDispatcher(options = {}) {
     };
   }
 
-  // 启动：清过期锁（含文件锁表 + 历史遗留的 memory.lock）→ 恢复状态 → 读通道/降级链
+  // 启动：清过期锁（含文件锁表 + 历史遗留的 memory.lock）→ 恢复状态 → 读通道/引擎快照/降级链
   sweepStaleLocks([repoLockPath, legacyMemoryLockPath], nowMs);
   sweepFileLocks();
   restore();
   loadChannelState();
+  loadEngineMap(); // ZB-44：通道→引擎快照（fail-open：读不到 ⇒ 全部按默认引擎 zcode）
   loadFallbackState();
 
   return {
@@ -2022,6 +2862,11 @@ export function createDispatcher(options = {}) {
     setFallbackChain,
     setFallbackTarget, // ZB-30：面板入口（单目标：通道+模型+思考强度；null=关闭）
     getFallbackChain,
+    /* ZB-44：引擎自检/展示用（只读；不参与调度决策）。面板与 CLI 想知道「OpenCode 执行器配到哪了」
+     * 时不必再各自推断路径 —— 与 startJob 实际 spawn 的是**同一个值**。 */
+    engines: [...ENGINES],
+    engineLimits: { zcode: maxConcurrent, opencode: maxConcurrentOpenCode, qoder: maxConcurrentQoder },
+    opencodeRunnerPath,
   };
 }
 

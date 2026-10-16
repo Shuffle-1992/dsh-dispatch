@@ -456,11 +456,38 @@ window.__ModuleLoader__.load({
         writeFiles: '要写入的文件列表', lockNoneHint: '不取锁（确认无竞写关系时才用）',
         lockScopeHint: '只锁上面列出的文件；留空则锁整个仓库（与其它任务互斥）',
         secChannel: '通道', chanNewTask: '新任务将使用：', chanDisabled: '不可用', chanLoadFail: '通道清单加载失败',
+        /* 双引擎（OpenCode 接入）：通道下拉按引擎分组 + 引擎徽标 + 引擎专属提示。
+         * 引擎是「通道」这个既有抽象的一个属性（不是新 tab）——进程列表/锁/队列/用量/降级链
+         * 全部与引擎无关，跨引擎降级才是本轮的主要增量，故只做"按选中通道动态显示"。 */
+        engZcode: 'ZCode', engOpencode: 'OpenCode', engGroupZcode: 'ZCode 通道', engGroupOpencode: 'OpenCode 免费模型',
+        /* ZB-51（T5）：第三个引擎（Qoder）+ 引擎状态条文案。
+         * ⚠️ 这几把键必须与 locale/zh.json **逐键一致**（single-source.test.mjs 守门）。 */
+        engQoder: 'Qoder', engGroupQoder: 'Qoder 通道',
+        enginesTitle: '引擎',
+        enginesHint: '本机自动探测到的执行引擎（形态 / 版本 / 登录态）。插件按「环境变量 → 配置 → PATH → 已知安装位置（含跨盘符）」五级查找，无需手填路径。',
+        engineNotFound: '未找到', engineNotLoggedIn: '未登录', engineLoggedIn: '已登录', engineLoginUnknown: '登录态未知',
+        engineFormCli: 'CLI', engineFormClientBundled: '客户端自带', engineFormIde: 'IDE 自带', engineFormIdeEntry: 'IDE 入口',
+        chanEngineHintQoder: 'Qoder 引擎：不支持 mode / memoryBench；思考强度映射为 Qoder 的 --reasoning-effort。**无头模式下「需要确认」的操作会被直接拒绝**，所以执行器默认带 --permission-mode accept_edits（能改工作目录内的文件，shell 仍受检）；需要全放行时由派发方**显式**传 auto=true（映射为 bypass_permissions）。⚠️ 非默认权限模式只在「受信任目录」生效，目录不受信任会回落到 default ⇒ 写操作会被拒且**表现很静默**（任务报成功但没改文件），执行器会比对 init.permissionMode 并在回落时明确报警。用量以 total_credits 为准（该引擎的 token 字段可能为 0）。',
+        engBadge: '引擎', engLimitedFree: '限时免费 / 限区域', engModelOnly: '该通道的模型由上表探测得出',
+        chanEngineHintZcode: 'ZCode 引擎：支持 mode（build/edit/plan/yolo）与 memoryBench；思考强度映射为 ZCode 的 reasoning-level。',
+        chanEngineHintOpencode: 'OpenCode 引擎：不支持 mode / memoryBench（派发时不会传）；思考强度映射为 OpenCode 的 --variant；默认不加 --auto（子代理不会自动放行所有权限）——需要放行时由派发方**显式**传 auto=true，且在下方进程行上会显示「已放行权限」徽标；免费层按 IP 限流，且每次调用都要起临时服务（冷启动慢），故其并发上限独立且较低（默认 2）。',
+        /* 通道过滤开关（用户要求）：两个独立开关，作用于「通道」与「自动降级目标」两处下拉。 */
+        filtAvailable: '仅看可用', filtAvailableHint: '只列出当前可用的通道（关闭 = 连不可用通道也一并列出，并标注原因）',
+        filtFree: '仅看免费', filtFreeHint: '只列出不需要付费额度的通道：免费额度（Start Plan）与 OpenCode 免费模型；个人 Key 与付费套餐通道隐藏',
+        filtHint: '过滤：仅看可用（默认开，关掉可连不可用通道一起看）｜仅看免费（默认关，开启只留免费额度与 OpenCode 免费模型）。只影响这两处下拉列出什么，不会自动改掉当前选择。',
+        filtCurrent: '当前选择',
+        filter: '过滤',
+        filtHiddenA: '过滤已隐藏 ',
+        filtHiddenB: ' 个通道（共 ',
+        filtHiddenC: ' 个）',
+        chanLoading: '通道清单加载中…（宿主刚启动或首次探测中；失败会自动重试，无需刷新）',
+        chanLoadRetry: '会自动重试', chanInfoPrefix: '通道清单说明：', zcFreeRoute: '免费额度（Start Plan）', zcRoutePlan: 'BigModel(Plan)', zcRouteFree: 'Start Plan(免费)', zcFreeSuffix: '免费',
+        autoApproved: '已放行权限', autoApprovedHint: '该任务派发时显式开启了 OpenCode 的 --auto：放行了所有未显式拒绝的权限（默认不开启，仅调用方显式指定时生效）',
         giftQuota: '免费额度剩余', giftQuotaUnavailable: '免费额度余量不可用', chanQuotaExhausted: '5 小时窗口已满',
         jobCurrent: '当前：', jobLastBeat: '最近心跳', jobStalled: '可能卡住',
         jobStalledHint: '超过 150 秒没有收到 runner 的心跳/输出：可能卡在上游请求、MCP 连接或等锁。可用「终止」后重派，或 action=tail 看最后输出。',
         chanOfflineHint: '未连接宿主：通道/模型来自宿主远端面，连接后这两个下拉才可选',
-        chanDefaultModel: '（通道默认模型）',
+        chanDefaultModel: '（通道默认模型）', modelAgentDecide: 'Agent决定', modelAgentDecideHint: '未指定模型：由派发 Agent 按任务自行选择（它可换成任意可用模型）',
         paused: '已暂停', pQuota: '额度耗尽', pEntitled: '未开通', pSigning: '需签名', pConfig: '配置错误', pUnknown: '未知原因',
         lockWait: '排队等待', timedOut: '超时终止',
         timedOutRunner: 'runner 超时（exit 124，--timeout-min 到点）', timedOutWatchdog: '看门狗强制终止（timeoutMin+120s 宽限后未退出）',
@@ -516,11 +543,32 @@ window.__ModuleLoader__.load({
         writeFiles: 'files to write', lockNoneHint: 'no lock (only when no write conflict is possible)',
         lockScopeHint: 'locks only the files listed above; empty locks the whole repo (exclusive)',
         secChannel: 'Channels', chanNewTask: 'New tasks will use: ', chanDisabled: 'unavailable', chanLoadFail: 'Failed to load channels',
+        engZcode: 'ZCode', engOpencode: 'OpenCode', engGroupZcode: 'ZCode channels', engGroupOpencode: 'OpenCode free models',
+        engQoder: 'Qoder', engGroupQoder: 'Qoder channels',
+        enginesTitle: 'Engines',
+        enginesHint: 'Execution engines auto-detected on this machine (form / version / login). The plugin searches in five levels — env var → config → PATH → known install locations (incl. other drives) — so no path needs to be filled in by hand.',
+        engineNotFound: 'not found', engineNotLoggedIn: 'not signed in', engineLoggedIn: 'signed in', engineLoginUnknown: 'login unknown',
+        engineFormCli: 'CLI', engineFormClientBundled: 'bundled with client', engineFormIde: 'bundled with IDE', engineFormIdeEntry: 'IDE entry',
+        chanEngineHintQoder: 'Qoder engine: no mode / memoryBench; thinking maps to Qoder --reasoning-effort. In headless mode any operation that would ask for confirmation is denied outright, so the executor defaults to --permission-mode accept_edits (it can edit files inside the working directory; shell stays gated). To allow everything the dispatcher must pass auto=true explicitly (mapped to bypass_permissions). Note: non-default permission modes only apply inside trusted directories — an untrusted directory falls back to default and write operations are denied *very quietly* (the task reports success but nothing changed), so the executor compares init.permissionMode and warns loudly on fallback. Usage is reported via total_credits (this engine\'s token fields may be 0).',
+        engBadge: 'Engine', engLimitedFree: 'Limited-time free / region-limited', engModelOnly: 'Models are probed from this channel',
+        chanEngineHintZcode: 'ZCode engine: supports mode (build/edit/plan/yolo) and memoryBench; thinking maps to ZCode reasoning-level.',
+        chanEngineHintOpencode: 'OpenCode engine: no mode / memoryBench (never passed); thinking maps to OpenCode --variant; --auto is never added by default (the sub-agent will not auto-approve permissions) — to allow it, the dispatcher must pass auto=true explicitly, and the job row then shows an "auto-approved" badge; the free tier is IP rate-limited and every call spins up a temporary server (slow cold start), so its concurrency cap is separate and lower (default 2).',
+        filtAvailable: 'Available only', filtAvailableHint: 'List only channels that are currently usable (off = also list unusable channels with their reason)',
+        filtFree: 'Free only', filtFreeHint: 'List only channels that need no paid quota: the free tier (Start Plan) and OpenCode free models; personal keys and paid plan channels are hidden',
+        filtHint: 'Filters: Available only (on by default; turn off to also see unusable channels) | Free only (off by default; turn on to keep only the free tier and OpenCode free models). They only change what these two dropdowns list — they never change the current selection.',
+        filtCurrent: 'current selection',
+        filter: 'Filter',
+        filtHiddenA: 'Filters hidden ',
+        filtHiddenB: ' of ',
+        filtHiddenC: ' channels',
+        chanLoading: 'Loading channel list… (host just started or first probe in flight; failures retry automatically, no refresh needed)',
+        chanLoadRetry: 'will retry automatically', chanInfoPrefix: 'Channel notes: ', zcFreeRoute: 'Free quota (Start Plan)', zcRoutePlan: 'BigModel (Plan)', zcRouteFree: 'Start Plan (free)', zcFreeSuffix: 'free',
+        autoApproved: 'auto-approved', autoApprovedHint: 'This job explicitly enabled OpenCode --auto: all permissions not explicitly denied were allowed (off by default; only takes effect when the caller sets it explicitly)',
         giftQuota: 'Free quota left', giftQuotaUnavailable: 'Free-quota balance unavailable', chanQuotaExhausted: '5h window full',
         jobCurrent: 'Now: ', jobLastBeat: 'last heartbeat', jobStalled: 'possibly stuck',
         jobStalledHint: 'No runner heartbeat/output for over 150s: it may be stuck on an upstream request, MCP connect or a lock. Kill and re-dispatch, or use action=tail for the last output.',
         chanOfflineHint: 'Host not connected: channel/model come from the host Remote face and unlock once connected',
-        chanDefaultModel: '(channel default model)',
+        chanDefaultModel: '(channel default model)', modelAgentDecide: 'Agent decides', modelAgentDecideHint: 'No model pinned: the dispatching Agent picks one per task (and may switch to any available model)',
         paused: 'Paused', pQuota: 'Quota exhausted', pEntitled: 'Not entitled', pSigning: 'Signing required', pConfig: 'Config error', pUnknown: 'Unknown',
         lockWait: 'Queue wait', timedOut: 'Timed out',
         timedOutRunner: 'runner timeout (exit 124, --timeout-min elapsed)', timedOutWatchdog: 'watchdog kill (still running after timeoutMin+120s grace)',
@@ -545,6 +593,54 @@ window.__ModuleLoader__.load({
       return String(s).toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en';
     })();
     const t = (k) => STRINGS[LANG][k] ?? STRINGS.zh[k] ?? k;
+
+    /* ─────────────── 引擎归一（**模块级唯一权威**）───────────────
+     * ZB-51：原先到处写 `c.engine === 'opencode' ? 'opencode' : 'zcode'` —— 二元判断，
+     * 第三个引擎（qoder）一来就被**错误地归进 ZCode 组**（下拉分组 / 徽标 / 提示全错），且不报错。
+     *
+     * ⚠️ 这几个必须放在**模块级**（而不是某个组件函数里）：
+     *   `foldChannels`（通道折叠）在 `ChannelSection` 里用到它们，而组件内的 `const` 有 TDZ ——
+     *   曾把 `engineOf` 留在组件函数里 ⇒ 真渲染时 `ReferenceError: Cannot access 'engineOf'
+     *   before initialization`（`node --check` 查不出来，靠 fallback-ui 的真 DOM 渲染才暴露）。 */
+    const KNOWN_ENGINES = ['zcode', 'opencode', 'qoder'];
+    const engineOf = (v) => {
+      const s = typeof v === 'string' ? v.trim().toLowerCase() : '';
+      return KNOWN_ENGINES.includes(s) ? s : 'zcode';
+    };
+    const ENG_LABEL_KEY = { zcode: 'engZcode', opencode: 'engOpencode', qoder: 'engQoder' };
+    const engLabel = (e) => t(ENG_LABEL_KEY[engineOf(e)]);
+    /* ZB-51：ZCode 的「模型」下拉里其实列的是**路由**（Plan / 免费额度）——
+     * 因为它们提供同样的模型名，按模型名去重会互相覆盖（真机反馈"ZCode 怎么剩 1 个？"）。
+     * 这里给出路由 → 文案的映射（**单一源**，上方「通道」与下方降级区共用）。 */
+    const ROUTE_LABEL_KEY = { plan: 'zcRoutePlan', 'account:bigmodel-start-plan': 'zcRouteFree' };
+    /** **免费额度（Start Plan）实际可用的模型**（用户实测：只给 GLM-5.3-Flash）。
+     *  ZCode 配置里两条路由声明了同样的模型名，故"哪些真能用"只能在这里收窄 —— 权益变化时改这一行。 */
+    const ZC_FREE_MODELS = ['GLM-5.3-Flash'];
+    /** 模型项显示文案：
+     *  · ZCode：`<模型名>`，若该模型来自免费额度路由则加后缀「免费」（同名模型不会混淆）；
+     *  · 其它引擎：模型名本身（它们一个模型一条通道，不存在路由维度）。 */
+    const modelLabelFor = (engine, routeOf, modelOf, m) => {
+      if (engine === 'zcode') {
+        const routeId = (routeOf && routeOf[m]) || '';
+        const model = (modelOf && modelOf[m]) || String(m);
+        return routeId === 'account:bigmodel-start-plan' ? `${model}「${t('zcFreeSuffix')}」` : model;
+      }
+      return String(m);
+    };
+    /* job 的引擎判据（与 core 的 `resolveEngineOf()` **顺序一致**）：
+     * ① job.engine（core 落库，最权威）② spec.engine ③ provider 形态（`qoder/<m>` / `opencode/<m>` / 裸名）
+     * ④ 兜底 zcode。旧记录没有这些字段 ⇒ 显示 ZCode（与事实相符）。 */
+    const jobEngineOf = (job) => {
+      const spec = job?.spec ?? {};
+      for (const v of [job?.engine, spec.engine]) {
+        const s = typeof v === 'string' ? v.trim().toLowerCase() : '';
+        if (KNOWN_ENGINES.includes(s)) return s;
+      }
+      const p = typeof spec.provider === 'string' ? spec.provider.trim().toLowerCase() : '';
+      if (p.startsWith('opencode/') || p === 'opencode') return 'opencode';
+      if (p.startsWith('qoder/') || p === 'qoder' || p === 'qoder-cn' || p === 'qoder-global') return 'qoder';
+      return 'zcode';
+    };
 
     /* ─────────────── 小工具 ─────────────── */
     const loadJson = (key, fallback) => {
@@ -860,17 +956,33 @@ window.__ModuleLoader__.load({
           planQuota = { available: false, reason: 'quotaPlan 调用失败' };
         }
       };
+      /* 单次 RPC 的**兜底超时**：真实事故是 `snapshot` 卡住 ⇒ `tick()` 永远停在 await 上、
+       * 一包都不发 ⇒ 面板卡在「连接中」、进程/用量全区空白（用户报「有时没有进程」）。
+       * 有超时后最坏情况也只是发一包 `snapshot:null`（下面那条 catch 分支），轮询继续、UI 自愈。 */
+      const RPC_TICK_TIMEOUT_MS = 8000;
+      const withTimeout = (p, ms) => new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error(`RPC 超时（${ms}ms 无响应）`)), ms);
+        Promise.resolve(p).then(
+          (v) => { clearTimeout(t); resolve(v); },
+          (e) => { clearTimeout(t); reject(e); },
+        );
+      });
+      /* **保留最后一包好快照**：远端抖动时若发 `snapshot:null`，进程列表会当场变成
+       * 「暂无进程记录」、再下一拍又恢复 —— 用户看到的就是"进程有时没有"（真机报告）。
+       * 故只有"一次都没成功过"时才发 null（此时确实没有数据可显示）。 */
+      let lastGoodSnapshot = null;
       const tick = async () => {
         try {
-          const snapshot = await remote.call('snapshot');
+          const snapshot = await withTimeout(remote.call('snapshot'), RPC_TICK_TIMEOUT_MS);
+          lastGoodSnapshot = snapshot;
           let quota = null;
           try {
-            quota = (await remote.call('quota'))?.quota ?? null;
+            quota = (await withTimeout(remote.call('quota'), RPC_TICK_TIMEOUT_MS))?.quota ?? null;
           } catch { /* 用量失败不挡快照 */ }
           emit({ conn: 'live', snapshot, quota, planQuota });
         } catch (e) {
-          // 远端抖动：发一包空快照让 UI 渲染空态，绝不抛出、绝不白屏
-          emit({ conn: 'live', snapshot: null, quota: null, planQuota, error: e?.message ?? String(e) });
+          // 远端抖动：**沿用上一包好快照**（有就保留，没有才给 null），绝不抛出、绝不白屏
+          emit({ conn: 'live', snapshot: lastGoodSnapshot, quota: null, planQuota, error: e?.message ?? String(e) });
         }
       };
       /* 与宿主 face 同形的调用（一一对应；错误照 face 契约 reject/折信封） */
@@ -1168,6 +1280,41 @@ window.__ModuleLoader__.load({
     }
 
     // 内置演示引擎（conn='demo'，默认关）：3 个进程起步；派发 / kill / dismiss / tail 均可交互（纯前端假数据）
+    /* ZB-30：降级**目标**归一（与 core/dispatch-core.mjs 的 normFallbackTargets 同语义）。
+     * 接受字符串（旧 chain 项）/ 对象（{provider|id|channel, model?, reasoningLevel?|thinking?}）；
+     * 无 provider 的项丢弃（不猜），顺序保留。null 字段 = 沿用原任务该维度。
+     *
+     * ⚠️ ZB-51：必须定义在 `demoWire()` **之前** —— 它的 `fallbackGet` / `fallbackSet` 方法
+     * 会引用这两个 helper（方法体在声明前求值也算"使用"）。原先它们在 1800+ 行，
+     * 而 demo 的方法在 1597 行 ⇒ **demo 模式一旦调用降级接口就会
+     * `ReferenceError: Cannot access 'normTargets' before initialization`**。
+     * 属于 latent TDZ（既有代码里就有的），由 `client-tdz.test.mjs` 抓出。 */
+    const normTargets = (list) => {
+      if (list == null) return [];
+      const arr = Array.isArray(list) ? list : [list];
+      const out = [];
+      for (const item of arr) {
+        if (typeof item === 'string') {
+          const id = item.trim();
+          if (id) out.push({ provider: id, model: null, reasoningLevel: null });
+          continue;
+        }
+        if (!item || typeof item !== 'object') continue;
+        const provider = String(item.provider ?? item.id ?? item.channel ?? '').trim();
+        if (!provider) continue;
+        const model = item.model == null || item.model === '' ? null : String(item.model);
+        const rl = item.reasoningLevel ?? item.thinking ?? null;
+        out.push({ provider, model, reasoningLevel: rl == null || rl === '' ? null : String(rl) });
+      }
+      return out;
+    };
+    const fallbackShape = (targets) => ({
+      enabled: targets.length > 0,
+      chain: targets.map((x) => x.provider),
+      targets,
+      target: targets[0] ?? null,
+    });
+
     function demoWire() {
       const seed = () => {
         const s = {
@@ -1237,11 +1384,16 @@ window.__ModuleLoader__.load({
         ],
       };
       // Z6 demo 通道面（与真实 listChannels 同形；含不可用项——如实标注，不假装能切）
+      // 双引擎：每条都带 engine（与 core 的 listChannels 同形）；OpenCode 免费模型是**探测式**的，
+      // demo 里只放 3 个示例（真实清单以 action=channels 为准，代码不写死枚举）。
       const demoChannels = [
-        { id: 'plan', name: '默认套餐（自动选择）', enabled: true, reason: null, endpoint: 'https://open.bigmodel.cn/api/anthropic', models: ['GLM-5.3', 'GLM-5.3-Flash'] },
-        { id: 'personal', name: '个人 API（演示）', enabled: true, reason: null, endpoint: 'https://demo.example/v1', models: ['deepseek-flash'] },
-        { id: 'builtin:bigmodel-start-plan', name: 'BigModel Start Plan（演示）', enabled: false, reason: 'coding_plan_not_entitled', endpoint: 'https://zcode.z.ai/api/v1/zcode-plan/anthropic', models: ['GLM-5.3', 'GLM-5.3-Flash'] },
-        { id: 'builtin:zai-coding-plan', name: 'Z.ai Coding Plan（演示）', enabled: false, reason: 'oauth_provider_inactive', endpoint: 'https://api.z.ai/api/anthropic', models: ['GLM-5.3', 'GLM-5.3-Flash'] },
+        { id: 'plan', name: '默认套餐（自动选择）', engine: 'zcode', enabled: true, reason: null, endpoint: 'https://open.bigmodel.cn/api/anthropic', models: ['GLM-5.3', 'GLM-5.3-Flash'] },
+        { id: 'personal', name: '个人 API（演示）', engine: 'zcode', enabled: true, reason: null, endpoint: 'https://demo.example/v1', models: ['deepseek-flash'] },
+        { id: 'builtin:bigmodel-start-plan', name: 'BigModel Start Plan（演示）', engine: 'zcode', enabled: false, reason: 'coding_plan_not_entitled', endpoint: 'https://zcode.z.ai/api/v1/zcode-plan/anthropic', models: ['GLM-5.3', 'GLM-5.3-Flash'] },
+        { id: 'builtin:zai-coding-plan', name: 'Z.ai Coding Plan（演示）', engine: 'zcode', enabled: false, reason: 'oauth_provider_inactive', endpoint: 'https://api.z.ai/api/anthropic', models: ['GLM-5.3', 'GLM-5.3-Flash'] },
+        { id: 'opencode/deepseek-v4.1-flash-free', name: 'deepseek-v4.1-flash（OpenCode 免费）', engine: 'opencode', enabled: true, reason: null, endpoint: null, models: ['opencode/deepseek-v4.1-flash-free'] },
+        { id: 'opencode/glm-5.3-flash-free', name: 'glm-5.3-flash（OpenCode 免费）', engine: 'opencode', enabled: true, reason: null, endpoint: null, models: ['opencode/glm-5.3-flash-free'] },
+        { id: 'opencode/cat-jam-free', name: 'cat-jam（OpenCode 免费，限时/限区）', engine: 'opencode', enabled: true, reason: null, endpoint: null, models: ['opencode/cat-jam-free'] },
       ];
       let demoChannel = { provider: 'plan', model: 'GLM-5.3-Flash' };
       let demoTargets = []; // ZB-30：demo 降级目标（[{provider, model, reasoningLevel}]）
@@ -1715,34 +1867,8 @@ window.__ModuleLoader__.load({
      * low/high/max），只在显示层映射中文标签；未知档位（上游新增）原样显示，绝不隐藏、不猜语义。 */
     const THINKING_LABEL_KEY = { disabled: 'thinkDisabled', enabled: 'thinkEnabled', low: 'thinkLow', high: 'thinkHigh', max: 'thinkMax' };
     const thinkingLabel = (lv) => (lv == null || lv === '' ? '' : t(THINKING_LABEL_KEY[lv] ?? '') || lv);
-    /* ZB-30：降级**目标**归一（与 core/dispatch-core.mjs 的 normFallbackTargets 同语义）。
-     * 接受字符串（旧 chain 项）/ 对象（{provider|id|channel, model?, reasoningLevel?|thinking?}）；
-     * 无 provider 的项丢弃（不猜），顺序保留。null 字段 = 沿用原任务该维度。 */
-    const normTargets = (list) => {
-      if (list == null) return [];
-      const arr = Array.isArray(list) ? list : [list];
-      const out = [];
-      for (const item of arr) {
-        if (typeof item === 'string') {
-          const id = item.trim();
-          if (id) out.push({ provider: id, model: null, reasoningLevel: null });
-          continue;
-        }
-        if (!item || typeof item !== 'object') continue;
-        const provider = String(item.provider ?? item.id ?? item.channel ?? '').trim();
-        if (!provider) continue;
-        const model = item.model == null || item.model === '' ? null : String(item.model);
-        const rl = item.reasoningLevel ?? item.thinking ?? null;
-        out.push({ provider, model, reasoningLevel: rl == null || rl === '' ? null : String(rl) });
-      }
-      return out;
-    };
-    const fallbackShape = (targets) => ({
-      enabled: targets.length > 0,
-      chain: targets.map((x) => x.provider),
-      targets,
-      target: targets[0] ?? null,
-    });
+    /* ZB-30：降级目标归一 / 形状 helper 已**上移**到 `demoWire()` 之前
+     * （见那里的注释：demo 的 fallbackGet/fallbackSet 会引用它们，留在原处是 latent TDZ）。 */
     /* ZB-28：排队可观测 —— 把 core 的 lockWait 结构转成一行人话：
      * 「第 2/3 位 · 前方 1 个（j-xxxxxxxx） · 被 tag-x 挡住 · 预计 ≤ 0时03分20秒」。
      * estWaitSec=null（有阻塞者未声明 timeoutMin）时如实显示「预计等待未知」，不猜。 */
@@ -1903,19 +2029,235 @@ window.__ModuleLoader__.load({
       );
     }
 
+    /* ZB-51（T5）：**引擎状态条** —— 把「本机自动探测到的三个引擎」显示出来。
+     *
+     * 为什么需要它（用户要求「避免各种撞墙」）：以前某个引擎不可用时，用户只看到"通道变少了"，
+     * 无从知道是**没装**、**没登录**、还是**插件坏了** —— 三种情况的最优动作完全不同。
+     * 这里把发现层的结论直接摊开：形态（CLI / 客户端自带 / IDE 自带）、版本、登录态，
+     * 异常一律带 `reason`（含"查过多少处"与怎么修）作为悬停提示。
+     *
+     * 数据来源：core `listChannels()` 的 `engineDetail`（T2 交付）。缺失时**整条不渲染**
+     * （向后兼容旧宿主：没有这个字段就当没有这条 UI，绝不显示空壳）。 */
+    function EngineStatus({ engineDetail }) {
+      if (!engineDetail || typeof engineDetail !== 'object') return null;
+      const rows = ['zcode', 'opencode', 'qoder'].map((e) => engineDetail[e]).filter(Boolean);
+      if (!rows.length) return null;
+      const FORM_KEY = {
+        cli: 'engineFormCli',
+        'client-bundled-cli': 'engineFormClientBundled',
+        'ide-bundled': 'engineFormIde',
+        'ide-entry': 'engineFormIdeEntry',
+      };
+      /* ⚠️ 纪律：client.js **不得写字面色值**（必须走主题令牌，verify-plugin.mjs 会拦）。
+       * 故这里不用彩色圆点，改用**形状 + 状态文字**区分（信息量不减少，且自动适配明暗主题）：
+       *   可用/已登录 = ● ；找到但未登录 = ○（空心）；未找到 = × */
+      const mark = (d) => {
+        if (!d.found) return '×';
+        if (d.loggedIn === false) return '○';
+        return '●';
+      };
+      const stateText = (d) => {
+        if (!d.found) return t('engineNotFound');
+        if (d.loggedIn === true) return t('engineLoggedIn');
+        if (d.loggedIn === false) return t('engineNotLoggedIn');
+        return t('engineLoginUnknown');
+      };
+      return h('div', { className: 'dsp-dim', style: { fontSize: '11px', marginTop: '2px' } },
+        h('div', { style: { marginBottom: '3px' } },
+          h('span', { style: { opacity: 0.75 }, title: t('enginesHint') }, `${t('enginesTitle')}：`),
+          rows.map((d) => h('span', {
+            key: d.engine,
+            className: 'dsp-badge',
+            style: { marginRight: '4px' },
+            title: `${d.summary ?? ''}${d.reason ? `\n${d.reason}` : ''}${d.loginEvidence ? `\n${d.loginEvidence}` : ''}`,
+          },
+            h('span', { style: { marginRight: '3px' } }, mark(d)),
+            d.engine === 'zcode' ? t('engZcode') : d.engine === 'opencode' ? t('engOpencode') : t('engQoder'),
+            d.form ? ` · ${t(FORM_KEY[d.form] ?? 'engineFormCli')}` : '',
+            d.version ? ` · v${d.version}` : '',
+            ` · ${stateText(d)}`))),
+      );
+    }
+
     /* 通道分区：切换器（provider+model+思考强度，不可用项置灰带原因）+ 自动降级开关。
      * ZB-30（用户要求）：「自动降级」改成**开关**（参考派发总开关：点击开/关、带指示灯），
      * 打开后下面才显示 通道 / 模型 / 思考强度 三个下拉（与上面「通道」分区同形）；关闭时不显示。
      * 目标为空的两维（模型、思考强度）语义是「沿用原任务」，故首项标签不是「Agent决定」
      * （降级是自动触发的，此刻并没有 Agent 在决定——与 ZB-29c 移除派发栏 Agent决定同一条理由）。 */
-    function ChannelSection({ channelsInfo, channel, fallback, onSwitch, onFallbackSet, offline, offlineReason, sw }) {
+    function ChannelSection({ channelsInfo, channel, fallback, onSwitch, onFallbackSet, offline, offlineReason, sw, chanError }) {
       const [fbFeedback, setFbFeedback] = useState(null);
       const [busy, setBusy] = useState(false);
+
+      /* ── ZB-51：**通道折叠**（用户要求：「通道」选引擎，「模型」里选模型）──
+       *
+       * ⚠️ 必须定义在**本函数最前面**：下面的 `sel` / `groupedChannelOptions` 都要用它。
+       * 曾把它们放在使用点之后（`const` 声明前使用 ⇒ TDZ）⇒ 面板**直接白屏**。
+       * 这类错误 `node --check` 查不出来（语法合法），只有真渲染才炸 —— 见 tasks/_tdz-check.mjs。
+       *
+       * 问题：OpenCode 探测出 12 个免费模型、Qoder 探测出 15 个模型，core 给**每个模型一条通道**
+       * （"通道即执行目标"是 core 的模型），结果 15 个模型全堆在「通道」下拉里，
+       * 而「模型」下拉反而只有一个选项 —— 层级用反了。
+       *
+       * 做法（**只在展示层折叠，不动 core 语义**）：
+       *   · `opencode` / `qoder`：把同引擎的所有模型通道**聚合**成一条"引擎通道"
+       *     （id 用裸引擎名，模型并集进 `models`）⇒「通道」里只有一条，模型在「模型」下拉里选；
+       *   · `zcode`：把该引擎的**所有路由**也聚合成一条 `zcode` —— 用户最终要的是
+       *     「通道 = ZCode / OpenCode / Qoder 三条」，ZCode 的"套餐 / 免费额度"作为
+       *     **模型下拉里的一项**（用户明确要求：「Zcode 只保留 Plan 和免费额度」两条路由）。
+       *
+       * ⚠️ 回写规则（**必须与实际路由一致**，否则会静默跑错通道）：
+       *   · 选 ZCode 的「免费额度」项 ⇒ `provider = account:bigmodel-start-plan`（**专用通道 id**）；
+       *   · 选 ZCode 的普通模型（如 GLM-5.3）⇒ `provider = plan`（默认套餐，由 runner 选 provider）；
+       *   · 选 OpenCode / Qoder 的模型 ⇒ `provider = opencode | qoder`（裸引擎名）+ 具体模型。
+       *   见下方 `onPickProvider` / `onPickModel` 的映射实现。
+       *
+       * ⚠️ 兼容：core 里"每模型一条通道"的数据仍在（工具 / 降级链 / 快照都不受影响）；
+       * 旧存值若指向具体通道 id（`opencode/xyz` / `account:bigmodel-start-plan`），
+       * `resolveFoldedChannel` 会把它映射回折叠条目并**还原出正确的模型选项**。 */
+      const FOLD_ENGINES = KNOWN_ENGINES; // 三引擎**全部**折叠（用户要求：通道只列引擎）
+      /** ZCode 折叠条目里的"免费额度"伪模型项（选中它会路由到专用通道 id）。 */
+      /** ZCode 折叠条目里，"模型项"就是**路由 id**（`plan` / `account:bigmodel-start-plan`）——
+       *  这样 Plan 与免费额度不会因"提供同样的模型名"而互相覆盖（真机反馈"ZCode 怎么剩 1 个？"）。
+       *  ⚠️ 这个常量仅保留给"旧存值兼容"路径使用，不再是下拉里的伪项。 */
+      const ZC_FREE_OPTION = '__zcode_free__';
+      const foldChannels = (list) => {
+        const out = [];
+        for (const c of list) {
+          const eng = engineOf(c.engine);
+          if (!FOLD_ENGINES.includes(eng)) { out.push(c); continue; }
+          /* 同一引擎的所有通道合并（首个出现的位置即聚合条目的位置）；id 用裸引擎名。 */
+          let agg = out.find((x) => x && x._foldEngine === eng);
+          if (!agg) {
+            agg = {
+              id: eng,
+              name: engLabel(eng),
+              engine: eng,
+              /* 可用性由子通道决定（见下）：**至少一个**可用即可用 ⇒ 初值 false，遇到可用的翻 true。 */
+              enabled: false,
+              reason: null,
+              endpoint: null,
+              models: [],
+              _foldEngine: eng,
+              _routeOf: Object.create(null),   // 模型项 key → 实际通道 id（回写时用）
+              _modelOf: Object.create(null),   // 模型项 key → 真实模型名（ZCode 才有 key）
+              _modelsByRoute: Object.create(null), // 路由 id → 该路由可用的模型名（档位/回显用）
+            };
+            out.push(agg);
+          }
+          /* 模型项：**ZCode 用"路由 id"、其它引擎用"模型名"**（用户要求：ZCode 要能看到
+           * Plan 与免费额度**两条**）。
+           *
+           * ⚠️ 为什么 ZCode 不能用模型名（真机反馈"ZCode 怎么剩 1 个？"）：
+           * `plan` 与 `account:bigmodel-start-plan` **提供同样的模型**（GLM-5.3 / GLM-5.3-Flash）
+           * ⇒ 按模型名去重时后者的路由会**覆盖**前者的 ⇒ 只剩"免费额度"一条，Plan 消失。
+           * 用**路由 id** 作选项值就不会撞车（每条路由天然唯一）。
+           *
+           * OpenCode/Qoder 没有这个问题（模型名本身唯一，且就是它们的执行目标），
+           * 故保持"模型名"作值 —— 也让「模型」下拉显示的是真正的模型名而不是内部路由 id。 */
+          /* ── 模型项 = **真实模型 × 路由**（用户要求：ZCode 要能选到具体模型）──
+           *
+           * 真机反馈演进（两次修正，别再倒退）：
+           *   ① 最初按"模型名"去重 ⇒ `plan` 与免费额度**提供同样的模型名**，后者覆盖前者 ⇒ ZCode 只剩 1 条；
+           *   ② 改成"用路由 id 当选项"能显示两条，但**看不到具体模型**（用户反馈"没有具体的模型可以选"）。
+           * 现在：**（模型, 路由）配对**作选项 —— 既能看到具体模型，又不会互相覆盖。
+           *   例：`GLM-5.3`（套餐） / `GLM-5.3-Flash`（套餐） / `GLM-5.3-Flash「免费」`（免费额度）。
+           *
+           * ⚠️ 只在**可用**通道上收集（真机被 fallback-ui 抓到）：不可用通道
+           * （如 `builtin:zai-coding-plan` / `oauth_provider_inactive`）不该出现在「模型」下拉里 ——
+           * 否则用户能选到一个**必然失败**的项。 */
+          const useRouteKeys = (eng === 'zcode');
+          if (c.enabled) {
+            const routeId = String(c.id);
+            const rawModels = Array.isArray(c.models) ? c.models : [c.id];
+            /* 免费额度路由**只列真正可用的模型**（用户实测：Start Plan 只给 GLM-5.3-Flash）。
+             * 数据源（ZCode 配置）里两条路由都声明了同名模型，故"哪些能用"只能由这里收窄 ——
+             * 见 `ZC_FREE_MODELS`（可配置常量）。 */
+            const isFreeRoute = /^account:.*start-plan$/.test(routeId);
+            const allowed = isFreeRoute ? rawModels.filter((m) => ZC_FREE_MODELS.includes(m)) : rawModels;
+            const models = allowed.length ? allowed : rawModels;
+            agg._modelsByRoute[routeId] = models;
+            for (const m of models) {
+              const key = useRouteKeys ? `${routeId}::${m}` : m;
+              if (!agg.models.includes(key)) agg.models.push(key);
+              agg._routeOf[key] = routeId;
+              agg._modelOf[key] = m;
+            }
+          } else {
+            /* 不可用通道仍**登记路由**（旧存值可能指向它 ⇒ 要能被解析成"该引擎条目"，而不是多固定一条），
+             * 但不进模型下拉。 */
+            agg._routeOf[String(c.id)] = c.id;
+          }
+          /* ⚠️ 思考强度档位要**取并集**带到折叠条目上：折叠后「通道」下拉只有一条，
+           * 而档位下拉（上面与降级区）都从**选中条目**读 `thinkingLevels` ——
+           * 不带上就会出现"档位下拉空掉"（真机被 fallback-ui 的真 DOM 渲染抓到）。 */
+          if (Array.isArray(c.thinkingLevels) && c.thinkingLevels.length) {
+            agg.thinkingLevels = [...new Set([...(agg.thinkingLevels ?? []), ...c.thinkingLevels])];
+          }
+          /* 额度条数据也要带到折叠条目上（ZCode 免费额度选中时用于显示剩余量）。 */
+          if (c.quota && (eng === 'zcode')) { agg.quota = c.quota; agg.quotaText = c.quotaText ?? null; }
+          /* ⚠️ 可用性判据（真机反馈修正）：**至少一个**子通道可用 ⇒ 折叠条目可用。
+           * 原先写的是"任一子通道不可用 ⇒ 整条不可用" ⇒ 实测发现 ZCode 里有一条禁用的
+           * `id:uuid` 路由，于是整条 `ZCode` 被置灰显示成「（不可用：-）」，
+           * 用户根本选不了（而后端 plan 完全可用）。语义上也错：
+           * 折叠条目的可用性 = "这组里还有能用的东西"。 */
+          if (c.enabled) agg.enabled = true;
+          if (c.recentQuotaExhausted) agg.recentQuotaExhausted = true;
+        }
+        return out;
+      };
+      /** 把"折叠条目 + 模型项"映射回**真实的 provider/model**（回写核心，必须准确）。 */
+      const routeForPick = (agg, model) => {
+        if (!agg) return null;
+        const real = agg._routeOf?.[model] ?? null;
+        const realModel = agg._modelOf?.[model] ?? null;
+        if (agg.engine === 'zcode') {
+          /* ZCode：模型项 key 是 `<路由id>::<模型名>` ⇒ provider=那条路由、model=真实模型名。
+           * 这样"免费额度 + GLM-5.3-Flash"能精确落到 `account:bigmodel-start-plan` + `GLM-5.3-Flash`。 */
+          return { provider: real ?? 'plan', model: realModel };
+        }
+        /* OpenCode / Qoder：provider=裸引擎名，model=具体模型（core 已认裸引擎名）。 */
+        return { provider: agg.id, model: model || null };
+      };
+      /** 把任意通道 id（含折叠前的旧存值 `opencode/xyz` / `plan` / `account:bigmodel-start-plan`）
+       *  解析成"折叠后清单里"的那条。
+       *
+       *  ⚠️ 顺序很重要（真机/测试都踩过）：**先看"哪个折叠条目的路由表包含它"，再看同名直配**。
+       *  否则 `provider='plan'` 会命中原始 `plan` 条目而不是折叠的 `ZCode`，
+       *  导致"上方下拉有 ZCode、下方降级下拉只有 默认套餐"这种**两侧不一致**。 */
+      const resolveFoldedChannel = (list, id) => {
+        if (!id) return null;
+        const byRoute = list.find((c) => c._routeOf && Object.values(c._routeOf).includes(id));
+        if (byRoute) return byRoute;
+        return list.find((c) => c.id === id)
+          ?? list.find((c) => Array.isArray(c.models) && c.models.includes(id)) ?? null;
+      };
+
       const channels = channelsInfo?.channels ?? [];
       const warnings = channelsInfo?.warnings ?? [];
-      const sel = channels.find((c) => c.id === channel.provider) ?? null;
+      /* ⚠️ `sel` 与 `models` 都基于**折叠后**的清单 —— 见下方 foldChannels 的说明。
+       * 这样"选中折叠条目 ⇒ 模型下拉拿到整个模型的并集"；旧存值（`opencode/xyz`）也能被
+       * resolveFoldedChannel 映射回折叠条目，不至于显示成"不可用：-"。
+       * 注意：折叠定义在下面（函数提升不可用于 const）—— 故这里先取原始，再用下面重算的变量。 */
+      const sel = resolveFoldedChannel(foldChannels(channels), channel.provider)
+        ?? channels.find((c) => c.id === channel.provider) ?? null;
       const models = sel && Array.isArray(sel.models) ? sel.models : [];
-      const modelValue = channel.model ?? '';
+      /* ZB-51：若当前 provider 就是 ZCode 的**免费额度通道**，模型下拉要**回显「免费额度」**
+       * 那个伪项 —— 否则 select 匹配不到 option 会掉到首项「通道默认模型」，
+       * 用户以为自己在用套餐模型（静默错配）。 */
+      /* 当前选中的**模型项**：选项 key 形态随引擎不同 ——
+       * · ZCode：`<路由id>::<模型名>`（存值里是 provider=路由、model=模型名）⇒ 反查 key；
+       * · OpenCode/Qoder：key 就是模型名。
+       * 反查不到就不给值（select 会落到首项「通道默认模型」——因为确实没选具体模型）。 */
+      const modelValueOf = (agg, provider, model) => {
+        if (!agg) return '';
+        if (agg.engine === 'zcode') {
+          if (!model) return '';
+          const key = `${provider}::${model}`;
+          return agg.models.includes(key) ? key : '';
+        }
+        return model ?? '';
+      };
+      const modelValue = modelValueOf(sel, channel.provider, channel.model);
       /* ── ZB-33：免费额度（Start Plan）通道的**额度条** ──
        * 数据来自宿主 `action=channels` 的 `channels[].quota`（只读 ZCode 客户端日志，
        * 零网络请求；同一份数据也暴露给 agent 工具，见 index.js 的工具描述）。
@@ -1929,45 +2271,192 @@ window.__ModuleLoader__.load({
       const giftText = giftSel ? (giftSel.quotaText ?? (giftSel.giftQuotaUnavailable ? `${t('giftQuotaUnavailable')}（${giftSel.giftQuotaUnavailable}）` : null)) : null;
 
       const switchProvider = (id) => {
-        const c = channels.find((x) => x.id === id);
+        /* ⚠️ ZB-51：必须在**折叠后**的清单里找 —— 折叠条目的 id 是裸引擎名（`opencode` / `qoder`），
+         * 原始清单里只有 `opencode/<model>` 形态，直接用 `channels.find` 会找不到 ⇒ **选不中**。
+         * 找不到折叠条目时再回退原始清单（未知通道）。 */
+        const folded = foldChannels(channels);
+        const c = resolveFoldedChannel(folded, id) ?? channels.find((x) => x.id === id);
         if (!c || !c.enabled) return; // 不可用项不允许选中（option 已 disabled）
-        onSwitch({ provider: id, model: c.models && c.models.length ? c.models[0] : null });
+        /* 选中引擎条目 ⇒ 模型默认取该引擎的**第一个模型**，并经 routeForPick 映射回真实路由
+         * （ZCode 的首项可能是"免费额度"伪项 ⇒ provider 要换成那条真实通道 id）。 */
+        const first = c.models && c.models.length ? c.models[0] : null;
+        const pick = routeForPick(c, first) ?? { provider: c.id, model: first };
+        onSwitch(pick);
       };
-      const switchModel = (m) => onSwitch({ provider: channel.provider, model: m || null });
+      const switchModel = (m) => {
+        /* ZCode 的模型项 key 是 `<路由id>::<模型名>` ⇒ provider 与 model **必须一起写**
+         * （否则会出现"provider=plan 但用户以为在用免费额度"的静默错配）。 */
+        if (sel && sel.engine === 'zcode') { const p = routeForPick(sel, m); onSwitch({ provider: p.provider, model: p.model }); return; }
+        onSwitch({ provider: channel.provider, model: m || null });
+      };
+      /** 模型下拉里某一项的**显示文案**（上面「通道」分区用）。 */
+      const modelOptionLabel = (m) => modelLabelFor(sel?.engine, sel?._routeOf, sel?._modelOf, m);
 
+      /* 模型下拉的选项：折叠条目的模型并集；ZCode 的「免费额度」也在其中（伪项）。
+       * 当前值必须**始终可渲染**（否则 select 会掉到首项显示成「通道默认模型」）。 */
       const modelOptions = models.length
         ? models
         : (modelValue ? [modelValue] : []); // 通道没给模型表时至少显示当前值
 
-      /* ── ZB-33b（用户要求）：**通道下拉只列可用通道**（「自动降级」目标下拉同样） ──
-       * 例外：**当前选中值**若已掉线（历史存值指向一个不可用通道），仍把它单独列在最前并标注
-       * 「不可用：原因」—— 否则 `<select value>` 匹配不到 option，浏览器会显示首项，
-       * 与真实存值不符（与 ZB-31 的"失效档位要显式列出"同一个坑）。 */
-      const usableChannels = channels.filter((c) => c.enabled);
-      const channelOptionsFor = (current) => {
-        const list = usableChannels.some((c) => c.id === current)
-          ? usableChannels
-          : [
-            ...(current
-              ? [{ id: current, name: current, enabled: false, reason: channels.find((c) => c.id === current)?.reason ?? '-' }]
-              : []),
-            ...usableChannels,
-          ];
-        return list.map((c) =>
-          h('option', { key: c.id, value: c.id, ...(c.enabled ? {} : { disabled: true }) },
-            `${c.name ?? c.id}${c.enabled ? '' : `（${t('chanDisabled')}：${c.reason ?? '-'}）`}` +
-              `${c.recentQuotaExhausted ? `（${t('chanQuotaExhausted')}）` : ''}`),
-        );
+      /* ── 双引擎（OpenCode 接入）：通道下拉按**引擎分组**（optgroup）──
+       * 设计决策（与用户确认，别再改成双 tab）：引擎是「通道」的**属性**，不是第二个维度 ——
+       * 进程列表 / 文件锁 / 队列 / 用量 / 唤醒通知 / 降级链全部与引擎无关，
+       * 拆 tab 会把进程列表与降级链割裂，丢掉「跨引擎降级」这个最大增量。
+       * 故这里只做**下拉分组 + 徽标**，引擎专属设置靠「按选中通道动态显示」（见下面的提示行）。
+       * ZB-51：分组之上再做**折叠**（同引擎的多条通道合成一条）—— 见 `foldChannels`。
+       * 分组顺序与 core 的 `listChannels()` 一致：先 ZCode，再 OpenCode，再 Qoder。
+       * 旧的 core（通道无 `engine` 字段）⇒ 全部落进 ZCode 组（向后兼容）。
+       * 当前值若已掉线（历史存值指向不可用通道）仍单独列出并标注「不可用：原因」（ZB-33b 语义不变）。 */
+      /* ZB-51：**引擎归一化的唯一权威**（客户端侧）。
+       * 原先到处写 `c.engine === 'opencode' ? 'opencode' : 'zcode'` —— 二元判断，第三个引擎
+       * （qoder）一来就会被**错误地归进 ZCode 组**（下拉分组、徽标、提示全错），且不会报错。
+       * 这里统一成一个函数，所有需要"引擎名"的地方都走它。 */
+      const ENG_GROUP_KEY = { zcode: 'engGroupZcode', opencode: 'engGroupOpencode', qoder: 'engGroupQoder' };
+
+      const ENGINE_GROUPS = [
+        { key: 'zcode', label: t(ENG_GROUP_KEY.zcode) },
+        { key: 'opencode', label: t(ENG_GROUP_KEY.opencode) },
+        { key: 'qoder', label: t(ENG_GROUP_KEY.qoder) },
+      ];
+      /* ── 通道过滤开关（用户要求）：两个独立开关，作用于「通道」与「自动降级目标」两处下拉 ──
+       * 「仅看可用」默认**开**：与改造前的既有行为一致（下拉只列可用通道，ZB-33b）。
+       *   ⚠️ 与 ZB-33b 的唯一差别：关掉它时**不可用通道也会列出来**（置灰 + 标注原因）——
+       *   这正是这个开关存在的意义（否则它与"永远开"没有区别，等于死开关）。
+       * 「仅看免费」默认**关**：开启后只列**不需要付费额度**的通道。
+       *   "免费"的判据（写死在这里，且**只影响展示，不影响调度**）：
+       *     ① `engine === 'opencode'` ⇒ 免费。依据：core 的清单来自 `opencode models`，
+       *        而 `OPENCODE-DISPATCH-HANDOFF.md` §2 实测该命令在本机 0 凭据下**只返回免费模型**；
+       *        将来 OpenCode 若在目录里混入付费模型，这条判据要跟着改（届时用 id 里的 `-free` 兜一层）。
+       *     ② ZCode 侧的免费额度通道：`account:<family>-start-plan`（ZB-33 的 Start Plan）与
+       *        `provider === 'start-plan'/'gift'`。
+       *   **刻意不把** `personal`（个人 Key）算作免费 —— 那走用户自己的付费额度。
+       *   状态存 localStorage（与分区展开态同款范式）：面板重开/刷新后保留用户选择。 */
+      const FREE_CHANNEL_RE = /^account:[a-z]+-start-plan$/;
+      const isFreeChannel = (c) => {
+        const id = String(c?.id ?? '');
+        return !!c && (c.engine === 'opencode' || FREE_CHANNEL_RE.test(id) || id === 'start-plan' || id === 'gift');
       };
+      /* 两个开关的持久化键（**单一源**：读取默认值、写回、测试断言都用这里，避免三处各写一遍字符串）。 */
+      const filtStorageKey = { available: 'dispatch:filter:available', free: 'dispatch:filter:free' };
+      const filtAvailInit = (() => { try { return localStorage.getItem(filtStorageKey.available) !== '0'; } catch { return true; } })();
+      const filtFreeInit = (() => { try { return localStorage.getItem(filtStorageKey.free) === '1'; } catch { return false; } })();
+      const [filtAvailable, setFiltAvailable] = useState(filtAvailInit);
+      const [filtFree, setFiltFree] = useState(filtFreeInit);
+      const toggleFilt = (which) => {
+        const next = which === 'free' ? !filtFree : !filtAvailable;
+        if (which === 'free') setFiltFree(next); else setFiltAvailable(next);
+        try { localStorage.setItem(filtStorageKey[which], next ? '1' : '0'); } catch { /* 存储不可用不影响本次会话 */ }
+      };
+      /* 应用过滤：先判可用（可选）、再判免费（可选）。
+       * 返回值统一成 `{...channel, _reasons: [...]}`，让 option 渲染唯一化（见 channelOptionNode）。 */
+      const applyChanFilters = (list) => list.filter((c) => {
+        if (filtAvailable && !c.enabled) return false;
+        if (filtFree && !isFreeChannel(c)) return false;
+        return true;
+      });
+      const freeCount = channels.filter(isFreeChannel).length;
+
+      const channelOptionNode = (c) => {
+        const reasons = (c._reasons ?? []).slice();
+        if (!c.enabled) reasons.push(`${t('chanDisabled')}：${c.reason ?? '-'}`);
+        if (c.recentQuotaExhausted) reasons.push(t('chanQuotaExhausted'));
+        return h('option', { key: c.id, value: c.id, ...(c.enabled ? {} : { disabled: true }) },
+          `${c.name ?? c.id}${reasons.length ? `（${reasons.join('；')}）` : ''}`);
+      };
+
+      /* ── ZB-51：**通道折叠**（用户要求：「通道」选引擎，「模型」里选模型）──
+       *
+       * 问题：OpenCode 探测出 12 个免费模型、Qoder 探测出 15 个模型，core 给每个模型一条通道
+       * （因为"通道即执行目标"是 core 的模型），结果**15 个模型全堆在「通道」下拉里**，
+       * 而「模型」下拉反而只有一个选项 —— 层级用反了。
+       *
+       * 做法（**只在展示层折叠，不动 core 语义**）：
+       *   · `opencode` / `qoder`：把同引擎的所有模型通道**聚合**成一条"引擎通道"
+       *     （id 用裸引擎名，模型并集进 `models`）⇒ 「通道」里只有一条，模型在「模型」下拉里选；
+       *   · `zcode`：**不折叠** —— 它的几条是**不同计费路由**（套餐/免费额度），必须各自可选。
+       *
+       * ⚠️ 兼容：core 里"每个模型一条通道"的数据仍在（工具/降级链/快照都不受影响）；
+       * 面板选中折叠后的引擎通道时，回写的是 `{provider:'opencode', model:'<具体模型>'}`，
+       * core 的 `resolveEngineOf` 已认裸引擎名 ⇒ 引擎路由不受影响（详见 qoder-routing 测试）。
+       * 旧存值若指向具体模型通道（`opencode/xyz`），下方 `sel` 的兜底会把它映射回引擎通道。 */
+      /* 被过滤掉的**当前值**：为什么还留在下拉里？两种情形分开标注（不谎报）。
+       *   · 本身不可用（掉线）⇒ 「不可用：原因」（ZB-33b 原语义）
+       *   · 本身可用、只是被「仅看免费」挡下 ⇒ 「当前选择」 */
+      const pinnedReasonText = (c) => {
+        if (!c) return `${t('chanDisabled')}：-`;
+        return c.enabled ? t('filtCurrent') : `${t('chanDisabled')}：${c.reason ?? '-'}`;
+      };
+      const groupedChannelOptions = (current) => {
+        /* ⚠️ 先折叠再过滤：折叠后的引擎条目才是"用户能选的东西"，
+         * 过滤开关（仅看可用 / 仅看免费）也应作用在折叠后的条目上
+         * （整条引擎条目只有在**所有**子模型都不可用时才不可用 —— foldChannels 已处理）。 */
+        const folded = foldChannels(channels);
+        const kept = applyChanFilters(folded);
+        const cur = resolveFoldedChannel(folded, current) ?? channels.find((c) => c.id === current) ?? null;
+        /* 当前选中值必须**始终可渲染**，否则 `<select value>` 匹配不到 option，
+         * 浏览器会显示首项 —— 与真实存值不符（ZB-31/ZB-33b 同类坑）。
+         * ZB-51：`cur` 已在折叠清单里找过 + 原清单兜底，故旧存值 `opencode/xyz` 也能正确定位。 */
+        const list = kept.some((c) => c.id === current) || !current
+          ? kept
+          : [
+            cur
+              ? { ...cur, _reasons: [pinnedReasonText(cur)] }
+              : { id: current, name: current, enabled: false, _reasons: [pinnedReasonText(null)] },
+            ...kept,
+          ];
+        const out = [];
+        for (const g of ENGINE_GROUPS) {
+          const items = list.filter((c) => engineOf(c.engine) === g.key);
+          if (items.length) out.push(h('optgroup', { key: g.key, label: g.label }, items.map(channelOptionNode)));
+        }
+        const others = list.filter((c) => !KNOWN_ENGINES.includes(engineOf(c.engine)));
+        if (others.length) out.push(h('optgroup', { key: 'other', label: t('provider') }, others.map(channelOptionNode)));
+        return out;
+      };
+      /* 引擎专属提示：跟随**选中通道**动态显示（用户要求：不做双 tab，靠动态区块解决）。
+       * 文案里的能力边界是硬事实（core 的 validateSpec 会拒 opencode+mode），不是软提示。 */
+      const chanEngine = sel ? engineOf(sel.engine) : null;
+      const chanEngineNote = chanEngine
+        ? h('div', { className: 'dsp-dim', style: { fontSize: '11px' } },
+          h('span', { className: 'dsp-badge' }, `${t('engBadge')}：${engLabel(chanEngine)}`),
+          h('span', { style: { marginLeft: '6px' } }, t(chanEngine === 'opencode' ? 'chanEngineHintOpencode' : chanEngine === 'qoder' ? 'chanEngineHintQoder' : 'chanEngineHintZcode')))
+        : null;
 
       /* 降级目标（单目标；core 仍支持多目标列表供 CLI 使用）。targets[0] 为准，旧 chain 兜底。 */
       const fbEnabled = !!fallback?.enabled;
       const fbTarget = fallback?.target ?? null;
       const fbProvider = fbTarget?.provider ?? '';
-      const fbSel = channels.find((c) => c.id === fbProvider) ?? null;
+      /* ⚠️ ZB-51：降级区与上面「通道」分区**共用折叠清单** ——
+       * 折叠后 provider 是裸引擎名（`opencode`/`qoder`），在**原始** channels 里找不到，
+       * 故一律经 `resolveFoldedChannel` 解析。真机反馈：降级区里 OpenCode/Qoder **选不中**
+       * （`fbSwitchProvider` 用原始清单 find ⇒ 找不到 ⇒ 直接 return，静默失效）。 */
+      const fbFolded = foldChannels(channels);
+      const fbSel = resolveFoldedChannel(fbFolded, fbProvider) ?? null;
+      /* ⚠️ ZB-51：档位集必须取**该引擎下所有子通道的并集**（与上方「通道」分区**同一来源**）。
+       * 原先取"第一个带 thinkingLevels 的子通道" ⇒ 降级区只剩 3 档、上方有 5 档，
+       * 两侧选项集不一致（被 fallback-ui 断言抓到）。 */
+      const fbEng = fbSel ? engineOf(fbSel.engine) : null;
+      const fbThinkingUnion = fbSel
+        ? [...new Set([
+          ...(Array.isArray(fbSel.thinkingLevels) ? fbSel.thinkingLevels : []),
+          ...channels.filter((c) => engineOf(c.engine) === fbEng).flatMap((c) => (Array.isArray(c.thinkingLevels) ? c.thinkingLevels : [])),
+        ])]
+        : [];
       const fbModels = fbSel && Array.isArray(fbSel.models) ? fbSel.models : (fbTarget?.model ? [fbTarget.model] : []);
-      const fbLevels = Array.isArray(fbSel?.thinkingLevels) ? fbSel.thinkingLevels : [];
-      const fbModel = fbTarget?.model ?? '';
+      const fbLevels = fbThinkingUnion;
+      /* ZB-51：与上面「通道」分区同一条转换 —— ZCode 的模型项是**路由 id**（存在 provider 里），
+       * 其它引擎存的是 model。这样「通道」下拉的当前值才能命中折叠条目（不会多固定一条）。 */
+      const fbValue = fbSel?.id ?? fbProvider;
+      /* 与上方同一套"模型项 key"解析（ZCode 是 `<路由id>::<模型名>`；其它引擎是模型名）。 */
+      const fbModel = (() => {
+        if (!fbSel) return fbTarget?.model ?? '';
+        if (fbSel.engine === 'zcode') {
+          if (!fbTarget?.model) return '';
+          const key = `${fbProvider}::${fbTarget.model}`;
+          return fbSel.models.includes(key) ? key : '';
+        }
+        return fbTarget?.model ?? '';
+      })();
       /* ZB-30b（用户要求「不要沿用原任务，就跟上面完全一致的选项逻辑」）：降级目标的模型/思考强度
        * 用与上面「通道」分区**逐字相同**的选项集与默认值 —— 模型首项 `（通道默认模型）`（值 ''）、
        * 思考强度首项 `Agent决定（按任务判断）`（值 'agent'）。语义也随之对齐：
@@ -1976,6 +2465,9 @@ window.__ModuleLoader__.load({
        *     与上面「Agent决定」在未显式指定档位时走的是同一条规则（仅新建会话生效）。
        * 注：core/CLI 侧的 `null` 仍表示"沿用原任务"（旧调用方兼容），面板不再产生 null。 */
       const fbThinking = fbTarget?.reasoningLevel ?? 'agent';
+
+      /** 降级区模型下拉的**显示文案**（与上面「通道」分区同一纪律）。 */
+      const fbModelLabel = (m) => modelLabelFor(fbSel?.engine, fbSel?._routeOf, fbSel?._modelOf, m);
 
       /** 写降级目标（对象 ⇒ 开启；null ⇒ 关闭）。乐观回显交给 PanelBody 的权威值校正。
        * ⚠️ 面板里**显示什么就写什么**（与上面「通道」分区同一纪律）：
@@ -2018,14 +2510,21 @@ window.__ModuleLoader__.load({
         setFbFeedback(null);
       };
       const fbSwitchProvider = (id) => {
-        const c = channels.find((x) => x.id === id);
+        /* ZB-51：与上面 `switchProvider` **同一套判据** —— 必须经折叠清单解析，
+         * 否则折叠条目 id（`opencode`/`qoder`）在原始 channels 里找不到 ⇒ **静默选不中**。 */
+        const c = resolveFoldedChannel(fbFolded, id) ?? channels.find((x) => x.id === id);
         if (!c || !c.enabled) return;
-        /* 换通道 ⇒ 模型/档位回到「通道默认模型 / Agent决定」（与上面切 provider 的行为同形）。 */
-        saveTarget({ provider: id, model: null, reasoningLevel: 'agent' });
+        /* 换通道 ⇒ 模型/档位回到「通道默认模型 / Agent决定」（与上面切 provider 的行为同形）。
+         * provider 写**折叠条目的 id**（裸引擎名，core 认）；ZCode 的"免费额度"由模型项带回路由。 */
+        saveTarget({ provider: c.id, model: null, reasoningLevel: 'agent' });
       };
-      const fbSwitchModel = (m) => saveTarget({ model: m || null });
+      const fbSwitchModel = (m) => {
+        /* ZCode 的模型项 key 是 `<路由id>::<模型名>` ⇒ provider 与 model 必须一起写。 */
+        if (fbSel && fbSel.engine === 'zcode') { const p = routeForPick(fbSel, m); saveTarget({ provider: p.provider, model: p.model }); return; }
+        saveTarget({ model: m || null });
+      };
       const fbSwitchThinking = (lv) => saveTarget({ reasoningLevel: lv || 'agent' });
-      const fbUnknown = fbEnabled && fbProvider && !channels.some((c) => c.id === fbProvider);
+      const fbUnknown = fbEnabled && fbProvider && !resolveFoldedChannel(fbFolded, fbProvider);
 
       return h('div', { className: 'dsp-stack' },
         /* ZB-42（用户现场报告）：总开关关闭时**必须在通道分区里明说**。
@@ -2036,21 +2535,53 @@ window.__ModuleLoader__.load({
         sw && sw.enabled === false
           ? h('div', { className: 'dsp-note', role: 'status', title: t('switchOffBlocked') }, t('switchOffBlocked'))
           : null,
-        warnings.length ? h('div', { className: 'dsp-feedback dsp-err' }, `${t('chanLoadFail')}: ${warnings[0]}`) : null,
+        /* ZB-51：通道清单的 warning **分两类渲染**（真机反馈：把"按白名单剔除 8 条"这种**预期信息**
+         * 渲染成红色 `通道清单加载失败: …` ⇒ 用户以为插件坏了）：
+         *   · `[info]` 前缀 ⇒ **中性提示**（dsp-note），说明"这是配置决定的，不是故障"；
+         *   · 其余 ⇒ 红色（真失败：探测不到、执行器缺失等）。
+         * 两类都要显示 —— 只是不能把信息渲染成故障。 */
+        (() => {
+          if (!warnings.length) return null;
+          const info = warnings.filter((w) => String(w).startsWith('[info]'));
+          const errs = warnings.filter((w) => !String(w).startsWith('[info]'));
+          if (!errs.length) {
+            return h('div', { className: 'dsp-note', role: 'status', title: info.join('\n') },
+              `${t('chanInfoPrefix')}${info.map((w) => String(w).replace(/^\[info\]\s*/, '')).join('；')}`);
+          }
+          return h('div', { className: 'dsp-feedback dsp-err' },
+            `${t('chanLoadFail')}: ${errs[0]}${errs.length > 1 ? `（+${errs.length - 1}）` : ''}`);
+        })(),
+        /* 通道清单拉取失败必须**可见**（真机事故：失败被静默丢弃 ⇒ 三个下拉全显示「不可用：-」，
+         * 用户以为插件坏了）。这里把 wire 的原始错误显示出来，并说明"会自动重试"。 */
+        !warnings.length && chanError
+          ? h('div', { className: 'dsp-feedback dsp-err', role: 'status' },
+            `${t('chanLoadFail')}: ${chanError}（${t('chanLoadRetry')}）`)
+          : null,
+        /* 清单为空且没有已知错误：多半是宿主刚启动、首次探测还没回来（或 OpenCode/ZCode 探测都失败）。
+         * 明说一句"正在加载"，避免用户把"空"误读成"没有可用通道"。 */
+        !warnings.length && !chanError && channels.length === 0
+          ? h('div', { className: 'dsp-note', role: 'status' }, t('chanLoading'))
+          : null,
         /* ZB-01 ③：离线态的说明统一由面板 body 首行渲染（此处曾重复渲染同一句，已去重）；
          * 两个下拉仍各自带 title，便于悬停即知为什么点不动。
          * ZB-14：改成**固定两行**（每行 = 标签 + 下拉），不再把 4 个元素塞进一个 flex-wrap 行 ——
          * 原先面板一变宽就重排换行、两个下拉宽度还各随内容变（用户报告「随窗口尺寸乱跑」）。
          * 现在：标签 nowrap 定自然宽、下拉 flex:1 等宽撑满 ⇒ 任意面板宽度下版式都一致。 */
+        /* ZB-51（T5）：引擎状态条 —— 放在开关/告警之后、两个下拉之前：
+         * 用户先看"这台机器上有什么引擎、能不能用"，再看"当前选哪个通道"。 */
+        h(EngineStatus, { engineDetail: channelsInfo?.engineDetail }),
         h('div', { className: 'dsp-field' },
           h('span', { className: 'dsp-field-k' }, t('provider')),
           h('select', {
-            className: 'dsp-select dsp-field-v', value: channel.provider,
+            /* ⚠️ ZB-51：与降级区**同一纪律** —— 下拉 value 用**折叠条目的 id**（`zcode`/`opencode`/`qoder`）。
+             * 用原始 `channel.provider`（如 `plan`）会匹配不到 option（选项值已是折叠 id）⇒
+             * 浏览器显示首项、当前选择消失（真机/测试都踩到）。 */
+            className: 'dsp-select dsp-field-v', value: sel?.id ?? channel.provider,
             onChange: (e) => switchProvider(e.target.value), 'aria-label': t('provider'),
             disabled: channels.length === 0,
             title: offline ? (offlineReason || t('chanOfflineHint')) : undefined,
           },
-            channelOptionsFor(channel.provider))),
+            groupedChannelOptions(sel?.id ?? channel.provider))),
         h('div', { className: 'dsp-field' },
           h('span', { className: 'dsp-field-k' }, t('model')),
           h('select', {
@@ -2059,14 +2590,25 @@ window.__ModuleLoader__.load({
             disabled: !sel || !sel.enabled,
             title: offline ? (offlineReason || t('chanOfflineHint')) : undefined,
           },
-            h('option', { value: '' }, t('chanDefaultModel')),
-            modelOptions.map((m) => h('option', { key: m, value: m }, m)))),
+            h('option', { value: '', title: t('modelAgentDecideHint') }, t('modelAgentDecide')),
+            /* ZB-51：ZCode 的模型项是 `<路由>::<模型名>`（显示成具体模型名，免费额度带「免费」）。 */
+            modelOptions.map((m) => h('option', { key: m, value: m }, modelOptionLabel(m))))),
         /* ZB-29d：通道默认思考强度——**这才是给派发 Agent 的规定**：
          * 'Agent决定'=派发方 Agent 按任务自行改传具体档位；具体档位=未显式指定的派发一律按它执行。
          * ⚠️ core 的 `thinkingLevels` 是**数组**（该通道各模型档位集的并集），不是 map ——
          * 曾误当 map 取值（lvMap[model]）导致下拉只剩「Agent决定」（现场 bug，测试已钉住形状契约）。 */
         (() => {
-          const levels = Array.isArray(sel?.thinkingLevels) ? sel.thinkingLevels : [];
+          /* ⚠️ ZB-51：档位集取**该引擎下所有子通道的并集**（与降级区**同一来源**）。
+           * 原先只读**当前路由条目**的档位 ⇒ 选了 `plan`（只有 disabled/enabled 两档）时，
+           * 「模型」下拉里那条免费额度（四档）能提供的 低/高/最高 就选不到；
+           * 而降级区读的是引擎并集 ⇒ **两侧选项集不一致**（被 fallback-ui 断言抓到）。 */
+          const engOfSel = sel ? engineOf(sel.engine) : null;
+          const levels = sel
+            ? [...new Set([
+              ...(Array.isArray(sel.thinkingLevels) ? sel.thinkingLevels : []),
+              ...channels.filter((c) => engineOf(c.engine) === engOfSel).flatMap((c) => (Array.isArray(c.thinkingLevels) ? c.thinkingLevels : [])),
+            ])]
+            : [];
           const cur = channel.reasoningLevel ?? 'agent';
           /* ZB-31：**失效档位必须显式列出**。修复探测匹配式后，某些"修复前存下的"档位
            * （如 GLM-5.3 的 `disabled`，旧探测误判为合法）已不在当前 levels 里；若不列出，
@@ -2086,8 +2628,47 @@ window.__ModuleLoader__.load({
               stale ? h('option', { value: cur }, `${thinkingLabel(cur)}（${t('thinkingStale')}）`) : null,
               levels.map((lv) => h('option', { key: lv, value: lv }, thinkingLabel(lv)))));
         })(),
+        /* ── 通道过滤开关（用户要求「面板新增 2 个开关：仅看可用 / 仅看免费」，用于过滤） ──
+         * 位置放在三个下拉**之后**：它们只影响上面两个下拉列出什么，不改变当前选择。
+         * 两个开关都只做**展示层过滤**（不写 core 状态、不影响调度），所以离线也能用。 */
+        h('div', { className: 'dsp-field', 'data-dsp-filter': 'channel' },
+          h('span', { className: 'dsp-field-k' }, t('filter')),
+          h('span', { className: 'dsp-field-v', style: { display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' } },
+            h('button', {
+              className: 'dsp-switch dsp-toggle', type: 'button',
+              onClick: () => toggleFilt('available'), 'aria-pressed': filtAvailable,
+              title: t('filtAvailableHint'),
+            },
+              h('span', { className: 'dsp-dot', style: { background: filtAvailable ? T.stDone : T.danger } }),
+              t('filtAvailable')),
+            h('button', {
+              className: 'dsp-switch dsp-toggle', type: 'button',
+              onClick: () => toggleFilt('free'), 'aria-pressed': filtFree,
+              title: t('filtFreeHint'),
+            },
+              h('span', { className: 'dsp-dot', style: { background: filtFree ? T.stDone : T.danger } }),
+              `${t('filtFree')}${freeCount ? `（${freeCount}）` : ''}`))),
+        /* 过滤生效时明说「滤掉了几个」—— 否则用户会以为通道清单变少了/坏了。
+         * 注意：被"仅看免费"挡下的**当前选择值**仍会补进下拉（否则 select 显示错值），
+         * 故这里的计数是"该补的那条恰好被挡下"时才 +1 —— 不虚构、与下拉实际条目一致。 */
+        (() => {
+          if (!filtAvailable && !filtFree) return null; // 两个都关 = 不过滤，不用提示
+          /* ZB-51：计数也要按**折叠后**的清单算（否则会报"隐藏了 25 条"而用户只看到几条）。 */
+          const folded = foldChannels(channels);
+          const kept = applyChanFilters(folded);
+          const cur = resolveFoldedChannel(folded, channel.provider) ?? null;
+          const curPinned = !!cur && !kept.some((c) => c.id === cur.id);
+          const shown = kept.length + (curPinned ? 1 : 0);
+          const hidden = folded.length - shown;
+          if (hidden <= 0) return null;
+          return h('div', { className: 'dsp-note', role: 'status', title: t('filtHint') },
+            `${t('filtHiddenA')}${hidden}${t('filtHiddenB')}${folded.length}${t('filtHiddenC')}`);
+        })(),
         h('div', { className: 'dsp-note', role: 'status' },
-          `${t('chanNewTask')}${channel.provider}/${channel.model || t('chanDefaultModel')} · ${t('thinking')}: ${channel.reasoningLevel === 'agent' || !channel.reasoningLevel ? t('thinkingAgentShort') : thinkingLabel(channel.reasoningLevel)}`),
+          /* ZB-51：未指定模型时显示「Agent决定」（与模型下拉首项同一文案，用户要求）。 */
+          `${t('chanNewTask')}${channel.provider}/${channel.model || t('modelAgentDecide')} · ${t('thinking')}: ${channel.reasoningLevel === 'agent' || !channel.reasoningLevel ? t('thinkingAgentShort') : thinkingLabel(channel.reasoningLevel)}`),
+        /* 引擎专属提示（跟随选中通道动态显示）——OpenCode 通道不支持 mode/memoryBench 等硬边界。 */
+        chanEngineNote,
         /* ── ZB-33：免费额度通道的额度条（仅选中该通道时显示） ── */
         giftSel && giftText
           ? h('div', { className: 'dsp-field' },
@@ -2129,11 +2710,15 @@ window.__ModuleLoader__.load({
           h('div', { className: 'dsp-field' },
             h('span', { className: 'dsp-field-k' }, t('provider')),
             h('select', {
-              className: 'dsp-select dsp-field-v', value: fbProvider,
+              /* ⚠️ ZB-51：下拉 value 用**折叠条目的 id**（`zcode`/`opencode`/`qoder`），
+               * 而不是存值里的原始通道 id（`plan`/`opencode/xyz`）——
+               * 否则「当前值」在折叠清单里命不中，会被额外固定一条 ⇒ 与上方「通道」分区选项集不一致
+               * （真机/测试都踩到：上方有 ZCode、下方却只有 默认套餐）。 */
+              className: 'dsp-select dsp-field-v', value: fbValue,
               onChange: (e) => fbSwitchProvider(e.target.value), 'aria-label': `${t('fallbackTitle')}-${t('provider')}`,
               disabled: busy || channels.length === 0,
             },
-              channelOptionsFor(fbProvider))),
+              groupedChannelOptions(fbValue))),
           h('div', { className: 'dsp-field' },
             h('span', { className: 'dsp-field-k' }, t('model')),
             h('select', {
@@ -2142,7 +2727,7 @@ window.__ModuleLoader__.load({
               disabled: busy || !fbSel || !fbSel.enabled,
             },
               h('option', { value: '' }, t('chanDefaultModel')),
-              fbModels.map((m) => h('option', { key: m, value: m }, m)))),
+              fbModels.map((m) => h('option', { key: m, value: m }, fbModelLabel(m))))),
           h('div', { className: 'dsp-field' },
             h('span', { className: 'dsp-field-k' }, t('thinking')),
             h('select', {
@@ -2338,6 +2923,17 @@ window.__ModuleLoader__.load({
           h('div', { className: 'dsp-job-line' },
             h(StatusDot, { state: job.state }),
             h('span', { className: 'dsp-job-tag', title: job.id }, job.tag ?? shortId(job.id)),
+            /* 引擎徽标（一眼看出这个进程是哪个引擎跑的）。
+             * 判据顺序与 core 一致：job.engine（core 落库）→ spec.engine → provider 形态 → 默认 zcode。
+             * 旧记录（改造前落盘的 job 没有这些字段）显示为 ZCode —— 与事实相符，不伪造成新形态。
+             *
+             * ⚠️ ZB-51 真机 bug（用户截图发现）：这里原来是**二元**判断
+             * `job.engine === 'opencode' || …` ⇒ **Qoder job 被显示成 ZCode 徽标**
+             * （第三引擎一来就归错组 —— 与通道分组那次是同一类错误）。改用统一归一函数。 */
+            (() => {
+              const e = jobEngineOf(job);
+              return h('span', { className: 'dsp-badge', title: `${t('engBadge')}：${engLabel(e)}` }, engLabel(e));
+            })(),
             h('span', { className: 'dsp-badge' }, job.model ?? '—'),
             /* ZB-29：思考强度徽标紧跟模型——显示**实际生效档位**（含 Agent决定档的解析结果）；
              * 无法确定（旧 runner / --resume / 模型未声明）时隐藏，不伪造。 */
@@ -2348,6 +2944,8 @@ window.__ModuleLoader__.load({
               }, thinkingLabel(shown)) : null;
             })(),
             paused ? h('span', { className: 'dsp-badge s-paused', title: job.pauseDetail ?? '' }, `${t('paused')}：${pauseLabel(job.pauseReason)}`) : null,
+            /* 权限放行必须**可见**（可审计）：auto 默认关，只有显式指定才有；有就必须在进程行上看得到。 */
+            (job.autoApproved || (job.spec && job.spec.auto)) ? h('span', { className: 'dsp-badge', title: t('autoApprovedHint') }, t('autoApproved')) : null,
             job.parentJobId ? h('span', { className: 'dsp-badge', title: job.parentJobId }, `${t('parentFrom')} ${shortId(job.parentJobId)}`) : null,
             (job.hopCount ?? 0) > 0 ? h('span', { className: 'dsp-badge' }, `${job.hopCount} ${t('hop')}`) : null,
             /* ZB-18：锁徽标区分「整仓库锁」/「文件锁 N」/「不取锁」；tooltip 给出细节与文件列表。
@@ -2783,21 +3381,43 @@ window.__ModuleLoader__.load({
       const [channelsInfo, setChannelsInfo] = useState({ channels: [], warnings: [] });
       const [channel, setChannelState] = useState({ provider: 'plan', model: 'GLM-5.3-Flash' });
       const [fallback, setFallbackState] = useState({ enabled: false, chain: [], targets: [], target: null });
+      /* 【真机事故修复（本轮用户现场）】面板三个下拉全部显示「不可用：-」、通道分区空、没有过滤提示。
+       * 根因：① `channels()` 只在**挂载时拉一次**；② `wire.client` 把失败包成 `{ok:false, error}`
+       * （不抛），而下面那个 `.then` 只处理 `ok` ⇒ **失败被静默丢弃、清单永远是空数组**；
+       * ③ 客户端也没有任何重试 —— 一次失败（例如冷探测较慢/宿主刚重启时首次调用）就永久残废。
+       * 现在三件事一起做：
+       *   · **失败可见**：把 wire 给的 error 显示在通道分区（不再"看起来像插件坏了"）；
+       *   · **自动自愈**：`snapshot()` 本来就带 `channels[]` 且每秒轮询 ⇒ 用快照兜底回填，
+       *     即便挂载时那次 `channels()` 失败，只要之后有任意一次快照成功，下拉就会恢复；
+       *   · 轮询回填只在"手上还是空清单"时覆盖，避免把用户刚切换后的权威值覆盖成旧快照。 */
+      const [chanError, setChanError] = useState(null);
       useEffect(() => {
         let alive = true;
         Promise.resolve(channels()).then((r) => {
-          if (alive && r && r.ok) setChannelsInfo({ channels: r.channels ?? [], warnings: r.warnings ?? [] });
-        });
+          if (!alive) return;
+          if (r && r.ok) { setChannelsInfo({ channels: r.channels ?? [], warnings: r.warnings ?? [] }); setChanError(null); }
+          else setChanError(String((r && r.error) || 'channels() 未返回 ok'));
+        }).catch((e) => { if (alive) setChanError(String(e?.message ?? e)); });
         Promise.resolve(channelGet()).then((r) => {
           if (alive && r && r.ok && r.channel && r.channel.provider) setChannelState(r.channel);
-        });
+        }).catch(() => { /* 兜底：下面快照/后续轮询会校正 */ });
         Promise.resolve(fallbackGet()).then((r) => {
           if (alive && r && r.ok) setFallbackState({ enabled: !!r.enabled, chain: r.chain ?? [], targets: r.targets ?? [], target: r.target ?? null });
-        });
+        }).catch(() => { /* 同上 */ });
         return () => {
           alive = false;
         };
       }, [channels, channelGet, fallbackGet]);
+
+      /* 快照兜底回填通道清单（自愈路径）：`snapshot()` 的载荷里本来就有 `channels[]`。
+       * 只在"当前清单为空"时采纳 —— 否则会用旧快照覆盖用户刚切通道后的权威值。
+       * 依赖里放 `snapshot`：每秒轮询会带来新的快照对象 ⇒ 失败后能自动恢复。 */
+      useEffect(() => {
+        const snapChans = Array.isArray(snapshot?.channels) ? snapshot.channels : null;
+        if (!snapChans || snapChans.length === 0) return;
+        setChannelsInfo((prev) => (prev.channels.length === 0 ? { channels: snapChans, warnings: prev.warnings ?? [] } : prev));
+        setChanError(null);
+      }, [snapshot]);
 
       const onSwitch = useCallback((c) => {
         setChannelState((prev) => ({ ...prev, ...c }));
@@ -2891,17 +3511,20 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsp-body' },
           h(Section, { id: SEC.channel, title: t('secChannel'), collapsible: true },
             /* 离线说明只在 body 首行渲染一处（去重）：这里不再重复同一句话。 */
-            h(ChannelSection, { channelsInfo, channel, fallback, onSwitch, onFallbackSet, offline: conn !== 'live', offlineReason, sw: dispatchSwitch })),
+            h(ChannelSection, { channelsInfo, channel, fallback, onSwitch, onFallbackSet, offline: conn !== 'live', offlineReason, sw: dispatchSwitch, chanError })),
           /* ZB-29c（用户要求）：**派发分区已移除**——无需手动派发，有需要让 Agent 通过
-           * dispatch 工具代劳。当前顺序：通道 → 用量 → 进程 → 单写者/文件锁。
-           * 分区 id 不变 ⇒ 各自展开状态与持久化键不受影响。 */
-          h(Section, { id: SEC.quota, title: t('secQuota'), collapsible: true },
-            h(QuotaCards, { quota, planQuota })),
+           * dispatch 工具代劳。
+           * 【用户要求（本轮）：**用量移到最下面**】顺序 = 通道 → 进程 → 单写者/文件锁 → 用量。
+           * 理由：用量是"回头看"的统计，而通道/进程/锁是"当下要看"的操作面；
+           * 放在最后不会把它挤到需要滚动才能看到的地方，也不会挡住进程列表。
+           * 分区 id 不变 ⇒ 各自展开状态与持久化键（localStorage['dispatch:section:<id>']）不受影响。 */
           h(Section, { id: SEC.jobs, title: t('secJobs'), collapsible: true },
             h(JobList, { snapshot, onKill, onDismiss, onTail: tail, onRetry, onContinue, channels: channelsInfo.channels, refreshKey: (snapshot && snapshot.generatedAt) || '', offline: conn === 'offline' })),
           /* ZB-09：单写者/文件锁紧跟在进程列表之后（排查并发问题时与进程对照着看更顺）。 */
           h(Section, { id: SEC.locks, title: t('secLocks'), collapsible: true },
             h(LockStatus, { snapshot })),
+          h(Section, { id: SEC.quota, title: t('secQuota'), collapsible: true },
+            h(QuotaCards, { quota, planQuota })),
         ),
       );
     }

@@ -3,6 +3,12 @@ dispatch/work/
 dispatch/.data/
 .data/
 node_modules/
+# OpenCode 执行器（collab-kit/opencode-run.mjs）与 ZCode 执行器一样，把产物落在
+# **工作目录**下的 collab/logs/。若派发的工作目录恰好是本仓库（测试/自派发场景），
+# 就会在这里生成 collab/ ⇒ 那是运行期产物，不入库。
+# ⚠️ 只忽略 logs 子目录：将来若要随仓库发货 collab/ 下的文档不会被误伤。
+collab/logs/
+dispatch/collab/logs/
 
 # 桥的运行时收发（只保留目录占位）
 bridge/inbox/*

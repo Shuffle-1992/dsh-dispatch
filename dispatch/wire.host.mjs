@@ -130,6 +130,10 @@ export const EVENT_NAME = 'dispatch/changed';
 const REMOTE_METHOD_DESCRIPTOR = '@deepseek-ai/dsh-typert-protocol/remote-methods';
 /** snapshot() 里 channels 的缓存时长（任务包规定 5s）：通道清单靠 runner 子进程探测，昂贵。 */
 const CHANNELS_TTL_MS = 5000;
+/** **失败结果**的缓存时长（真机事故）：探测失败时若也缓存满 5s，宿主刚启动那几秒里
+ * 客户端拿到的就是"空清单"，而面板的通道分区只在挂载时拉一次 ⇒ 一次失败可能永久残废。
+ * 失败只缓存 1s ⇒ 下一次快照轮询（1s 一次）就会重试，面板能自愈。 */
+const CHANNELS_ERROR_TTL_MS = 1000;
 
 const trunc = (s, n = 200) => {
   const str = s == null ? '' : String(s);
@@ -197,6 +201,11 @@ export function slimJob(job) {
       body: trunc(spec?.[bodyField], 2000),
       model: spec?.model ?? null,
       provider: spec?.provider ?? null,
+      /* 双引擎：`engine`/`auto` 也放进 slim spec —— 面板的引擎徽标与「已放行权限」徽标
+       * 直接读 `job.engine`/`job.autoApproved`（走 ...rest 已保留），但工具/CLI 侧读的是 slim spec；
+       * 两者都给，避免"同一个事实在两条通道上一条有、一条没有"。 */
+      engine: spec?.engine ?? null,
+      auto: Boolean(spec?.auto),
       mode: spec?.mode ?? null,
       cwd: spec?.cwd ?? null,
       /* ZB-16 修正（ZB-17 补漏）：默认由 'both' 改为 'repo' —— 上一轮删 memory 时漏改了这里，
@@ -444,9 +453,15 @@ export function createActionHandler(dispatcher, config = {}) {
           if (spec.kind === 'task') spec.task = p.task;
           else if (spec.kind === 'target') spec.target = p.target;
           else spec.prompt = p.prompt;
-          for (const k of ['model', 'provider', 'mode', 'tag', 'cwd', 'resume']) {
+          /* 双引擎（OpenCode 接入）：`engine` / `auto` 也必须在这份白名单里 —— 否则 agent 工具
+           * 新加的参数会被**静默丢掉**（工具 schema 有、wire 不透传 ⇒ 调用方以为生效了）。
+           * `engine` 主路径其实不依赖它（`provider: "opencode/<model>"` 由 core 自动识别引擎），
+           * 但显式 `engine` 是工具文档承诺过的入口；`auto` 是**显式放行 OpenCode 权限**的唯一入口
+           * （默认关，不传即不放行），丢了它会让"放行"静默失效 —— 两种都属于"说了不做"，故补上。 */
+          for (const k of ['model', 'provider', 'engine', 'mode', 'tag', 'cwd', 'resume']) {
             if (p[k] != null && p[k] !== '') spec[k] = p[k];
           }
+          if (p.auto != null) spec.auto = Boolean(p.auto); // 布尔：false 也要落（显式关闭 ≠ 未指定）
           /* ZB-08：细粒度文件锁 —— 调用方声明写入集，只为这些路径加锁。
            * 不声明（null/空数组）⇒ core 回退到 repo/memory 粗粒度锁，安全语义不变。 */
           if (Array.isArray(p.write) && p.write.length > 0) spec.write = p.write.filter((x) => typeof x === 'string' && x.trim());
@@ -573,8 +588,22 @@ export function createActionHandler(dispatcher, config = {}) {
         }
         /* ---- Z6 增量动作：通道 / 续跑 / 降级链（既有动作语义不变） ---- */
         case 'channels': {
+          /* ⚠️ 这里**不能**顺手写 channelsCache —— 那是 `createRemoteFace()` 里的局部变量，
+           * 与本函数（`createActionHandler`）是两个独立作用域（实测：两者边界在 689/709 行）。
+           * 跨作用域引用它会在运行时抛 ReferenceError，而 `node --check` **查不出来**。 */
           const r = await dispatcher.listChannels();
-          return { ok: true, ...attachGiftQuota(r.channels ?? [], config.ledgerPath), warnings: r.warnings ?? [] };
+          /* ZB-51（T5 补）：工具路径（`action=channels`）也必须带上 `engineDetail` ——
+           * 与 `impl.channels()`（面板路径）共用同一份诊断信息。**两条路径都要透传**，
+           * 否则 Agent 用工具查通道时看不到"引擎形态/版本/登录态"，排障只能靠猜。
+           * （面板路径已透传；这里此前漏了 —— 只有"重启后实际调用工具"才暴露出来。） */
+          return {
+            ok: true,
+            ...attachGiftQuota(r.channels ?? [], config.ledgerPath),
+            warnings: r.warnings ?? [],
+            ...(r.engines ? { engines: r.engines } : {}),
+            ...(r.engineDetail ? { engineDetail: r.engineDetail } : {}),
+            ...(r.opencodeVersion != null ? { opencodeVersion: r.opencodeVersion } : {}),
+          };
         }
         case 'channel': {
           if (p.provider != null && p.provider !== '') {
@@ -612,7 +641,15 @@ export function createActionHandler(dispatcher, config = {}) {
           if (!sw.enabled) return { ok: false, error: SWITCH_OFF_ERROR, switch: sw };
           const id = p.id ?? p.jobId;
           if (!id) return { ok: false, error: 'retry 需要参数 id' };
-          const job = dispatcher.retry(id, { provider: p.provider, model: p.model ?? p.retryModel });
+          const job = dispatcher.retry(id, {
+            /* ZB-45（双引擎）：retry 也要能显式指定**引擎/模型**（跨引擎交接重跑＝换会话，
+             * 不是 resume），并把 `auto` 带过去 —— 否则"这个任务允许放行权限"会在重试后
+             * 静默变回不放行，用户看到的是同一个任务行为前后不一致。 */
+            provider: p.provider,
+            model: p.model ?? p.retryModel,
+            ...(p.engine != null && p.engine !== '' ? { engine: p.engine } : {}),
+            ...(p.auto != null ? { auto: Boolean(p.auto) } : {}),
+          });
           return { ok: true, job: slimJob(job) };
         }
         case 'fallback': {
@@ -661,14 +698,81 @@ export function createRemoteFace(dispatcher, config = {}) {
   let channelsCache = null; // { at, value } —— listChannels 每次起 runner 子进程探测，缓存 5s
   const NOT_READY = 'dispatcher 未初始化：请在插件 config 配置 runnerPath 与 workRoot 后重载插件';
 
+  /** 通道清单的**共享缓存 + 去重探测**（两条路径都走这里：面板挂载时的 `channels()` 与快照）。 */
+  let channelsProbeInFlight = null;
+
+  /**
+   * 取缓存的通道清单；过期则**在后台**刷新（不阻塞调用方）。
+   *
+   * 【真机事故修复（用户现场：「进程」有时显示"暂无进程记录"、标题栏卡在「连接中」）】
+   * 原先 `snapshot()` **内联 await** 了 `channelsCached()`（它会 spawn 一个 runner 子进程做探测，
+   * 冷启约 3s，而缓存只有 5s ⇒ 每 5 秒就有一次慢探测）。面板的 remote wire 是
+   * `await remote.call('snapshot')` 之后再 emit 的 —— 于是**只要那一次探测慢/卡住，
+   * 整包快照就发不出去**：进程列表、用量、总开关状态一起空白，界面停在「连接中」。
+   * 这正是"有时正常、有时没有进程"的成因（取决于那一刻探测是命中缓存还是真去 spawn）。
+   *
+   * 现在：快照路径**只读已缓存的清单**（有就带上，没有就先给空数组），刷新一律后台进行。
+   * 通道下拉的权威取数仍在 `channels()`（面板挂载时调用，那里 await 是合理的）。
+   */
+  function cachedChannels() {
+    const now = Date.now();
+    const stale = !channelsCache
+      || now - channelsCache.at >= ((channelsCache.value.channels ?? []).length === 0 || (channelsCache.value.warnings ?? []).length > 0
+        ? CHANNELS_ERROR_TTL_MS
+        : CHANNELS_TTL_MS);
+    if (stale && channelsProbeInFlight == null) {
+      /* 后台刷新：不 await、不 reject 到调用方；失败保留旧值（有旧值总比空好），
+       * 下一次快照轮询会按短 TTL 再来一遍（自愈）。 */
+      channelsProbeInFlight = (async () => {
+        try {
+          const r = await dispatcher.listChannels();
+          channelsCache = {
+            at: Date.now(),
+            value: {
+              channels: r?.channels ?? [],
+              warnings: r?.warnings ?? [],
+              ...(r && r.engines ? { engines: r.engines } : {}),
+              /* ZB-51（T5）：`engineDetail`（每引擎的形态/版本/登录态）必须一起透传 ——
+               * 面板的「引擎状态条」靠它渲染。**漏掉就是静默丢字段**（客户端只会画不出那条 UI）。 */
+              ...(r && r.engineDetail ? { engineDetail: r.engineDetail } : {}),
+              ...(r && r.opencodeVersion != null ? { opencodeVersion: r.opencodeVersion } : {}),
+            },
+          };
+        } catch { /* 保留旧缓存；下次轮询再试 */ }
+        finally { channelsProbeInFlight = null; }
+      })();
+    }
+    return channelsCache ? channelsCache.value : { channels: [], warnings: ['通道清单首次探测中（后台进行，不影响其它分区）'] };
+  }
+
+  /** 通道清单（**权威取数**：面板挂载 / `action=channels` 用；会 await 探测）。
+   *  双引擎：顶层 `engines` / `opencodeVersion` 一起透传；失败走**短 TTL**（1s）以便轮询自愈。 */
   async function channelsCached() {
-    if (channelsCache && Date.now() - channelsCache.at < CHANNELS_TTL_MS) return channelsCache.value;
+    if (channelsCache) {
+      const failed = (channelsCache.value.channels ?? []).length === 0 || (channelsCache.value.warnings ?? []).length > 0;
+      const ttl = failed ? CHANNELS_ERROR_TTL_MS : CHANNELS_TTL_MS;
+      if (Date.now() - channelsCache.at < ttl) return channelsCache.value;
+    }
+    /* 已有一次探测在飞 ⇒ 复用它（避免并发 spawn 多个 runner —— 那是真机实测过的坑）。 */
+    if (channelsProbeInFlight) {
+      await channelsProbeInFlight;
+      if (channelsCache) return channelsCache.value;
+    }
     const r = await dispatcher.listChannels();
-    const value = { channels: r?.channels ?? [], warnings: r?.warnings ?? [] };
+    /* 双引擎：**顶层 `engines` / `opencodeVersion` 必须一起透传** —— core 的 listChannels 提供它们
+     * （每个通道另有 `c.engine`），若在这里丢掉，客户端/工具就看不到"这台机器上有哪些引擎、
+     * OpenCode CLI 是哪个版本"（面板目前靠 `c.engine` 分组，所以丢的是诊断信息，不是功能）。 */
+    const value = {
+      channels: r?.channels ?? [],
+      warnings: r?.warnings ?? [],
+      ...(r && r.engines ? { engines: r.engines } : {}),
+      // ZB-51（T5）：引擎明细（形态/版本/登录态）—— 面板「引擎状态条」的数据来源
+      ...(r && r.engineDetail ? { engineDetail: r.engineDetail } : {}),
+      ...(r && r.opencodeVersion != null ? { opencodeVersion: r.opencodeVersion } : {}),
+    };
     channelsCache = { at: Date.now(), value };
     return value;
   }
-
   /** 动作方法：透传 createActionHandler 信封（它已把一切异常折成 {ok:false,error}）。 */
   const viaAction = (action, params) => handleAction(action, params);
 
@@ -677,9 +781,21 @@ export function createRemoteFace(dispatcher, config = {}) {
     async snapshot() {
       if (!dispatcher) throw new Error(NOT_READY);
       const snap = dispatcher.snapshot();
-      const { channels } = await channelsCached();
+      /* 双引擎（真机事故修复）：这里**只读缓存**的通道清单，绝不 await 探测 ——
+       * 探测会 spawn 子进程（冷启 ~3s），一旦它慢，整包快照就发不出去 ⇒ 面板卡在「连接中」、
+       * 进程与用量一起空白。刷新交给 cachedChannels() 的后台任务。 */
+      const cached = cachedChannels();
+      const channels = cached.channels;
       // Z12：快照带开关状态（UI 徽标与禁用判据的直接来源；mtime 缓存，轮询无读盘压力）
-      return { ...snap, jobs: snap.jobs.map(slimJob).filter(withoutDismissed(dispatcher)), channels, switch: readSwitch(switchFileOf(config)) };
+      /* ZB-51（T5）：**引擎明细也随快照下发** —— 面板的引擎状态条每轮轮询都能刷新
+       * （若只走 `channels()`，那条 UI 就只在挂载/换通道时更新，掉线/登录态变化看不到）。 */
+      return {
+        ...snap,
+        jobs: snap.jobs.map(slimJob).filter(withoutDismissed(dispatcher)),
+        channels,
+        ...(cached.engineDetail ? { engineDetail: cached.engineDetail } : {}),
+        switch: readSwitch(switchFileOf(config)),
+      };
     },
     async quota() {
       return { quota: quotaWindows(config.ledgerPath), ...giftQuotaFields() };
@@ -695,8 +811,15 @@ export function createRemoteFace(dispatcher, config = {}) {
       if (!dispatcher) return { channels: [], warnings: [NOT_READY] };
       const c = await channelsCached();
       /* ZB-33：免费额度通道带**剩余额度**（只读 ZCode 日志，零网络请求）。
-       * 面板据此画额度条；agent 工具 `action=channels` 也返回同一份（同一函数）。 */
-      return { ...attachGiftQuota(c.channels, config.ledgerPath), warnings: c.warnings };
+       * 面板据此画额度条；agent 工具 `action=channels` 也返回同一份（同一函数）。
+       * ZB-51（T5）：`engineDetail` 必须一起透传（面板引擎状态条的数据来源）。 */
+      return {
+        ...attachGiftQuota(c.channels, config.ledgerPath),
+        warnings: c.warnings,
+        ...(c.engines ? { engines: c.engines } : {}),
+        ...(c.engineDetail ? { engineDetail: c.engineDetail } : {}),
+        ...(c.opencodeVersion != null ? { opencodeVersion: c.opencodeVersion } : {}),
+      };
     },
     async channel() {
       if (!dispatcher) throw new Error(NOT_READY);
