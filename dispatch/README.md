@@ -574,6 +574,11 @@ paused/pausedAt 与 unknown 分支、timeoutMin 校验）。
   语义：`enabled:false` = **拒绝对 ZCode 的任何派发**；文件缺失/损坏 = 视为开启（不误锁）。
 - **查询/切换 CLI**：`node "<本仓库>/collab-kit/dispatch-switch.mjs" --project "<宿主项目>" status|on|off [--by …] [--note "…"]`（status 退出码 0=开、2=关）。
 - **遵守的三个入口**（缺一不可）：① runner `zcode-run.mjs`（关闭时 exit 3，不启动进程）② 本插件 Host 动作层（`dispatch`/`retry` 关闭时返回 `{ok:false, error, switch}`，不创建 job、不 spawn）③ `<本仓库>/tools/bridge.mjs`（关闭时 exit 3，拒绝投放）。
+- **只读探测不受冻结影响（ZB-42，用户现场报告）**：闸门在 runner 里位于 `--list-providers` 分支**之后**、凭据读取与子进程启动**之前** ⇒
+  - `--list-providers`（纯读：不派发、不起进程、不耗额度）**可以过** ⇒ 冻结期间面板照常列出通道，并在「通道」分区显示 `switchOffBlocked` 说明"冻结 ≠ 故障"；
+  - 一切**真实派发**仍必过闸；且此时尚未读凭据库 ⇒ ZB-33「冻结时不碰凭据」的收益完整保留。
+  - 历史：ZB-33 曾把闸门提到**最前**，连带挡住只读探测 ⇒ 开关一关面板就"没有任何通道"且报「通道清单加载失败」，用户误判成插件坏了。ZB-42 下移并加源码锁测试防回退。
+- **BOM 加固（ZB-42）**：真值文件解析前剥离 UTF-8 BOM。PowerShell 5 的 `Set-Content -Encoding UTF8` 与 Windows 记事本另存为 UTF-8 都会写 BOM（`EF BB BF`），而 `JSON.parse` 遇 BOM 必抛 ⇒ 原先命中 catch ⇒ **fail-open（冻结静默失效）**。对安全闸门，静默失效比报错更危险，故剥 BOM（实测：带 BOM 的 `enabled:false` 加固前放行、加固后 exit 3）。
 - **插件侧读写只此一处**：`wire.host.mjs` 的 `readSwitch()`（mtime 缓存、永不抛）/ `writeSwitch()`（tmp+rename 原子写，格式与 CLI 逐字段一致）。UI 与工具都经 `createActionHandler` 的 `switch` 动作写，杜绝第二个写文件方。
 - **config**：`switchPath`（string，默认空 = 未接入宿主项目；由 profile patch 指定；测试可指向临时文件密封）。字段清单见上文「config 说明」表（代码里 DEFAULTS / fallbackConfig / schema 三处同源）。
 - **面板（UI）**：标题栏徽标「派发：开 / 关」——`conn='live'` 时可点击切换（成功后 1s 轮询带回新快照；真实点击效果需刷新页面后确认）；远端不可用（ext/demo/offline/连接中）时显示为**只读**，tooltip 提示「未连接宿主：请在终端执行 dispatch-switch.mjs 切换」，状态未知时如实显示「派发：未知」（浏览器读不到宿主文件，不谎报）。关闭态下派发按钮禁用并显示原因（`switchOffBlocked`）。

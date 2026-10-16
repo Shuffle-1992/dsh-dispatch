@@ -1908,7 +1908,7 @@ window.__ModuleLoader__.load({
      * 打开后下面才显示 通道 / 模型 / 思考强度 三个下拉（与上面「通道」分区同形）；关闭时不显示。
      * 目标为空的两维（模型、思考强度）语义是「沿用原任务」，故首项标签不是「Agent决定」
      * （降级是自动触发的，此刻并没有 Agent 在决定——与 ZB-29c 移除派发栏 Agent决定同一条理由）。 */
-    function ChannelSection({ channelsInfo, channel, fallback, onSwitch, onFallbackSet, offline, offlineReason }) {
+    function ChannelSection({ channelsInfo, channel, fallback, onSwitch, onFallbackSet, offline, offlineReason, sw }) {
       const [fbFeedback, setFbFeedback] = useState(null);
       const [busy, setBusy] = useState(false);
       const channels = channelsInfo?.channels ?? [];
@@ -2028,6 +2028,14 @@ window.__ModuleLoader__.load({
       const fbUnknown = fbEnabled && fbProvider && !channels.some((c) => c.id === fbProvider);
 
       return h('div', { className: 'dsp-stack' },
+        /* ZB-42（用户现场报告）：总开关关闭时**必须在通道分区里明说**。
+         * 此前只有标题栏一个小徽标（「派发：关」），而 ZB-33 把闸门提到 runner 最前时
+         * 连只读探测也挡住了 ⇒ 用户看到的是「通道清单加载失败」+ 空列表，**误判成插件坏了**。
+         * 现在：runner 放行探测（通道照常列出），这里再点明"冻结≠故障"。
+         * 复用既有 locale 键 switchOffBlocked（此前只在工具描述里用过，面板从未渲染）⇒ 不新增文案键。 */
+        sw && sw.enabled === false
+          ? h('div', { className: 'dsp-note', role: 'status', title: t('switchOffBlocked') }, t('switchOffBlocked'))
+          : null,
         warnings.length ? h('div', { className: 'dsp-feedback dsp-err' }, `${t('chanLoadFail')}: ${warnings[0]}`) : null,
         /* ZB-01 ③：离线态的说明统一由面板 body 首行渲染（此处曾重复渲染同一句，已去重）；
          * 两个下拉仍各自带 title，便于悬停即知为什么点不动。
@@ -2883,7 +2891,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsp-body' },
           h(Section, { id: SEC.channel, title: t('secChannel'), collapsible: true },
             /* 离线说明只在 body 首行渲染一处（去重）：这里不再重复同一句话。 */
-            h(ChannelSection, { channelsInfo, channel, fallback, onSwitch, onFallbackSet, offline: conn !== 'live', offlineReason })),
+            h(ChannelSection, { channelsInfo, channel, fallback, onSwitch, onFallbackSet, offline: conn !== 'live', offlineReason, sw: dispatchSwitch })),
           /* ZB-29c（用户要求）：**派发分区已移除**——无需手动派发，有需要让 Agent 通过
            * dispatch 工具代劳。当前顺序：通道 → 用量 → 进程 → 单写者/文件锁。
            * 分区 id 不变 ⇒ 各自展开状态与持久化键不受影响。 */

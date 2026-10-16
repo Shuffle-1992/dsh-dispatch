@@ -129,11 +129,12 @@ function readProjectArg() {
   return readArgValue('--project');
 }
 
-/* ---------- 派发总开关（跨会话真值来源；契约见 collab/PROTOCOL.md） ----------
- * 任何会话（DSH / ZCode / 桥）派发前都必须过这一关：文件里 enabled:false 即拒绝。
- * 真值来源是磁盘文件而非内存开关 —— 跨进程只能靠文件。
- * 【ZB-33 位置调整】原先它在临时配置生成之后（≈795 行），意味着"总开关关闭"时仍会去
- * 读 config.json/凭据库做 provider 解析；现在提到最前，作为**第一道闸**（语义不变，更早、更省）。 */
+/* 【ZB-33 位置调整】原先它在临时配置生成之后（≈795 行），意味着"总开关关闭"时仍会去
+ * 读 config.json/凭据库做 provider 解析；现在提到最前，作为**第一道闸**（语义不变，更早、更省）。
+ * 【ZB-42 二次调整（用户现场报告）】闸门**下移到 `--list-providers` 分支之后**（见下方 GATE）。
+ * 原因：ZB-33 提到最前时，把**只读**探测也一并挡住了 —— 总开关一关，面板连通道列表都显示不出来，
+ * 还报「通道清单加载失败」，用户以为插件坏了（实测复现）。闸门仍早于**凭据读取与进程启动**，
+ * 故 ZB-33 的收益（冻结时不碰凭据/不起进程）完整保留。 */
 const SWITCH_FILE =
   process.env.ZCODE_SWITCH_FILE && process.env.ZCODE_SWITCH_FILE.trim() !== ''
     ? resolve(process.env.ZCODE_SWITCH_FILE.trim())
@@ -141,23 +142,19 @@ const SWITCH_FILE =
 function readDispatchSwitch() {
   try {
     if (!existsSync(SWITCH_FILE)) return { enabled: true, source: 'default(无文件=开启)' };
-    const raw = JSON.parse(readFileSync(SWITCH_FILE, 'utf8'));
+    /* 【ZB-42】剥掉 UTF-8 BOM 再解析：PowerShell 5 的 `Set-Content -Encoding UTF8`、Windows 记事本
+     * 另存为 UTF-8 都会写入 BOM（EF BB BF），而 `JSON.parse` 遇 BOM **必抛** ⇒ 命中下面的 catch
+     * ⇒ **fail-open（开关静默失效）**。对「冻结闸门」这种安全开关，静默失效比报错更危险
+     * （实测复现：带 BOM 的 enabled:false 仍被放行）。BOM 与"文件损坏"无关，剥掉即可。 */
+    const text = readFileSync(SWITCH_FILE, 'utf8').replace(/^\uFEFF/, '');
+    const raw = JSON.parse(text);
     return { enabled: raw.enabled !== false, updatedAt: raw.updatedAt, updatedBy: raw.updatedBy, note: raw.note };
   } catch (e) {
     return { enabled: true, source: `default(读取失败: ${e.message})` };
   }
 }
-{
-  const sw = readDispatchSwitch();
-  if (!sw.enabled) {
-    console.error('[zcode-run] ⛔ 派发总开关为「关闭」，拒绝派发（未启动任何进程、未消耗任何额度）。');
-    console.error(`[zcode-run] 开关文件: ${SWITCH_FILE}`);
-    if (sw.updatedBy || sw.updatedAt) console.error(`[zcode-run] 最后修改: ${sw.updatedBy ?? '?'} @ ${sw.updatedAt ?? '?'}`);
-    if (sw.note) console.error(`[zcode-run] 备注: ${sw.note}`);
-    console.error('[zcode-run] 需要恢复派发时: node <本仓库>/collab-kit/dispatch-switch.mjs --project <宿主项目> on');
-    process.exit(3); // 3 = 因总开关关闭而拒绝（与参数错误 1、超时 124 区分）
-  }
-}
+/* 闸门**不在**这里 —— 已下移到 `--list-providers` 分支之后（ZB-42，见文件中部 GATE 注释）。
+ * 只读探测必须能过闸，否则冻结期间面板看不到任何通道。 */
 
 /* ---------- CLI 与环境（本机实测：两个 provider 配置必须同时给出） ---------- */
 const CLI = process.env.ZCODE_CLI || 'F:\\Program Files\\ZCode\\resources\\glm\\zcode.cjs';
@@ -345,6 +342,26 @@ const listProviders = async () => {
 if (opt.listProviders) {
   await listProviders();
   process.exit(0);
+}
+
+/* ---------- GATE：派发总开关（跨会话真值来源；契约见 collab/PROTOCOL.md） ----------
+ * 任何会话（DSH / ZCode / 桥）**派发前**都必须过这一关：文件里 enabled:false 即拒绝。
+ * 真值来源是磁盘文件而非内存开关 —— 跨进程只能靠文件。
+ * 【位置】紧跟在 `--list-providers` 分支之后、**凭据读取与子进程启动之前**：
+ *   · 只读探测（上面已 return）**不过闸** —— 不派发、不起进程、不耗额度，冻结期间面板仍能列通道；
+ *   · 一切真实派发**必过闸**；且此时尚未读凭据库、尚未 spawn ⇒ ZB-33 的收益完整保留。
+ * 退出码 3 = 因总开关关闭而拒绝（与参数错误 1、超时 124 区分）。 */
+{
+  const sw = readDispatchSwitch();
+  if (!sw.enabled) {
+    console.error('[zcode-run] ⛔ 派发总开关为「关闭」，拒绝派发（未启动任何进程、未消耗任何额度）。');
+    console.error(`[zcode-run] 开关文件: ${SWITCH_FILE}`);
+    if (sw.updatedBy || sw.updatedAt) console.error(`[zcode-run] 最后修改: ${sw.updatedBy ?? '?'} @ ${sw.updatedAt ?? '?'}`);
+    if (sw.note) console.error(`[zcode-run] 备注: ${sw.note}`);
+    console.error('[zcode-run] 需要恢复派发时: node <本仓库>/collab-kit/dispatch-switch.mjs --project <宿主项目> on');
+    console.error('[zcode-run] 提示：只读探测（--list-providers）不受总开关影响，可随时查看通道。');
+    process.exit(3);
+  }
 }
 
 const problems = [];
