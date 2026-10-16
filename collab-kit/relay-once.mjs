@@ -14,7 +14,7 @@ import { join, resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /* 项目根（含 collab/ 的目录）：--project > env ZCODE_PROJECT_DIR > cwd。
- * 本工具已迁至 zcode-dispatch/collab-kit，不再与宿主项目有目录关系。 */
+ * 本工具已迁至 dispatch/collab-kit，不再与宿主项目有目录关系。 */
 function resolveProjectRoot() {
   const i = process.argv.indexOf('--project');
   if (i >= 0 && process.argv[i + 1]) return resolve(process.argv[i + 1]);

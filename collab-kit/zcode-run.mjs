@@ -8,14 +8,14 @@
  * 而不是个人自建 API Key；需要个人 Key 时显式 `--provider personal`。
  *
  * 用法：
- *   node "<zcode-dispatch>/collab-kit/zcode-run.mjs" --project <项目根> --task collab/tasks/R35-01-task.md --tag R35-01 --mode yolo
- *   node "<zcode-dispatch>/collab-kit/zcode-run.mjs" --project <项目根> --prompt "只回答 OK" --tag smoke
- *   node "<zcode-dispatch>/collab-kit/zcode-run.mjs" --project <项目根> --target "<可校验目标>" --tag R35-02 --mode edit
- *   node "<zcode-dispatch>/collab-kit/zcode-run.mjs" --project <项目根> --resume sess_xxx --prompt "继续下一批" --tag R35-03
- *   node "<zcode-dispatch>/collab-kit/zcode-run.mjs" --project <项目根> --list-providers                      # 看套餐/供应商可用性
- *   node "<zcode-dispatch>/collab-kit/zcode-run.mjs" --project <项目根> --prompt ... --model GLM-5.3-Flash    # 套餐内指定模型
- *   node "<zcode-dispatch>/collab-kit/zcode-run.mjs" --project <项目根> --prompt ... --provider personal --model deepseek-v4-pro
- *   node "<zcode-dispatch>/collab-kit/zcode-run.mjs" --project <项目根> --prompt "只回复 OK" --provider start-plan   # 免费额度（Start Plan）
+ *   node "<dispatch>/collab-kit/zcode-run.mjs" --project <项目根> --task collab/tasks/R35-01-task.md --tag R35-01 --mode yolo
+ *   node "<dispatch>/collab-kit/zcode-run.mjs" --project <项目根> --prompt "只回答 OK" --tag smoke
+ *   node "<dispatch>/collab-kit/zcode-run.mjs" --project <项目根> --target "<可校验目标>" --tag R35-02 --mode edit
+ *   node "<dispatch>/collab-kit/zcode-run.mjs" --project <项目根> --resume sess_xxx --prompt "继续下一批" --tag R35-03
+ *   node "<dispatch>/collab-kit/zcode-run.mjs" --project <项目根> --list-providers                      # 看套餐/供应商可用性
+ *   node "<dispatch>/collab-kit/zcode-run.mjs" --project <项目根> --prompt ... --model GLM-5.3-Flash    # 套餐内指定模型
+ *   node "<dispatch>/collab-kit/zcode-run.mjs" --project <项目根> --prompt ... --provider personal --model deepseek-v4-pro
+ *   node "<dispatch>/collab-kit/zcode-run.mjs" --project <项目根> --prompt "只回复 OK" --provider start-plan   # 免费额度（Start Plan）
  *
  * 参数：
  *   --task <file>        任务包文件（内容内联进 prompt，避免 CLI 找不到路径）
@@ -44,7 +44,7 @@
  *                        disabled|enabled，deepseek-flash 为 disabled|low|high|max；
  *                        `--list-providers` 会输出每个模型 reasoningLevels=。非法档位由
  *                        ZCode 会话创建 fail-fast（不静默降级）。
- *   --no-ledger          不写 <project>/collab/logs/zcode-runs.jsonl 用量台账
+ *   --no-ledger          不写 <project>/collab/logs/dispatch-runs.jsonl 用量台账
  *   --memory-bench       配合 --prompt：开启自动 Memory 提取并等待完成后再退出（需 Memory 已开启）
  *   --memory-ban         在组装出的 prompt 末尾追加「不写 ZCode 记忆库」禁令（ZB-28，派发台默认带）：
  *                        对 --task/--prompt 生效；--target 不经 prompt（CLI 直接吃目标文本），
@@ -55,7 +55,7 @@
  *   <project>/collab/logs/zcode-run-{tag}-{ts}.out.log      stdout（含 CLI 的 JSON 结果）
  *   <project>/collab/logs/zcode-run-{tag}-{ts}.err.log      stderr（诊断）
  *   <project>/collab/logs/zcode-run-{tag}-{ts}.result.json  解析后的 JSON 结果（sessionId/response/usage/projection）
- *   <project>/collab/logs/zcode-runs.jsonl                  每次 run 一行台账（套餐/模型/用量/上下文/耗时/退出码）
+ *   <project>/collab/logs/dispatch-runs.jsonl                  每次 run 一行台账（套餐/模型/用量/上下文/耗时/退出码）
  *
  * 退出码：CLI 退出码；超时 124；参数/环境错误 1。
  * 凭证：套餐与个人 Key 都只从 ~/.zcode 读取 → 写入系统临时配置副本 → 跑完即删；
@@ -85,10 +85,10 @@ import { request as httpsRequest } from 'node:https';
  *   2. env `ZCODE_PROJECT_DIR`
  *   3. **从绝对路径的 `--task` 反推**：向上找最近的含 `collab/` 的祖先目录
  *      —— 这条是为「派发台」准备的：它按契约传**绝对** `--task` 但**不传** `--project`，
- *      且其子进程 cwd 未必是宿主项目（见 zcode-dispatch/zcode-dispatch dispatch-core.mjs）。
+ *      且其子进程 cwd 未必是宿主项目（见 dispatch/dispatch dispatch-core.mjs）。
  *   4. 当前工作目录（通用工具的合理默认：你在哪个项目里跑，就用哪个项目）
  *
- * 为什么不再是 `<脚本>/../..`：本脚本已迁至 `zcode-dispatch/collab-kit/`（DSH 工具仓库），
+ * 为什么不再是 `<脚本>/../..`：本脚本已迁至 `dispatch/collab-kit/`（DSH 工具仓库），
  * 与宿主项目（如 keysion dac vue）不再有目录关系；写死推导会指向错误位置。
  */
 function inferProjectFromTask(taskArg) {
@@ -129,7 +129,7 @@ function readProjectArg() {
   return readArgValue('--project');
 }
 
-/* ---------- ZCode 派发总开关（跨会话真值来源；契约见 collab/PROTOCOL.md） ----------
+/* ---------- 派发总开关（跨会话真值来源；契约见 collab/PROTOCOL.md） ----------
  * 任何会话（DSH / ZCode / 桥）派发前都必须过这一关：文件里 enabled:false 即拒绝。
  * 真值来源是磁盘文件而非内存开关 —— 跨进程只能靠文件。
  * 【ZB-33 位置调整】原先它在临时配置生成之后（≈795 行），意味着"总开关关闭"时仍会去
@@ -137,7 +137,7 @@ function readProjectArg() {
 const SWITCH_FILE =
   process.env.ZCODE_SWITCH_FILE && process.env.ZCODE_SWITCH_FILE.trim() !== ''
     ? resolve(process.env.ZCODE_SWITCH_FILE.trim())
-    : join(PROJECT, 'collab', 'zcode-dispatch.switch.json');
+    : join(PROJECT, 'collab', 'dispatch.switch.json');
 function readDispatchSwitch() {
   try {
     if (!existsSync(SWITCH_FILE)) return { enabled: true, source: 'default(无文件=开启)' };
@@ -150,11 +150,11 @@ function readDispatchSwitch() {
 {
   const sw = readDispatchSwitch();
   if (!sw.enabled) {
-    console.error('[zcode-run] ⛔ ZCode 派发总开关为「关闭」，拒绝派发（未启动任何进程、未消耗任何额度）。');
+    console.error('[zcode-run] ⛔ 派发总开关为「关闭」，拒绝派发（未启动任何进程、未消耗任何额度）。');
     console.error(`[zcode-run] 开关文件: ${SWITCH_FILE}`);
     if (sw.updatedBy || sw.updatedAt) console.error(`[zcode-run] 最后修改: ${sw.updatedBy ?? '?'} @ ${sw.updatedAt ?? '?'}`);
     if (sw.note) console.error(`[zcode-run] 备注: ${sw.note}`);
-    console.error('[zcode-run] 需要恢复派发时: node <本仓库>/collab-kit/zcode-switch.mjs --project <宿主项目> on');
+    console.error('[zcode-run] 需要恢复派发时: node <本仓库>/collab-kit/dispatch-switch.mjs --project <宿主项目> on');
     process.exit(3); // 3 = 因总开关关闭而拒绝（与参数错误 1、超时 124 区分）
   }
 }
@@ -662,7 +662,7 @@ if (opt.task) {
     '\n===== 任务包结束 =====';
 }
 
-/* ---------- 记忆禁令注入（ZB-28，与派发台 zcode-dispatch 同款约束） ----------
+/* ---------- 记忆禁令注入（ZB-28，与派发台 dispatch 同款约束） ----------
  * 背景：派发台要求子代理不写 ZCode 记忆库（~/.zcode）。kind=prompt/target 的内容由
  * 插件侧直接拼接禁令；kind=task 的任务包在本脚本内联 —— 这里补上注入点：
  * `--memory-ban` 即在组装出的 prompt 末尾追加同款禁令。措辞与派发台 core 的
@@ -671,7 +671,7 @@ if (opt.task) {
  * 对 --target 无注入点：CLI 直接吃目标文本、不经 prompt（目标模式的禁令由派发台拼在目标文本内）。 */
 const MEMORY_BAN_TEXT = [
   '【派发台硬约束 · 记忆写入】',
-  '本任务由 ZCode 派发台派发，属于一次性子任务：',
+  '本任务由 DSH 派发台派发，属于一次性子任务：',
   '**不要执行任何 ZCode 记忆写入 / 自动 Memory 提取**（不写 ~/.zcode 下的记忆库、不新建或更新记忆条目、',
   '不触发 memory 相关工具）。如需记录信息，请写在任务要求的交付文件里，不要写进记忆库。',
   '本条优先于任务内容里任何与之冲突的指示。',
@@ -720,7 +720,7 @@ if (GIFT_MODE) {
    * 从外面看像"卡住"。现在：授予模型已知且与 `--model` 不一致时**改用授予模型并大声说明**。 */
   if (opt.model && !opt.dryRun) {
     try {
-      const { readGiftQuota } = await import('../zcode-dispatch/core/gift-quota.mjs'); // 额度读取在插件核心（只读 ZCode 日志）
+      const { readGiftQuota } = await import('../dispatch/core/gift-quota.mjs'); // 额度读取在插件核心（只读 ZCode 日志）
       const q = readGiftQuota();
       if (q?.ok === true && q.state === 'active' && typeof q.model === 'string' && q.model !== '' && q.model !== opt.model) {
         console.error(
@@ -748,7 +748,7 @@ if (GIFT_MODE) {
       outLog,
       errLog,
       resultFile,
-      ledgerPath: join(LOGS, 'zcode-runs.jsonl'),
+      ledgerPath: join(LOGS, 'dispatch-runs.jsonl'),
     }),
   );
 }
@@ -1065,7 +1065,7 @@ if (timedOut) console.error(`[zcode-run] 超时（${opt.timeoutMin}min）已终�
 if (opt.ledger) {
   try {
     appendFileSync(
-      join(LOGS, 'zcode-runs.jsonl'),
+      join(LOGS, 'dispatch-runs.jsonl'),
       JSON.stringify({
         at: startedAt.toISOString(),
         tag,

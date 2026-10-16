@@ -6,7 +6,7 @@
  *
  * 协调：锁存在且未过期时，Trae IDE 侧 Stop 钩子（trae-stop-check.mjs）会跳过自动续跑，避免双重复审。
  * 安全：任何异常一律 exit 0（不阻塞）；traecli 未登录/不可用时记日志、保持待办原样（人工/Ding 侧仍可拉起）。
- * 用法：node "<zcode-dispatch>/collab-kit/headless-wake.mjs" --project <项目根> [--skip-relay] [--force]
+ * 用法：node "<dispatch>/collab-kit/headless-wake.mjs" --project <项目根> [--skip-relay] [--force]
  *   --skip-relay  跳过机械证据复跑（测试用）
  *   --force       忽略“无待办”判定强制跑一轮（测试用）
  * 详见 collab/headless-cli-setup.md。
@@ -17,7 +17,7 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /* 项目根（含 collab/ 的目录）：--project > env ZCODE_PROJECT_DIR > cwd。
- * 本工具已迁至 zcode-dispatch/collab-kit，不再与宿主项目有目录关系。 */
+ * 本工具已迁至 dispatch/collab-kit，不再与宿主项目有目录关系。 */
 function resolveProjectRoot() {
   const i = process.argv.indexOf('--project');
   if (i >= 0 && process.argv[i + 1]) return resolve(process.argv[i + 1]);

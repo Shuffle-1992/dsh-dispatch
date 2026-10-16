@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const PKG = 'F:\\My Code\\zcode-dispatch\\zcode-dispatch';
+const PKG = 'F:\\My Code\\zcode-dispatch\\dispatch';
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}  ${detail}`); };
 
@@ -23,7 +23,7 @@ const PROFILE_BEFORE = snapshotProfile();
 
 /* ---------- ① manifest / patch ---------- */
 const pkg = JSON.parse(readFileSync(join(PKG, 'package.json'), 'utf8'));
-check('manifest: name/exports/dsh.bundle.patch', pkg.name === 'dsh-zcode-dispatch' && pkg.exports?.['.'] === './index.js' && pkg.exports?.['./client'] === './client.js' && pkg.dsh?.bundle?.patch === './cordis.patch.yml', `${pkg.name}`);
+check('manifest: name/exports/dsh.bundle.patch', pkg.name === 'dsh-dispatch' && pkg.exports?.['.'] === './index.js' && pkg.exports?.['./client'] === './client.js' && pkg.dsh?.bundle?.patch === './cordis.patch.yml', `${pkg.name}`);
 /* ZB-32 市场合规：可发布身份 + 元数据。`private:true` 会挡掉 npm 发布；
  * typert-loader 硬校验 TYPERT.package === 包名（refs/dsh-typert/loader/lib/index.js:80），
  * 故 name 与 TYPERT.package 必须**逐字一致**，这里一并钉住。 */
@@ -49,7 +49,7 @@ check('manifest: meta 标题/描述/图标', !!pkg.meta?.title && !!pkg.meta?.de
   check('manifest: files 覆盖 index.js 的相对 import', missing.length === 0, missing.length ? `缺: ${missing.join(',')}` : `${rel.length} 个相对 import 全覆盖`);
 }
 const patch = readFileSync(join(PKG, 'cordis.patch.yml'), 'utf8');
-check('patch: 插入行 id/name/config', /id:\s*zcode-dispatch/.test(patch) && /name:\s*'dsh-zcode-dispatch'/.test(patch) && /runnerPath:/.test(patch) && /ledgerPath:/.test(patch), patch.split('\n').filter((l) => /runnerPath|ledgerPath|demo|maxConcurrent/.test(l)).join(' | ').slice(0, 140));
+check('patch: 插入行 id/name/config', /id:\s*dispatch/.test(patch) && /name:\s*'dsh-dispatch'/.test(patch) && /runnerPath:/.test(patch) && /ledgerPath:/.test(patch), patch.split('\n').filter((l) => /runnerPath|ledgerPath|demo|maxConcurrent/.test(l)).join(' | ').slice(0, 140));
 
 /* ---------- ② 静态纪律 ---------- */
 const jsFiles = readdirSync(PKG, { recursive: true }).filter((f) => /\.(js|mjs)$/.test(f) && !f.includes('work') && !f.includes('test'));
@@ -71,7 +71,7 @@ check('index.js 声明 Config（可配置）', /export\s+const\s+Config\s*=/.tes
 {
   let std = { ok: false, detail: 'import 失败' };
   try {
-    const mod = await import('file:///F:/My Code/zcode-dispatch/zcode-dispatch/index.js');
+    const mod = await import('file:///F:/My Code/zcode-dispatch/dispatch/index.js');
     const C = mod.Config;
     const fn = C && C['~standard'] && C['~standard'].validate;
     const res = typeof fn === 'function' ? fn({}) : null;
@@ -91,7 +91,7 @@ check('index.js 引用 core dispatcher', /dispatch-core\.mjs/.test(index) && /cr
 let captured = null;
 globalThis.window = { __ModuleLoader__: { load: (o) => { captured = o; } } };
 await import(pathToFileURL(join(PKG, 'client.js')).href);
-check('client.js 通过 __ModuleLoader__.load 注册', !!captured && captured.id === 'dsh-zcode-dispatch' && typeof captured.factory === 'function', `id=${captured?.id}`);
+check('client.js 通过 __ModuleLoader__.load 注册', !!captured && captured.id === 'dsh-dispatch' && typeof captured.factory === 'function', `id=${captured?.id}`);
 
 const el = (type, props, ...children) => ({ type, props, children });
 class StubComponent {

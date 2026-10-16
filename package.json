@@ -1,5 +1,5 @@
 {
-  "name": "dsh-zcode-dispatch",
+  "name": "dsh-dispatch",
   "version": "0.1.0",
   "description": "在 DeepSeek Harness 里派发/监视多个 ZCode 无头进程：单写者互斥、用量与上下文聚合、套餐通道与自动降级",
   "license": "MIT",
@@ -26,17 +26,17 @@
     "node": ">=22.12.0"
   },
   "exports": {
-    ".": "./zcode-dispatch/index.js",
-    "./client": "./zcode-dispatch/client.js",
-    "./typert": "./zcode-dispatch/wire.host.mjs",
-    "./remote": "./zcode-dispatch/wire.client.mjs",
-    "./locale/*.json": "./zcode-dispatch/locale/*.json",
+    ".": "./dispatch/index.js",
+    "./client": "./dispatch/client.js",
+    "./typert": "./dispatch/wire.host.mjs",
+    "./remote": "./dispatch/wire.client.mjs",
+    "./locale/*.json": "./dispatch/locale/*.json",
     "./package.json": "./package.json"
   },
   "dsh": {
     "manifestVersion": 1,
     "bundle": {
-      "patch": "./zcode-dispatch/cordis.patch.yml"
+      "patch": "./dispatch/cordis.patch.yml"
     },
     "client": {
       "platform": "web",
@@ -47,22 +47,22 @@
     }
   },
   "meta": {
-    "title": "ZCode 派发台",
+    "title": "DSH 派发台",
     "description": "在 Harness 里派发/监视多个 ZCode 无头进程（单写者互斥、用量与上下文、套餐通道）"
   },
-  "icon": "./zcode-dispatch/icon.svg",
+  "icon": "./dispatch/icon.svg",
   "files": [
-    "zcode-dispatch/index.js",
-    "zcode-dispatch/client.js",
-    "zcode-dispatch/notify.mjs",
-    "zcode-dispatch/wire.host.mjs",
-    "zcode-dispatch/wire.client.mjs",
-    "zcode-dispatch/cordis.patch.yml",
-    "zcode-dispatch/icon.svg",
-    "zcode-dispatch/README.md",
-    "zcode-dispatch/bin",
-    "zcode-dispatch/core",
-    "zcode-dispatch/locale",
+    "dispatch/index.js",
+    "dispatch/client.js",
+    "dispatch/notify.mjs",
+    "dispatch/wire.host.mjs",
+    "dispatch/wire.client.mjs",
+    "dispatch/cordis.patch.yml",
+    "dispatch/icon.svg",
+    "dispatch/README.md",
+    "dispatch/bin",
+    "dispatch/core",
+    "dispatch/locale",
     "README.md",
     "LICENSE"
   ]

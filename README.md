@@ -1,10 +1,10 @@
-# ZCode 派发台（zcode-dispatch）
+# DSH 派发台（dispatch）
 
 > 一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）插件：
 > 把任务派发给本机 **ZCode** CLI 的无头进程，并在 DSH 页面右下角的悬浮面板里监视它们。
 
 DSH 自带的 `subagent` 跑的是 DSH 自己的 agent；**本插件跑的是 ZCode**——独立进程、独立额度、
-独立会话，任务行出现在「ZCode 派发台」面板里，可查输出、可终止、可续跑、可换通道重跑。
+独立会话，任务行出现在「DSH 派发台」面板里，可查输出、可终止、可续跑、可换通道重跑。
 
 ---
 
@@ -16,20 +16,20 @@ DSH 自带的 `subagent` 跑的是 DSH 自己的 agent；**本插件跑的是 ZC
 **从 GitHub 仓库安装（推荐）**——git 规格 + `#path:` 子目录定位：
 
 ```bash
-dsh plugin --profile web add "github:Shuffle-1992/zcode-dispatch#path:zcode-dispatch"
+dsh plugin --profile web add "github:Shuffle-1992/zcode-dispatch#path:dispatch"
 ```
 
 > 把 `web` 换成你的 profile 名（`dsh plugin list` 可查）。装完**重启 DSH** 生效。
-> **`#path:zcode-dispatch` 不能省**：本仓库是 monorepo，插件本体在 `zcode-dispatch/` 子目录；
+> **`#path:dispatch` 不能省**：本仓库是 monorepo，插件本体在 `dispatch/` 子目录；
 > DSH 实际执行 `pnpm add <spec>`，而 pnpm 对 git 仓库默认取**仓库根** —— 根目录没有插件
 > `package.json`，装出来只会得到占位包（实测 `{"_pnpmPlaceholder":"...did not contain a package.json."}`）。
 
 **本地开发挂载**（源码就在本机时）：profile 的 `dependencies` 加
-`"dsh-zcode-dispatch": "link:<仓库>/zcode-dispatch"`、`bundles` 加 `"dsh-zcode-dispatch"`，
-并在 profile 的 `node_modules/dsh-zcode-dispatch` 建 junction 指向该目录。
+`"dsh-dispatch": "link:<仓库>/dispatch"`、`bundles` 加 `"dsh-dispatch"`，
+并在 profile 的 `node_modules/dsh-dispatch` 建 junction 指向该目录。
 
-> 包名 = `dsh-zcode-dispatch`；bundle 资格由**仓库根** `package.json` 的 `dsh.bundle.patch`
-> （→ `zcode-dispatch/cordis.patch.yml`）声明；插件本体清单在 `zcode-dispatch/package.json`。
+> 包名 = `dsh-dispatch`；bundle 资格由**仓库根** `package.json` 的 `dsh.bundle.patch`
+> （→ `dispatch/cordis.patch.yml`）声明；插件本体清单在 `dispatch/package.json`。
 
 ---
 
@@ -45,21 +45,21 @@ dsh plugin --profile web add "github:Shuffle-1992/zcode-dispatch#path:zcode-disp
 | **免费额度通道** | 支持 ZCode **Start Plan（活动赠送额度）**：托管官方 agent 走 app-server（端点要求逐请求官方签名），通道 `account:<family>-start-plan`；与付费套餐复用同一条面板 / 台账 / 暂停 / 降级流水线 |
 | **用量聚合** | 本地台账 5 小时滚动 / 本周 / 今日，外加套餐剩余额度（数据源不可用时如实标注 `available:false`，不猜） |
 | **派发总开关** | 一个跨会话真值文件：`false` = 任何会话都不得派发（runner / 插件 / 桥接三处强制生效） |
-| **agent 工具** | 注册 `zcode_dispatch`，与面板同一套动作实现（一操作两调用方） |
+| **agent 工具** | 注册 `dispatch`，与面板同一套动作实现（一操作两调用方） |
 
 ---
 
 ## 目录结构
 
 ```
-zcode-dispatch/
-├─ zcode-dispatch/          ★ 插件本体（cordis bundle：Host 半边 + Client 半边）
+dispatch/
+├─ dispatch/          ★ 插件本体（cordis bundle：Host 半边 + Client 半边）
 │  ├─ index.js              Host 入口：apply(ctx, config)、dispatcher 单例、注册 agent 工具、激活信标
 │  ├─ wire.host.mjs         Host 接线 + 动作唯一实现 createActionHandler + 派发总开关读写
 │  ├─ wire.client.mjs       Client 接线 + 轮询 / demo 降级
 │  ├─ client.js             UI 半边：悬浮面板（React.createElement，无构建步骤）
 │  ├─ core/                 派发核心（零 npm 依赖）：dispatch-core / quota / appserver-rpc
-│  ├─ bin/zcd.mjs           独立 CLI（与插件同 core，用来对照排查）
+│  ├─ bin/dispatch.mjs           独立 CLI（与插件同 core，用来对照排查）
 │  ├─ locale/{zh,en}.json   中英文案
 │  ├─ test/                 可复跑自测与验收脚本
 │  └─ cordis.patch.yml      bundle 层 patch（**只放 demo/maxConcurrent**，机器路径见「配置」）
@@ -81,8 +81,8 @@ zcode-dispatch/
    ```powershell
    # 例：把本包挂进 profile 的 node_modules
    New-Item -ItemType Junction `
-     -Path "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@local\zcode-dispatch" `
-     -Target "<本仓库>\zcode-dispatch"
+     -Path "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@local\dispatch" `
+     -Target "<本仓库>\dispatch"
    ```
 
 2. 在 **创造模式会话**里用 `plugin_manager` 的 `install_bundle` 安装（`target` = 插件绝对路径），
@@ -104,7 +104,7 @@ zcode-dispatch/
 | `demo` | `false` | UI 演示模式：用内置假数据渲染面板，不触达 dispatcher |
 | `maxConcurrent` | `3` | 同时运行的 run 上限 |
 | `runnerPath` | `''` | runner 脚本绝对路径（通用工具仓库 `<本仓库>/collab-kit/zcode-run.mjs`，只读使用） |
-| `ledgerPath` | `''` | 台账 `zcode-runs.jsonl` 绝对路径；留空则跳过用量聚合 |
+| `ledgerPath` | `''` | 台账 `dispatch-runs.jsonl` 绝对路径；留空则跳过用量聚合 |
 | `workRoot` | `''` | 派发器工作根目录（`locks/`、`state/jobs.json`、`logs/`）；留空落到插件目录 `.data/` |
 | `switchPath` | `''` | 派发总开关真值文件；留空则开关不可写 |
 
@@ -117,15 +117,15 @@ zcode-dispatch/
 `~/.dsh/profiles/<profile>/cordis.patch.yml` 里按 id 覆盖：
 
 ```yaml
-- id: zcode-dispatch
-  name: "dsh-zcode-dispatch"
+- id: dispatch
+  name: "dsh-dispatch"
   config:
     demo: false
     maxConcurrent: 3
     runnerPath: '<宿主项目>\scripts\collab\zcode-run.mjs'
-    ledgerPath: '<宿主项目>\collab\logs\zcode-runs.jsonl'
+    ledgerPath: '<宿主项目>\collab\logs\dispatch-runs.jsonl'
     workRoot:   '<本插件目录>\.data'
-    switchPath: '<宿主项目>\collab\zcode-dispatch.switch.json'
+    switchPath: '<宿主项目>\collab\dispatch.switch.json'
 ```
 
 （`cordis.patch.yml` 的 patch 层按 id 覆盖是 DSH 的标准机制——同文件里 `ui-theme` / `ui-chat`
@@ -148,7 +148,7 @@ zcode-dispatch/
 3. **备份** `config.json`，把有效 Key 填回 `options.apiKey`；回读校验。
 
 > 详细步骤、解密参考实现、验活判定代码与完整踩坑记录见
-> **[`zcode-dispatch/README.md` 的「凭据从哪来 + 报 401 怎么办」一节](zcode-dispatch/README.md#️-凭据从哪来--报身份验证失败--401-怎么办)**。
+> **[`dispatch/README.md` 的「凭据从哪来 + 报 401 怎么办」一节](dispatch/README.md#️-凭据从哪来--报身份验证失败--401-怎么办)**。
 > 现成恢复工具见姊妹项目 [`dsh-connect-zcode`](https://github.com/Shuffle-1992/dsh-connect-zcode)
 > 的 `scripts/sync-key-to-config.mjs`（自动备份 + 验活 + 原子替换 + 回读校验）。
 
@@ -178,7 +178,7 @@ zcd dispatch --kind task   --task <任务包> --provider account:bigmodel-start-
 > 见其 README 的「免费额度通道目前缺失的功能速查」）。
 > ⇒ **要让 agent 用工具自主干活，就用派发台；要在 DSH 里做交互式对话并复用 DSH 工具链，就用 provider 通道。**
 
-限制与验收记录见 [`zcode-dispatch/README.md` 的「免费额度（Start Plan）通道」一节](zcode-dispatch/README.md#免费额度start-plan通道zb-33)
+限制与验收记录见 [`dispatch/README.md` 的「免费额度（Start Plan）通道」一节](dispatch/README.md#免费额度start-plan通道zb-33)
 与 [`tasks/ZB-33-gift-channel-exploration.md`](tasks/ZB-33-gift-channel-exploration.md)。
 **额度可见性（ZB-33）**：选中该通道时面板显示**额度条**（剩余 / 百分比 / 窗口 / 剩余时长）；
 同一份数据也通过 `action=channels`（`channels[].quota`/`quotaText`）与 `action=quota`（`giftQuota`）
@@ -190,7 +190,7 @@ zcd dispatch --kind task   --task <任务包> --provider account:bigmodel-start-
 
 ---
 
-## agent 工具 `zcode_dispatch`
+## agent 工具 `dispatch`
 
 一个工具 + `action` 参数，与面板上的操作一一对应：
 
@@ -234,10 +234,10 @@ dispatch | list | kill | dismiss | tail | quota | status | switch | channels | c
 
 ## 悬浮弹窗
 
-**会话标题行的「ZCode 派发台」入口**（与「智能体团队」「创造模式」同排）+ 点击弹出的悬浮弹窗
+**会话标题行的「DSH 派发台」入口**（与「智能体团队」「创造模式」同排）+ 点击弹出的悬浮弹窗
 （ZB-27：复用系统菜单样式与令牌；点外部 / Esc 关闭；**入口本身不建 wire**，展开才连）。
 弹窗高度上限 **960px**（ZB-36：按用户要求「增加 100%」由 480px 翻倍；短屏按 `calc(100vh - 140px)`
-自然收敛，不会顶出屏幕；该上限**只挂在面板这一层**，`.zcd-menu` 类仍是 DSH 官方菜单的 480px）。
+自然收敛，不会顶出屏幕；该上限**只挂在面板这一层**，`.dsp-menu` 类仍是 DSH 官方菜单的 480px）。
 
 - **通道**：通道 + 模型两个下拉（固定两行版式），自动降级链；**不可用通道不再列出**
   （主通道与降级目标同一过滤；当前选中值若已掉线仍单独显示并标注「不可用：原因」以便切走）
@@ -254,7 +254,7 @@ dispatch | list | kill | dismiss | tail | quota | status | switch | channels | c
 ```bash
 node tools/verify-plugin.mjs      # 插件形态与契约探针（20 项）
 node tools/verify-switch.mjs      # 派发总开关独立复现（8 项，用临时目录密封）
-cd zcode-dispatch
+cd dispatch
 node test/core.test.mjs           # 派发核心自测（12 项）
 node test/channel-retry.test.mjs  # 通道 / 续跑 / 降级链自测（9 项）
 node test/quota-rpc.test.mjs      # 额度 RPC 自测（16 项）

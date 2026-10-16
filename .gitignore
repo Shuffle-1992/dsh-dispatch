@@ -1,6 +1,6 @@
 # 运行期数据（不入库）
-zcode-dispatch/work/
-zcode-dispatch/.data/
+dispatch/work/
+dispatch/.data/
 .data/
 node_modules/
 

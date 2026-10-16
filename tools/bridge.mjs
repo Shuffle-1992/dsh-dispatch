@@ -22,15 +22,15 @@ for (const d of [INBOX, OUTBOX, ARCHIVE]) mkdirSync(d, { recursive: true });
 const isTask = (f) => f.endsWith('.md') && !f.startsWith('.') && !f.startsWith('README');
 const list = (dir) => (existsSync(dir) ? readdirSync(dir).filter(isTask).sort() : []);
 
-/* ---- ZCode 派发总开关（跨会话唯一真值来源）----
- * 契约见宿主仓库 collab/PROTOCOL.md §ZCode 派发总开关。
- * 真值文件路径**不硬编码**（属机器专有配置）：必须用 ZCD_SWITCH_FILE 指定，
+/* ---- 派发总开关（跨会话唯一真值来源）----
+ * 契约见宿主仓库 collab/PROTOCOL.md §派发总开关。
+ * 真值文件路径**不硬编码**（属机器专有配置）：必须用 DSP_SWITCH_FILE 指定，
  * 未指定时按「无文件 = 开启」放行（不误锁），并在投放前提示该事实。
  * 语义：enabled:false → 拒绝投放；文件缺失/损坏 → 视为开启（不误锁）。 */
-const SWITCH_FILE = process.env.ZCD_SWITCH_FILE || '';
+const SWITCH_FILE = process.env.DSP_SWITCH_FILE || '';
 function readDispatchSwitch() {
   try {
-    if (!SWITCH_FILE) return { enabled: true, source: 'default(未配置 ZCD_SWITCH_FILE=开启)' };
+    if (!SWITCH_FILE) return { enabled: true, source: 'default(未配置 DSP_SWITCH_FILE=开启)' };
     if (!existsSync(SWITCH_FILE)) return { enabled: true, source: 'default(无文件=开启)' };
     const raw = JSON.parse(readFileSync(SWITCH_FILE, 'utf8'));
     return { enabled: raw.enabled !== false, updatedAt: raw.updatedAt, updatedBy: raw.updatedBy, note: raw.note };
@@ -41,11 +41,11 @@ function readDispatchSwitch() {
 function assertSwitchOn() {
   const sw = readDispatchSwitch();
   if (sw.enabled) return;
-  console.error('[bridge] ⛔ ZCode 派发总开关为「关闭」，拒绝投放任务（没有任务会被客户端执行）。');
+  console.error('[bridge] ⛔ 派发总开关为「关闭」，拒绝投放任务（没有任务会被客户端执行）。');
   console.error(`[bridge] 开关文件: ${SWITCH_FILE}`);
   if (sw.updatedBy || sw.updatedAt) console.error(`[bridge] 最后修改: ${sw.updatedBy ?? '?'} @ ${sw.updatedAt ?? '?'}`);
   if (sw.note) console.error(`[bridge] 备注: ${sw.note}`);
-  console.error('[bridge] 恢复: 用 collab-kit 的 zcode-switch.mjs 打开开关（node "<本仓库>/collab-kit/zcode-switch.mjs" on）');
+  console.error('[bridge] 恢复: 用 collab-kit 的 dispatch-switch.mjs 打开开关（node "<本仓库>/collab-kit/dispatch-switch.mjs" on）');
   process.exit(3);
 }
 

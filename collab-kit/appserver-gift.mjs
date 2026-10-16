@@ -560,7 +560,7 @@ export async function runGiftTurn(opts) {
   let basis = 'none';
   try {
     mark('create-session');
-    const created = await client.call('session/create', { workspace: { workspacePath: opts.cwd, workspaceKey: 'zcode-dispatch-gift' } });
+    const created = await client.call('session/create', { workspace: { workspacePath: opts.cwd, workspaceKey: 'dispatch-gift' } });
     sessionId = created?.session?.sessionId ?? created?.sessionId;
     if (typeof sessionId !== 'string' || sessionId === '') throw new Error('app-server 没有返回 sessionId');
     progress.sessionId = sessionId;
@@ -575,7 +575,7 @@ export async function runGiftTurn(opts) {
     /* 账户注入：basedOn 必须与 spawn 的 builtin 文件同源 */
     mark('inject-account');
     const injected = await client.call('provider/updateAccountConfig', {
-      revision: `zcode-dispatch-gift:${Date.now()}`,
+      revision: `dispatch-gift:${Date.now()}`,
       basedOnZCodeBuiltinRevision: revision,
       providers: { [accountProviderId]: { access: { type: 'zhipu-account', entitled: true }, builtinModelIds: [modelId] } },
       states: { [accountProviderId]: { availability: 'available', entitled: true, current: true } },

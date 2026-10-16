@@ -35,7 +35,7 @@
 - **正解**：把注入提到 `apply()` 内、**槽位注册之前**（`try { ensureStyle(); }`）—— 常驻入口一出现就带样式；
   弹窗里的那次保留作兜底（幂等）。
 - **顺带加固**（同一处现场暴露的两个脆弱点）：
-  ① 选择器加作用域 `.zcd-entry .zcd-chip`（0,2,0）压过宿主形如 `.headerActions button` 的规则，
+  ① 选择器加作用域 `.dsp-entry .dsp-chip`（0,2,0）压过宿主形如 `.headerActions button` 的规则，
      并显式 `appearance:none` + `background:transparent` + `box-shadow:none`；
   ② 颜色一律走主题令牌（`T.*` = `--dsw-alias-*` 带回退），**规则里不出现字面色值** ⇒ 明暗两套主题自适应。
 - **门禁**：`header-entry.test.mjs` 新增 B11–B15（作用域/appearance/透明底/无字面色值）与 F1–F3
@@ -43,7 +43,7 @@
 
 ### 事故：给第三方入口写 `font-family:inherit` → 与同排官方入口"字号不一致"（查了三轮）
 
-- **现象**：会话标题行的「ZCode 派发台」入口字号看着比同排的「子智能体/智能体团队/创造模式」大，
+- **现象**：会话标题行的「DSH 派发台」入口字号看着比同排的「子智能体/智能体团队/创造模式」大，
   反复调 `font-size` 都不对（12px 明明与官方实现声明值相同）。
 - **真因**：**font-family 不同，不是 font-size**。邻居都是 `<button>`，而全仓**没有**全局
   `button{font:inherit}` ⇒ 它们渲染用的是 **UA/平台按钮字体**；我写了 `font-family:inherit`
@@ -62,7 +62,7 @@
 
 ### 教训：别对 minify 产物做"肉眼对照"，DSH 是开源的 —— 直接读源码
 
-- **背景**：为了把「ZCode 派发台」入口调成与同排一致，我连续三轮从 `app.asar` 里的 **minify 产物**
+- **背景**：为了把「DSH 派发台」入口调成与同排一致，我连续三轮从 `app.asar` 里的 **minify 产物**
   里抠 CSS 字符串、再并排比对截图，结果两次押错参照物（先按 job-list，再按「创造模式」）。
 - **正解**：DSH 开源在 **`github.com/deepseek-ai/deepseek-harness`**（"Everything is a Plugin"）。
   源码路径与包一一对应，例如 `@deepseek-ai/dsh-client-ui-jobs` →
@@ -145,9 +145,9 @@ Chromium 会落盘到 `%APPDATA%\@deepseek-ai\dsh-desktop\Local Storage\leveldb\
 ### 坑：重构容器时丢掉"基础字号"，整块 UI 悄悄变大
 
 - **现象**：面板内"进程"等板块的文字比同级官方弹层明显大。
-- **成因**：浮窗时代容器是 `.zcd-root{font-size:12px;line-height:1.6}`；ZB-27 改弹窗后容器换成
-  `.zcd-menu`，我**只搬了布局与令牌、漏了字体基准** ⇒ 所有**未显式写 font-size** 的元素
-  （进程行、`.zcd-dim`、下拉/输入框、按钮…）都去继承应用根部（≈14px）。而写了字号的又是
+- **成因**：浮窗时代容器是 `.dsp-root{font-size:12px;line-height:1.6}`；ZB-27 改弹窗后容器换成
+  `.dsp-menu`，我**只搬了布局与令牌、漏了字体基准** ⇒ 所有**未显式写 font-size** 的元素
+  （进程行、`.dsp-dim`、下拉/输入框、按钮…）都去继承应用根部（≈14px）。而写了字号的又是
   10 / 10.5 / 11 / 12px 混杂，视觉上更乱。
 - **正解**：容器**必须显式给出基础字号**（此处对齐官方弹层主行 12px/17px），并把零散值收敛成
   官方三档 —— **12/17（主）· 11/16（次）· 10/15（元）**，删掉 10.5px 这类中间值。
@@ -182,8 +182,8 @@ Chromium 会落盘到 `%APPDATA%\@deepseek-ai\dsh-desktop\Local Storage\leveldb\
 
 ### 另记：清理"死代码"时要先确认它真的没人用
 
-删浮窗样式时把 `.zcd-iconbtn` 当死代码删掉，随后发现 **JobRow 的终止/重跑/续接/关闭四个按钮仍在用它**。
-教训：删 CSS 前用 `grep 'className: ...'` 反查类名在 JSX 里的使用点；`.zcd-root` 这类被删掉的**容器**类
+删浮窗样式时把 `.dsp-iconbtn` 当死代码删掉，随后发现 **JobRow 的终止/重跑/续接/关闭四个按钮仍在用它**。
+教训：删 CSS 前用 `grep 'className: ...'` 反查类名在 JSX 里的使用点；`.dsp-root` 这类被删掉的**容器**类
 才适合整组删。
 
 ## 2026-10-05 ZB-22（派发台落地自动唤醒；以及「host 代码改动何时才真生效」）
@@ -201,9 +201,9 @@ DSH 自带的后台任务完成时会自动把会话拉起来，派发台也应�
 
 5. **新增一个 host 半边文件，必须同步 `package.json` 的 `files`**：`install_bundle` 按 `files` 打包，漏一个文件 = 装出来的插件 `index.js` 静态 import 直接 ERR_MODULE_NOT_FOUND（本轮加 `notify.mjs` 时差点漏；本机因为是 `link:` 装配所以照样能跑，**只有真装机才炸**——最难发现的一类）。已给 `tools/verify-plugin.mjs` 加常驻哨兵：「index.js 的每个 `./xxx` 相对 import 要么列在 `files`、要么落在列出的目录项下」，并做了反向验证（摘掉 `notify.mjs` → 立刻 `FAIL 缺: notify.mjs`）。
 
-6. **真机验收（重启后闭环）**：`j-muuw3axj-0-f43f`（tag `wake-smoke`，GLM-5.3-Flash，`lock=none`）06:49:27Z 派发 → 06:49:41Z 落地（`done`、exit 0、14.1s、`responseChars:13`、台账命中）。**派发它的会话当时已经结束本轮、没有做任何等待**，落地瞬间被自动拉起并收到通知卡片（正文即 `[zcode-dispatch] 派发任务 … 已落地。…[status: done]`），且只收到一次（幂等）。同刻信标 `wakeActive:true / agentsVisible:true / systemPromptHintActive:true`；活体 Config schema 里可查到三个新字段（`cordis_inspect_query` host/Config）。至此「工具取 `exec.agent.id` → 登记归属 → 落地判据 → `followup` 开新一轮 → 新轮次带 notice」整条链路全部经真机验证，不再是「应该能行」。
+6. **真机验收（重启后闭环）**：`j-muuw3axj-0-f43f`（tag `wake-smoke`，GLM-5.3-Flash，`lock=none`）06:49:27Z 派发 → 06:49:41Z 落地（`done`、exit 0、14.1s、`responseChars:13`、台账命中）。**派发它的会话当时已经结束本轮、没有做任何等待**，落地瞬间被自动拉起并收到通知卡片（正文即 `[dispatch] 派发任务 … 已落地。…[status: done]`），且只收到一次（幂等）。同刻信标 `wakeActive:true / agentsVisible:true / systemPromptHintActive:true`；活体 Config schema 里可查到三个新字段（`cordis_inspect_query` host/Config）。至此「工具取 `exec.agent.id` → 登记归属 → 落地判据 → `followup` 开新一轮 → 新轮次带 notice」整条链路全部经真机验证，不再是「应该能行」。
 
-## 2026-09-30 Z13（官方 API 注册 agent 工具 zcode_dispatch）
+## 2026-09-30 Z13（官方 API 注册 agent 工具 dispatch）
 
 1. **「宿主随包出货」≠ 本地能静态 import**：本地 node_modules 只有宿主出货包的子集（cosmokit/schemastery）。给 index.js 加静态 `import '@deepseek-ai/dsh-tools'` 会让模块加载即炸——verify-plugin ③「Config 是 Standard Schema」项会**真实 import index.js**（tools/verify-plugin.mjs:38），门禁直接红；宿主真缺包则激活死（Z10-1 同源）。正解沿用本文件 loadConfig 同款：动态 import + try/catch 降级 null，宿主内解析到同一个官方包，语义等价、失败可降。
 2. **defineTool 的 output 不可省略**：`options.output.render` / `options.output.schema` 被无条件读取（refs/dsh-tools/lib/index.js:842/:849），「若 output 可省略就省略」按真契约为假。最小合法形态：`{ schema: { type: 'json' }, render: (args, value) => [{type:'text', text: …}] }`——DSL 的 `type:'json'` 编译为注解即无约束 JSON（:688），任意 JSON 返回值都合法。
@@ -253,7 +253,7 @@ DSH 自带的后台任务完成时会自动把会话拉起来，派发台也应�
 
 ## 2026-09-30 Z5（安装前收尾）
 
-1. **行为变更必须同步本地验收探针**：Z3 把 `fetchPlanQuota` 从占位变真实、Z4 把注册 id 改为 `zcode-dispatch.console`，两单都没同步 `test/z2-verify.mjs` 的对应断言，探针一直 73 PASS / 2 FAIL 假红（DSH 侧探针是另一份所以没暴露）。改行为的那一单要 grep 本地验收脚本里的相关断言一起改。
+1. **行为变更必须同步本地验收探针**：Z3 把 `fetchPlanQuota` 从占位变真实、Z4 把注册 id 改为 `dispatch.console`，两单都没同步 `test/z2-verify.mjs` 的对应断言，探针一直 73 PASS / 2 FAIL 假红（DSH 侧探针是另一份所以没暴露）。改行为的那一单要 grep 本地验收脚本里的相关断言一起改。
 2. **React 桩必须在 factory 之前装好**：client.js 顶部 `const { useState, … } = React` 在 factory 时解构，之后再造 `R.useState` 无效（表现诡异：hooks 返回初始值、整树只剩 21 个节点）。先装桩再调 factory。
 3. **遍历元素树要对函数组件求值**：只递归 children 会把 Section/QuotaCards 等函数组件当黑盒叶子（节点数骤减、找不到目标 DOM）。要 `el.t({ ...el.p, children })` 递归求值，并按组件切换 hooks 槽（同 test/z2-verify.mjs 的 renderTree 做法）。
 
@@ -274,7 +274,7 @@ DSH 自带的后台任务完成时会自动把会话拉起来，派发台也应�
 5. **反查 minified bundle 的捷径**：grep zod 校验错误文案（如 "Unrecognized key"、"Method not found"）可直接反推协议 union 形状与方法表，比读压缩代码快一个量级。
 6. **模拟 spawn ENOENT 时假进程 pid 必须为 undefined**：真实 Node spawn 失败不给 pid；假进程给了 pid，库的"pid 已设=spawn 成功"快路径会误判（测试假桩踩的）。
 
-## 2026-09-30 Z2（ZCode 派发台插件包）
+## 2026-09-30 Z2（DSH 派发台插件包）
 
 1. **纪律 grep 会被注释命中**：任务包禁止 JS 出现 `@deepseek-ai`、`document.body`、`require('react')` 以外的 require——这些字面串连**注释**里都不能出现（client.js 头注释原样写了这三个，验收 grep 全部命中）。改述为「DSH 宿主客户端包 / 宿主 body 节点 / 经宿主模块表注入的 react」。
 2. **Node ≥21 的 `globalThis.navigator` 只读**（本机 v24.14.1）：测试桩直接赋值抛 `TypeError: Cannot set property navigator … only a getter`。赋值要 try/catch；业务代码读 navigator 必须带回退链。
@@ -289,7 +289,7 @@ DSH 自带的后台任务完成时会自动把会话拉起来，派发台也应�
    cordis `lib/index.js:958` 只认 `Config["~standard"].validate(config)`（Standard Schema v1）。
    导出裸 JSON Schema 会得到 `runtime.Config["~standard"] === undefined` → 激活失败、插件不加载。
    正解：`import z from "@deepseek-ai/schemastery"`（随 dsh 出货、官方插件同款）+ `z.object({...})`；
-   或手写 `{'~standard':{version:1,vendor,validate}}`（DSH 已加降级兜底，见 `zcode-dispatch/index.js`）。
+   或手写 `{'~standard':{version:1,vendor,validate}}`（DSH 已加降级兜底，见 `dispatch/index.js`）。
 
 2. **"关→开开关"重载不到新代码（宿主半边）**
    cordis `_reload()` → `_resolveConfig()` 用的是 `this.runtime`，即**进程内已 import 的模块对象**；
@@ -298,7 +298,7 @@ DSH 自带的后台任务完成时会自动把会话拉起来，派发台也应�
    → **宿主半边改动：必须完全退出 DSH 再启动**；客户端半边（`client.js`）改动：刷新页面即可（浏览器重新取包）。
 
 3. **本地自证的两条路径**（写单必带）
-   - 主路径：`node -e "import('./zcode-dispatch/index.js')"` → `Config['~standard'].validate({})` 应有 5 个默认值；
+   - 主路径：`node -e "import('./dispatch/index.js')"` → `Config['~standard'].validate({})` 应有 5 个默认值；
    - 降级路径：`node --import <block-hook>`（resolve 钩子对该包抛 ERR_MODULE_NOT_FOUND）→ 仍须有 `~standard` 且归一脏值。
 
 ## 2026-09-30：DSH 崩溃对话框的「禁用第三方插件、备份 profile patch 并重启」会重置配置（务必知晓）
@@ -312,20 +312,20 @@ DSH 自带的后台任务完成时会自动把会话拉起来，派发台也应�
 - **教训**：让插件进入启动路径前，先用常驻判据挡住"会阻塞启动"的写法（本轮已加：
   「inject 不自声明 remote 命名空间」+「apply 全兜底」），否则一次启动失败就要用户点救援按钮 = 配置被重置。
 
-## 2026-10-05：仓库目录改名（`dsh-plugins` → `zcode-dispatch`）—— link 状态必须由 pnpm 重建
+## 2026-10-05：仓库目录改名（`dsh-plugins` → `dispatch`）—— link 状态必须由 pnpm 重建
 
-- **起因**：本地目录名与 GitHub 仓库名（`zcode-dispatch`）不一致，改名对齐。
+- **起因**：本地目录名与 GitHub 仓库名（`dispatch`）不一致，改名对齐。
 - **踩的坑**：改完 `profile/package.json` 的 `link:` spec 后，**只手工改了
   `node_modules/.pnpm/lock.yaml`，漏了 profile 根目录的正式锁文件 `profiles/desktop/pnpm-lock.yaml`**。
   约 2.5 小时后 DSH 插件管理器自动跑 `pnpm install`（日志
   `profiles/desktop/.plugin-manager/logs/operation-*/pnpm.log`），pnpm 以**仍含旧路径的根锁**为准，
   把 `package.json`/两个 lock/junction 全部按旧路径重建 ⇒ junction 悬空 ⇒ 下次启动报
-  `cannot resolve profile bundle "@local/zcode-dispatch"`。（当时的包名 —— ZB-32 起包已改名为
-  `dsh-zcode-dispatch`；此处保留原始报错文本以保持史实准确。）
+  `cannot resolve profile bundle "@local/dispatch"`。（当时的包名 —— ZB-32 起包已改名为
+  `dsh-dispatch`；此处保留原始报错文本以保持史实准确。）
 - **正确做法**：改 `link:` spec 后**跑一次 profile 的 pnpm install**，让它自己重建 lock + junction；
   若必须手工改，则 `profiles/<p>/pnpm-lock.yaml`（正式）与 `node_modules/.pnpm/lock.yaml`（副本）
   **两个都要改**，并重建 junction，最后**再跑一次 install 复验**。
-- **附带教训（本仓库自身）**：`tools/`、`zcode-dispatch/test/*.test.mjs`、README、`CREATOR-*.md`
+- **附带教训（本仓库自身）**：`tools/`、`dispatch/test/*.test.mjs`、README、`CREATOR-*.md`
   里**硬编码了绝对路径**（本次共 23 文件 43 处），改名后测试/校验脚本全部找不到源码。
   本次已批量更正；**建议后续改为相对自身推导**（`import.meta.url` → `path.resolve`），
   这样仓库放哪都能跑，不必再随改名批量改路径。

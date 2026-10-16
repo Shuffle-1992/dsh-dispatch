@@ -9,7 +9,7 @@ import { readdirSync, readFileSync, existsSync, statSync, appendFileSync } from 
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/* collab/ 目录：--project > env ZCODE_PROJECT_DIR > cwd（本工具已迁至 zcode-dispatch/collab-kit）。 */
+/* collab/ 目录：--project > env ZCODE_PROJECT_DIR > cwd（本工具已迁至 dispatch/collab-kit）。 */
 function resolveCollabDir() {
   const i = process.argv.indexOf('--project');
   const base = i >= 0 && process.argv[i + 1]

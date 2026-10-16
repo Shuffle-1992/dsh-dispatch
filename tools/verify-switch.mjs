@@ -2,7 +2,7 @@
 import { writeFileSync, readFileSync, existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createActionHandler, createRemoteFace } from 'file:///F:/My Code/zcode-dispatch/zcode-dispatch/wire.host.mjs';
+import { createActionHandler, createRemoteFace } from 'file:///F:/My Code/zcode-dispatch/dispatch/wire.host.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'z12-verify-'));
 const swFile = join(dir, 'switch.json');

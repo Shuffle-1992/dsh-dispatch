@@ -9,6 +9,6 @@
   },
   "bin": {
     "zcode-run": "./zcode-run.mjs",
-    "zcode-switch": "./zcode-switch.mjs"
+    "dispatch-switch": "./dispatch-switch.mjs"
   }
 }

@@ -3,7 +3,7 @@
 从 `keysion dac vue/scripts/collab/` 迁出的**通用协作基础设施**（2026-10-01）。
 它们与任何具体业务项目无关，只是恰好被 keysion 项目的协作流程使用。
 
-**配套的派发台插件**在本仓库 `zcode-dispatch/`（DSH 面板 + job 管理 + 锁闸）。
+**配套的派发台插件**在本仓库 `dispatch/`（DSH 面板 + job 管理 + 锁闸）。
 
 ---
 
@@ -12,7 +12,7 @@
 | 工具 | 用途 |
 |---|---|
 | `zcode-run.mjs` | **ZCode 无头派发器**（核心）：把自足任务包交给 ZCode Agent CLI 无头执行，产物/证据落盘，退出码透传 |
-| `zcode-switch.mjs` | **派发总开关**（跨会话唯一真值来源）：`enabled:false` = 禁止一切派发 |
+| `dispatch-switch.mjs` | **派发总开关**（跨会话唯一真值来源）：`enabled:false` = 禁止一切派发 |
 | `wait-inbox.mjs` | 等待信箱出现新消息（跨 Agent 互唤醒的备选通道） |
 | `run-gates.mjs` | 门禁批量复跑器（读 `<project>/collab/gates.json`，逐套件执行并留原始日志） |
 | `relay-once.mjs` | 机械复审证据准备（跑门禁 + 产出证据包） |
@@ -69,8 +69,8 @@ node "<本仓库>/collab-kit/zcode-run.mjs" --project "<root>" --resume sess_xxx
 node "<本仓库>/collab-kit/zcode-run.mjs" --list-providers
 
 # 派发总开关
-node "<本仓库>/collab-kit/zcode-switch.mjs" --project "<root>" status
-node "<本仓库>/collab-kit/zcode-switch.mjs" --project "<root>" off --by dsh --note "维护中"
+node "<本仓库>/collab-kit/dispatch-switch.mjs" --project "<root>" status
+node "<本仓库>/collab-kit/dispatch-switch.mjs" --project "<root>" off --by dsh --note "维护中"
 
 # 门禁批量复跑
 node "<本仓库>/collab-kit/run-gates.mjs" --project "<root>" --tag R1
@@ -146,16 +146,16 @@ secret：env ZCODE_CREDENTIAL_SECRET
 
 ## 与 DSH 派发台的配合
 
-派发台插件（本仓库 `zcode-dispatch/`）通过 `runnerPath` 调 `zcode-run.mjs`。
+派发台插件（本仓库 `dispatch/`）通过 `runnerPath` 调 `zcode-run.mjs`。
 profile 配置示例（`~/.dsh/profiles/<p>/cordis.patch.yml`）：
 
 ```yaml
-- id: zcode-dispatch
+- id: dispatch
   config:
     runnerPath: '<本仓库>\collab-kit\zcode-run.mjs'
     runnerCwd: 'F:\My Code\keysion dac vue'      # runner 子进程 cwd = 宿主项目根
-    ledgerPath: 'F:\My Code\keysion dac vue\collab\logs\zcode-runs.jsonl'
-    switchPath: 'F:\My Code\keysion dac vue\collab\zcode-dispatch.switch.json'
+    ledgerPath: 'F:\My Code\keysion dac vue\collab\logs\dispatch-runs.jsonl'
+    switchPath: 'F:\My Code\keysion dac vue\collab\dispatch.switch.json'
     workRoot: '<插件目录>\.data'
 ```
 
