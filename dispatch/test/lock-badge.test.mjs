@@ -72,7 +72,9 @@ console.log('\n容错（脏数据不崩）');
 
 console.log('\n接线与样式（源码断言）');
 ok(/const lk = lockKindOf\(job\);/.test(src), 'F1 进程行调用 lockKindOf');
-ok(/className: `dsp-badge dsp-lock-\$\{lk\.kind\}`/.test(src), 'F2 徽标带锁类型 class（便于着色区分）');
+/* ZB-70e（用户要求）：文件锁改为第二行**右对齐** ⇒ 徽标 className 多挂一个 `dsp-job-lock` 修饰类。
+ * 断言语义不变（"徽标必须带锁类型 class 以便着色"），只是把锚点更新到当前真实字面（并额外钉住修饰类）。 */
+ok(/className: `dsp-badge dsp-lock-\$\{lk\.kind\} dsp-job-lock`/.test(src), 'F2 徽标带锁类型 class + 右对齐修饰类 dsp-job-lock');
 ok(/if \(lk\.kind === 'none'\) return null;/.test(src), 'F3 无锁时不渲染徽标');
 ok(/\.dsp-badge\.dsp-lock-repo\{/.test(src), 'F4 有整仓库锁样式');
 ok(/\.dsp-badge\.dsp-lock-file\{/.test(src), 'F5 有文件锁样式');

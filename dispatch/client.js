@@ -196,23 +196,24 @@ window.__ModuleLoader__.load({
       '.dsp-job-head{display:flex;flex-direction:column;align-items:stretch;gap:2px;min-height:24px;}',
       '.dsp-job-line{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap;}',
       /* ZB-70（用户要求）：行头改**三行** ——
-       *   行1 = 状态灯 + 进程名（左）… 时间 + 退出（右）：`margin-right:auto` 把右组推到行尾；
-       *   行2 = 引擎 + 模型 + 思考 + 权限 + 文件锁（**全部左对齐**，原先这里是 line2 右对齐）；
-       *   行3 = 心跳/上下文（左对齐，11px 次要色）。 */
+       *   行1 = 状态灯 + 进程名（左）… 上下文 + 时间 + 退出（右）；
+       *   行2 = 引擎 + 模型 + 思考 + 权限（左）… **文件锁（右对齐）**；
+       *   行3 = 心跳（左）+ 接续/跳数（右）。 */
       '.dsp-job-line .dsp-job-tag{margin-right:auto;}',
-      /* ZB-70c（用户要求）：第二行**不许折行**（"整仓库锁"曾被挤到下一行）——
-       * 模型徽标可压缩（省略号 + title 悬浮看全名），其余徽标固定宽度 ⇒ 文件锁永远留在第二行。 */
+      /* ZB-70c/e（用户要求）：第二行**不许折行**（"整仓库锁"曾被挤到下一行）——
+       * 模型徽标可压缩（省略号 + title 悬浮看全名），其余徽标固定宽度；
+       * 文件锁改**右对齐**（margin-left:auto 顶到行尾），这样既不会折行、位置也固定。 */
       '.dsp-job-line2{justify-content:flex-start;flex-wrap:nowrap;overflow:hidden;}',
-      '.dsp-job-line3{justify-content:flex-start;}',
+      '.dsp-job-line2 .dsp-job-lock{margin-left:auto;flex:0 0 auto;}',
       '.dsp-job-right{display:flex;align-items:center;gap:8px;flex:0 0 auto;}',
       /* 第三行：**左心跳 / 右接续**。
-       * ⚠️ 关键：这一行**必须不折行** —— 心跳文字很长（"当前：step-finish · read · … ｜ 最近心跳 12s"），
-       * 一旦允许 wrap，右侧的「接续自 X / N 跳」会被折到**下一行的行首**，看起来就像"接续在左边"。
-       * 现在：左侧组可压缩（省略号），右侧组固定，`margin-left:auto` 把它顶到行尾。 */
-      '.dsp-job-line3{flex-wrap:nowrap;}',
-      '.dsp-job-left{display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0;overflow:hidden;}',
+       * 用 **grid 两列**而不是 flex：`minmax(0,1fr) auto` + `justify-self:end` 让右侧组**结构性**贴右边缘，
+       * 不依赖 `margin-left:auto`，也**不可能折行**（两次踩坑都源于"折行后从行首排版，看着像左对齐"）。
+       * 左列 minmax(0,…) 让心跳超长时用省略号让位。 */
+      '.dsp-job-line3{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:8px;}',
+      '.dsp-job-left{display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;}',
       '.dsp-job-left>*{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
-      '.dsp-job-line3 .dsp-job-right{margin-left:auto;flex:0 0 auto;}',
+      '.dsp-job-line3 .dsp-job-right{justify-self:end;flex:0 0 auto;}',
       /* 模型名：可压缩 + 省略号；完整名在 title（用户要求「压缩模型名称的显示，鼠标悬浮显示完整模型名称」）。 */
       '.dsp-job-model{flex:0 1 auto;min-width:52px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
       /* 列表页脚：左侧「还有 N 条更早 / 收起」，右侧「清除所有」（仅非「进行中」页签出现）。 */
@@ -3821,11 +3822,12 @@ window.__ModuleLoader__.load({
               const lk = lockKindOf(job);
               if (lk.kind === 'none') return null;
               return h('span', {
-                className: `dsp-badge dsp-lock-${lk.kind}`,
+                /* ZB-70e（用户要求）：文件锁**右对齐**放在第二行行尾（dsp-job-lock 带 margin-left:auto）。 */
+                className: `dsp-badge dsp-lock-${lk.kind} dsp-job-lock`,
                 title: lk.detail || t('lockHeld'),
               }, lk.label);
             })()
-            /* ↑ 第二行到此为止：只放用户指定的五项（引擎 / 模型 / 思考 / 权限 / 文件锁）。
+            /* ↑ 第二行到此为止：引擎 / 模型 / 思考 / 权限（左）+ 文件锁（右）。
              * paused 与血缘徽标已移到第三行 —— 否则第二行一挤，文件锁就被折到下一行（用户截图反馈）。 */
           ),
           /* ZB-70c（用户要求）：第三行 = **左侧心跳** + **右侧接续**（血缘徽标）。
