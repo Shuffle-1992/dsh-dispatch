@@ -27,6 +27,8 @@
  * 激活安全：任何一步失败都只 warn，绝不抛——唤醒是增强，不能影响派发本身。
  */
 import { randomUUID } from 'node:crypto';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 /* ZB-25：落地判据取自 core（状态机所有者），不在本文件重新写一份集合。 */
 import { SETTLED_STATES } from './core/dispatch-core.mjs';
 
@@ -133,7 +135,17 @@ export function createSettleNotifier({ dispatcher, agents, log, config = {}, ctx
   const suppressed = new Set();
   /** 会话 id → 连续唤醒次数（仅在配置了上限时计数）。 */
   const spentWakes = new Map();
-  const counter = { registered: 0, notified: 0, delivered: 0, followup: 0, inject: 0, suppressed: 0, missingAgent: 0, capped: 0 };
+  const counter = { registered: 0, notified: 0, delivered: 0, followup: 0, inject: 0, suppressed: 0, missingAgent: 0, capped: 0, insertAcked: 0, lostWakes: 0 };
+  /* ZB-62（DSH 0.2.1 新事件）：**唤醒投递第一次变得可观测**。
+   * 背景：`delivered++` 只说明"调用 followup/inject 没抛错"，**不能证明消息真的进了会话 Inbox**
+   * —— 会话已关闭/被清空时，通知会被宿主静默丢弃（旧代码完全看不见）。
+   * 0.2.1 的事件目录给了两个 emit 事件：`agent/inbox/inserted`（消息进入 live inbox）与
+   * `agent/inbox/discarded`（被丢弃）。这里只做**纯观测**：拿我们自己生成的消息 id 对账。
+   * ⚠️ 刻意**不**用 `claimed` 反推"唤醒是否真的开了 turn"——官方语义里 claimed 之后 turn
+   * 仍可能因 proposed step 被拒而无 step 关闭（既不算 discarded、也不会重发），据此退连续唤醒
+   * 预算会引入错账（既有 `claimed` 订阅只按 `source.kind==='user'` 复位，语义正确，保持不动）。 */
+  const deliveredIds = new Set();     // 我们投递过的通知消息 id（限量，沿用 TRACK_CAP 淘汰）
+  const pendingInsert = new Map();    // 已投递但**尚未**看到 inserted 的消息 id → 投递时刻
   const wakeBudget = Number.isSafeInteger(config.maxConsecutiveWakes) && config.maxConsecutiveWakes > 0 ? config.maxConsecutiveWakes : 0;
   let disposed = false;
   /* ZB-25（审计 A#4）：集合原先只增不减 ⇒ 长跑进程（几天不重启）无界增长。
@@ -162,6 +174,53 @@ export function createSettleNotifier({ dispatcher, agents, log, config = {}, ctx
     })
     : null;
 
+  /* ZB-62：投递健康度快照（stats() 与落盘共用同一份，避免"两处各数一遍"）。 */
+  function snapshotStats() {
+    return {
+      ...counter,
+      tracked: owners.size,
+      wakeBudget,
+      unconfirmed: pendingInsert.size,
+      owners: [...owners.entries()].map(([id, agentId]) => ({ id, agentId })),
+    };
+  }
+
+  /** ZB-62：把投递健康度落盘（`<jobsFile 同目录>/wake-stats.json`，诊断用）。
+   *  为什么值得写文件：宿主**没有**可供插件读取的通用日志；唤醒是"有就更好"的增强，
+   *  没有落盘就只能靠"我发现没被唤醒"这种事后感知。写失败只 warn，绝不影响投递。 */
+  function persistStats() {
+    try {
+      const jobsFile = dispatcher?.jobsFile;
+      if (typeof jobsFile !== 'string' || !jobsFile) return;
+      const file = join(dirname(jobsFile), 'wake-stats.json');
+      const tmp = `${file}.tmp`;
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(tmp, JSON.stringify({ at: new Date().toISOString(), ...snapshotStats() }, null, 2));
+      renameSync(tmp, file); // 原子替换（与 core 落盘同思路）
+    } catch { /* 诊断落盘失败不影响唤醒 */ }
+  }
+
+  /* ZB-62：按消息 id 对账 —— inserted = 真的进了 Inbox；discarded = 被宿主丢弃（旧代码看不见）。 */
+  const offInserted = typeof ctx?.on === 'function'
+    ? ctx.on('agent/inbox/inserted', ({ message } = {}) => {
+      const id = message?.id;
+      if (typeof id !== 'string' || !deliveredIds.has(id)) return;
+      pendingInsert.delete(id);
+      counter.insertAcked += 1;
+      persistStats();
+    })
+    : null;
+  const offDiscarded = typeof ctx?.on === 'function'
+    ? ctx.on('agent/inbox/discarded', ({ agent, message } = {}) => {
+      const id = message?.id;
+      if (typeof id !== 'string' || !deliveredIds.has(id)) return;
+      pendingInsert.delete(id);
+      counter.lostWakes += 1;
+      persistStats();
+      warn(`落地通知被宿主丢弃（会话 ${agent?.id ?? '?'}）：唤醒未送达 —— 请用 action=list / action=tail 主动查看结果`);
+    })
+    : null;
+
   /** 投递一条落地通知：空闲会话开新一轮（followup），忙碌会话插进下一步（inject）。 */
   function deliver(job, agentId) {
     const agent = agents?.get?.(agentId);
@@ -180,6 +239,9 @@ export function createSettleNotifier({ dispatcher, agents, log, config = {}, ctx
         agent.inject(message);
         counter.inject += 1;
         counter.delivered += 1;
+        remember(deliveredIds, message.id);
+        pendingInsert.set(message.id, Date.now());
+        persistStats();
         return;
       }
       spentWakes.set(agentId, used + 1);
@@ -188,6 +250,15 @@ export function createSettleNotifier({ dispatcher, agents, log, config = {}, ctx
     else agent.inject(message);
     counter[idle ? 'followup' : 'inject'] += 1;
     counter.delivered += 1;
+    /* ZB-62：登记消息 id 等 inserted 对账；未确认的留在 pendingInsert（= 诊断"悄悄没入队"）。 */
+    remember(deliveredIds, message.id);
+    pendingInsert.set(message.id, Date.now());
+    while (pendingInsert.size > TRACK_CAP) {
+      const oldest = pendingInsert.keys().next().value;
+      if (oldest === undefined) break;
+      pendingInsert.delete(oldest);
+    }
+    persistStats();
   }
 
   /** 判定并投递一个 job（幂等：每个 job 最多一次）。 */
@@ -253,21 +324,21 @@ export function createSettleNotifier({ dispatcher, agents, log, config = {}, ctx
       if (typeof jobId !== 'string' || !jobId) return;
       suppressed.delete(jobId);
     },
-    /** 诊断快照（测试与激活信标用）。 */
+    /** 诊断快照（测试、落盘、激活信标共用同一份）。 */
     stats() {
-      return {
-        ...counter,
-        tracked: owners.size,
-        wakeBudget,
-        owners: [...owners.entries()].map(([id, agentId]) => ({ id, agentId })),
-      };
+      return snapshotStats();
     },
+    /** ZB-62：诊断落盘的显式入口（测试用；正常运行由投递/事件自动触发）。 */
+    persistStats,
     dispose() {
       if (disposed) return;
       disposed = true;
       try { unsubscribe?.(); } catch { /* 已退订 */ }
       try { offInbox?.(); } catch { /* 已退订 */ }
+      try { offInserted?.(); } catch { /* 已退订 */ }
+      try { offDiscarded?.(); } catch { /* 已退订 */ }
       owners.clear();
+      pendingInsert.clear();
     },
   };
 }
