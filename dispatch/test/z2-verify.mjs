@@ -438,24 +438,32 @@ section('7. client.js：ModuleLoader 桩 + 假 ctx + 渲染冒烟');
   const mod = loads[0].factory(requireStub);
   ok(Array.isArray(mod.inject) && mod.inject.includes('slots') && typeof mod.apply === 'function', 'factory 返回 {inject:[slots], apply}');
 
-  const registered = {};
+  /* ⚠️ 桩必须收集**全部** inject/register，不能只留最后一个：
+   * 插件现在注册**两个**槽位（会话头入口 + ZB-52 的插件详情页配置卡），
+   * 只留最后一个会让"会话头"那两条断言拿到配置卡的注册记录而假红。
+   * 下面按**槽位名**取值断言（这也是更结实的写法：不依赖注册顺序）。 */
+  const injected = [];
+  const registeredList = [];
   const ctx = {
     slots: {
-      inject(owner, cb) { registered.owner = owner; registered.cb = cb; },
-      register(opts, comp) { registered.opts = opts; registered.comp = comp; },
+      inject(owner, cb) { injected.push(owner); cb(); },
+      register(opts, comp) { registeredList.push({ opts, comp }); },
     },
   };
   mod.apply(ctx);
-  registered.cb(); // 真实框架在槽位挂载时调用该回调 → 触发 slots.register
-  /* ⚠️ ZB-27（用户要求）之后**只注册一个标题行入口**：原先右下角浮层（`shell.overlay` /
-   * id `dispatch.console` / order 20）与最小化胶囊**都已取消** —— 两份 UI 会让"哪个才是派发台"含糊。
+  /* ⚠️ ZB-27（用户要求）：**会话标题行只放一个入口** —— 原先右下角浮层（`shell.overlay` /
+   * id `dispatch.console` / order 20）与最小化胶囊**都已取消**（两份 UI 会让"哪个才是派发台"含糊）。
    * ZB-27o 又把 order 调到 -25（插在子智能体目录 -30 与智能体团队 -20 之间）。
-   * 所以这三条断言必须跟当前契约对齐（改前一直是红的）。 */
-  ok(registered.owner === 'conversation.session.header.actions',
-    `slots.inject 槽位=${registered.owner}（HEADER_SLOT：会话标题行入口）`);
-  ok(registered.opts?.id === 'dispatch' && registered.opts?.name === 'conversation.session.header.actions' && registered.opts?.order === -25,
+   * ZB-52 新增第二个槽位 `plugins.bundle.config`（插件详情页配置卡），与标题行入口互不影响。 */
+  const header = registeredList.find((r) => r.opts?.name === 'conversation.session.header.actions');
+  ok(injected.includes('conversation.session.header.actions'),
+    `slots.inject 含会话标题行槽位（实际 ${JSON.stringify(injected)}）`);
+  ok(header?.opts?.id === 'dispatch' && header?.opts?.order === -25,
     'slots.register 选项 {name, id, order}（ZB-27o 起 id=dispatch / order=-25）');
-  ok(typeof registered.comp === 'function', 'register 的是组件函数');
+  ok(typeof header?.comp === 'function', '会话头 register 的是组件函数');
+  const bundleCard = registeredList.find((r) => r.opts?.name === 'plugins.bundle.config');
+  ok(bundleCard?.opts?.key === 'dsh-dispatch' && typeof bundleCard?.comp === 'function',
+    `插件详情页配置卡已注册（keyed 槽位 key=包名；实际 ${JSON.stringify(bundleCard?.opts ?? null)}）`);
 
   // 渲染冒烟：渲染 → 跑 effect（demo 引擎订阅/定时器）→ 等 1.3s（elapsed tick）→ 再渲染 → 清理
   const renderTree = (comp) => {
@@ -511,7 +519,7 @@ section('7. client.js：ModuleLoader 桩 + 假 ctx + 渲染冒烟');
     return nodes;
   };
 
-  const Panel = registered.comp;
+  const Panel = header.comp; // 标题行入口（渲染冒烟对象；配置卡另有独立探针覆盖）
   const n1 = renderTree(Panel);
   /* ⚠️ 注册的是**标题行入口**（`HeaderEntry`），收起态只渲染一个按钮 ⇒ 节点数天然很小
    * （实测 8）。原先的 `> 20` 是"整块浮层"时代的阈值，早已过期。

@@ -207,6 +207,11 @@
     "seqThinkingDefault": "设置默认",
     "seqThinkingDefaultHint": "顺序派发模式：档位由顺序列表里**逐个模型**设置（模型不同、支持的档位也不同），此处不可改",
     "seqLevelLabel": "档位",
-    "seqLevelDefault": "默认"
+    "seqLevelDefault": "默认",
+    "seqHintCard": "按下面顺序从上到下尝试：上一个报错就换下一个；换模型 = 新开会话",
+    "seqUseMain": "主通道正在使用此顺序",
+    "seqUseFallback": "降级目标正在使用此顺序",
+    "seqUseBoth": "主通道与降级目标都在使用此顺序",
+    "seqUseNone": "当前未生效：把通道的「模型」选成「顺序派发」后才按此列表尝试"
   }
 }

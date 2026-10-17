@@ -207,6 +207,11 @@
     "seqThinkingDefault": "Set default",
     "seqThinkingDefaultHint": "Sequential mode: effort is set per model in the sequence list (models differ in supported levels), so it is not editable here",
     "seqLevelLabel": "Effort",
-    "seqLevelDefault": "Default"
+    "seqLevelDefault": "Default",
+    "seqHintCard": "Tries the list below top to bottom: an error moves on to the next entry; switching models starts a NEW session",
+    "seqUseMain": "The main channel is using this list",
+    "seqUseFallback": "The fallback target is using this list",
+    "seqUseBoth": "Both the main channel and the fallback target use this list",
+    "seqUseNone": "Not active yet: pick \"Sequential dispatch\" in Model to try this list"
   }
 }

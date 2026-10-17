@@ -53,6 +53,13 @@ window.__ModuleLoader__.load({
      * 我们取 order 10：排在 agent-preset 之后、DSH 自带「后台任务」之前。 */
     const HEADER_SLOT = 'conversation.session.header.actions';
 
+    /* ZB-53（用户真机反馈「插件详情页没有配置区」）：**bundle 自己的配置槽位**。
+     * 契约（DSH 运行时 Slot 树）：`plugins.bundle.config` —— keyed / scope: root，
+     * 按 **bundle 的包名**派发，渲染在 bundle 详情页「描述与条目之间」（`view: 'page'`）。
+     * 本地参照插件 dsh-connect-zcode 就是这么注册的 ⇒ 我们的 key 必须是包名 `dsh-dispatch`。 */
+    const BUNDLE_CONFIG_SLOT = 'plugins.bundle.config';
+    const BUNDLE_CONFIG_KEY = 'dsh-dispatch';
+
     /* ZB-27：入口改为「点开即弹窗」后，ZB-24 那份**模块级共享状态 store 已不需要** ——
      * 弹窗内容（PanelBody）自己持 wire 并渲染实时数据，入口只是个开合开关（局部 useState）。
      * 原 store 的用途是"让另一个渲染器零网络成本显示计数徽标"，现在没有第二个渲染器了。 */
@@ -501,6 +508,13 @@ window.__ModuleLoader__.load({
         seqUnavailable: '（当前不可用）',
         seqOfflineHint: '未连接宿主：顺序设置存在宿主工作目录，连接后才可读写',
         seqLevelLabel: '档位', seqLevelDefault: '默认',
+        /* ZB-54（插件详情页配置卡"按引擎编辑"）：一行短说明 + 该引擎是否正在被顺序派发。
+         * ⚠️ 与 locale/zh.json、locale/en.json **逐键逐值一致**（single-source ⑤ 守门）。 */
+        seqHintCard: '按下面顺序从上到下尝试：上一个报错就换下一个；换模型 = 新开会话',
+        seqUseMain: '主通道正在使用此顺序',
+        seqUseFallback: '降级目标正在使用此顺序',
+        seqUseBoth: '主通道与降级目标都在使用此顺序',
+        seqUseNone: '当前未生效：把通道的「模型」选成「顺序派发」后才按此列表尝试',
         paused: '已暂停', pQuota: '额度耗尽', pEntitled: '未开通', pSigning: '需签名', pConfig: '配置错误', pUnknown: '未知原因',
         lockWait: '排队等待', timedOut: '超时终止',
         timedOutRunner: 'runner 超时（exit 124，--timeout-min 到点）', timedOutWatchdog: '看门狗强制终止（timeoutMin+120s 宽限后未退出）',
@@ -596,6 +610,13 @@ window.__ModuleLoader__.load({
         seqUnavailable: ' (currently unavailable)',
         seqOfflineHint: 'Host not connected: the sequential order lives in the host work dir and unlocks once connected',
         seqLevelLabel: 'Effort', seqLevelDefault: 'Default',
+        /* ZB-54（bundle config card: edit BY ENGINE）：one-line hint + whether this engine is in use.
+         * Must match locale/en.json and locale/zh.json word for word (single-source.test.mjs ⑤). */
+        seqHintCard: 'Tries the list below top to bottom: an error moves on to the next entry; switching models starts a NEW session',
+        seqUseMain: 'The main channel is using this list',
+        seqUseFallback: 'The fallback target is using this list',
+        seqUseBoth: 'Both the main channel and the fallback target use this list',
+        seqUseNone: 'Not active yet: pick "Sequential dispatch" in Model to try this list',
         paused: 'Paused', pQuota: 'Quota exhausted', pEntitled: 'Not entitled', pSigning: 'Signing required', pConfig: 'Config error', pUnknown: 'Unknown',
         lockWait: 'Queue wait', timedOut: 'Timed out',
         timedOutRunner: 'runner timeout (exit 124, --timeout-min elapsed)', timedOutWatchdog: 'watchdog kill (still running after timeoutMin+120s grace)',
@@ -2234,6 +2255,356 @@ window.__ModuleLoader__.load({
       );
     }
 
+    /* ─────── ZB-53：**顺序派发 / 通道折叠的共用件**（浮窗「通道」分区 + 插件详情页配置卡） ───────
+     * 背景（用户真机反馈）：「dsh-dispatch」的**插件详情页**光秃秃没有配置区 —— 槽位
+     * `plugins.bundle.config`（keyed，按**包名**派发）从没注册过任何东西。卡片要展示的正是
+     * "顺序派发"设置 ⇒ 把原先写在 `ChannelSection` 组件内的折叠 / 列表块逻辑**上提到本层**，
+     * 浮窗与配置卡共用同一套实现（单一源，不会漂移；卡片不必重写一份）。
+     * ⚠️ 本块刻意放在这里（而不是文件更前面）：它用到上面刚定义的 `thinkingLabel`，
+     * 提前会踩 TDZ（`client-tdz.test.mjs` 会红，真渲染直接白屏）。 */
+
+    /** 面板 / 配置卡共用的主题令牌变量（`--dsp-*`）；缺了它们 `var(--dsp-*)` 不解析 ⇒ 样式会掉。 */
+    const DSP_CSS_VARS = {
+      '--dsp-bg': T.bg, '--dsp-bgBar': T.bgBar, '--dsp-sunken': T.sunken, '--dsp-hover': T.hover,
+      '--dsp-accent': T.accent, '--dsp-onAccent': T.onAccent, '--dsp-border': T.border, '--dsp-shadow': T.shadow,
+      '--dsp-text': T.text, '--dsp-text2': T.text2, '--dsp-text3': T.text3, '--dsp-danger': T.danger, '--dsp-mono': T.mono,
+      '--dsp-st-queued': T.stQueued, '--dsp-st-running': T.stRunning, '--dsp-st-done': T.stDone,
+      '--dsp-st-failed': T.stFailed, '--dsp-st-killed': T.stKilled, '--dsp-st-interrupted': T.stInterrupted,
+      '--dsp-st-idle': T.stIdle,
+    };
+
+    const FOLD_ENGINES = KNOWN_ENGINES; // 三引擎**全部**折叠（用户要求：通道只列引擎）
+    /** ZCode 折叠条目里的"免费额度"伪模型项（选中它会路由到专用通道 id）。 */
+    /** ZCode 折叠条目里，"模型项"就是**路由 id**（`plan` / `account:bigmodel-start-plan`）——
+     *  这样 Plan 与免费额度不会因"提供同样的模型名"而互相覆盖（真机反馈"ZCode 怎么剩 1 个？"）。
+     *  ⚠️ 这个常量仅保留给"旧存值兼容"路径使用，不再是下拉里的伪项。 */
+    const ZC_FREE_OPTION = '__zcode_free__';
+    const foldChannels = (list) => {
+      const out = [];
+      for (const c of list) {
+        const eng = engineOf(c.engine);
+        if (!FOLD_ENGINES.includes(eng)) { out.push(c); continue; }
+        /* 同一引擎的所有通道合并（首个出现的位置即聚合条目的位置）；id 用裸引擎名。 */
+        let agg = out.find((x) => x && x._foldEngine === eng);
+        if (!agg) {
+          agg = {
+            id: eng,
+            name: engLabel(eng),
+            engine: eng,
+            /* 可用性由子通道决定（见下）：**至少一个**可用即可用 ⇒ 初值 false，遇到可用的翻 true。 */
+            enabled: false,
+            reason: null,
+            endpoint: null,
+            models: [],
+            _foldEngine: eng,
+            _routeOf: Object.create(null),   // 模型项 key → 实际通道 id（回写时用）
+            _modelOf: Object.create(null),   // 模型项 key → 真实模型名（ZCode 才有 key）
+            _modelsByRoute: Object.create(null), // 路由 id → 该路由可用的模型名（档位/回显用）
+          };
+          out.push(agg);
+        }
+        /* 模型项：**ZCode 用"路由 id"、其它引擎用"模型名"**（用户要求：ZCode 要能看到
+         * Plan 与免费额度**两条**）。
+         *
+         * ⚠️ 为什么 ZCode 不能用模型名（真机反馈"ZCode 怎么剩 1 个？"）：
+         * `plan` 与 `account:bigmodel-start-plan` **提供同样的模型**（GLM-5.3 / GLM-5.3-Flash）
+         * ⇒ 按模型名去重时后者的路由会**覆盖**前者的 ⇒ 只剩"免费额度"一条，Plan 消失。
+         * 用**路由 id** 作选项值就不会撞车（每条路由天然唯一）。
+         *
+         * OpenCode/Qoder 没有这个问题（模型名本身唯一，且就是它们的执行目标），
+         * 故保持"模型名"作值 —— 也让「模型」下拉显示的是真正的模型名而不是内部路由 id。 */
+        /* ── 模型项 = **真实模型 × 路由**（用户要求：ZCode 要能选到具体模型）──
+         *
+         * 真机反馈演进（两次修正，别再倒退）：
+         *   ① 最初按"模型名"去重 ⇒ `plan` 与免费额度**提供同样的模型名**，后者覆盖前者 ⇒ ZCode 只剩 1 条；
+         *   ② 改成"用路由 id 当选项"能显示两条，但**看不到具体模型**（用户反馈"没有具体的模型可以选"）。
+         * 现在：**（模型, 路由）配对**作选项 —— 既能看到具体模型，又不会互相覆盖。
+         *   例：`GLM-5.3`（套餐） / `GLM-5.3-Flash`（套餐） / `GLM-5.3-Flash「免费」`（免费额度）。
+         *
+         * ⚠️ 只在**可用**通道上收集（真机被 fallback-ui 抓到）：不可用通道
+         * （如 `builtin:zai-coding-plan` / `oauth_provider_inactive`）不该出现在「模型」下拉里 ——
+         * 否则用户能选到一个**必然失败**的项。 */
+        const useRouteKeys = (eng === 'zcode');
+        if (c.enabled) {
+          const routeId = String(c.id);
+          const rawModels = Array.isArray(c.models) ? c.models : [c.id];
+          /* 免费额度路由**只列真正可用的模型**（用户实测：Start Plan 只给 GLM-5.3-Flash）。
+           * 数据源（ZCode 配置）里两条路由都声明了同名模型，故"哪些能用"只能由这里收窄 ——
+           * 见 `ZC_FREE_MODELS`（可配置常量）。 */
+          const isFreeRoute = /^account:.*start-plan$/.test(routeId);
+          const allowed = isFreeRoute ? rawModels.filter((m) => ZC_FREE_MODELS.includes(m)) : rawModels;
+          const models = allowed.length ? allowed : rawModels;
+          agg._modelsByRoute[routeId] = models;
+          for (const m of models) {
+            const key = useRouteKeys ? `${routeId}::${m}` : m;
+            if (!agg.models.includes(key)) agg.models.push(key);
+            agg._routeOf[key] = routeId;
+            agg._modelOf[key] = m;
+          }
+        } else {
+          /* 不可用通道仍**登记路由**（旧存值可能指向它 ⇒ 要能被解析成"该引擎条目"，而不是多固定一条），
+           * 但不进模型下拉。 */
+          agg._routeOf[String(c.id)] = c.id;
+        }
+        /* ⚠️ 思考强度档位要**取并集**带到折叠条目上：折叠后「通道」下拉只有一条，
+         * 而档位下拉（上面与降级区）都从**选中条目**读 `thinkingLevels` ——
+         * 不带上就会出现"档位下拉空掉"（真机被 fallback-ui 的真 DOM 渲染抓到）。 */
+        if (Array.isArray(c.thinkingLevels) && c.thinkingLevels.length) {
+          agg.thinkingLevels = [...new Set([...(agg.thinkingLevels ?? []), ...c.thinkingLevels])];
+        }
+        /* 额度条数据也要带到折叠条目上（ZCode 免费额度选中时用于显示剩余量）。 */
+        if (c.quota && (eng === 'zcode')) { agg.quota = c.quota; agg.quotaText = c.quotaText ?? null; }
+        /* ⚠️ 可用性判据（真机反馈修正）：**至少一个**子通道可用 ⇒ 折叠条目可用。
+         * 原先写的是"任一子通道不可用 ⇒ 整条不可用" ⇒ 实测发现 ZCode 里有一条禁用的
+         * `id:uuid` 路由，于是整条 `ZCode` 被置灰显示成「（不可用：-）」，
+         * 用户根本选不了（而后端 plan 完全可用）。语义上也错：
+         * 折叠条目的可用性 = "这组里还有能用的东西"。 */
+        if (c.enabled) agg.enabled = true;
+        if (c.recentQuotaExhausted) agg.recentQuotaExhausted = true;
+      }
+      return out;
+    };
+    /** 把任意通道 id（含折叠前的旧存值 `opencode/xyz` / `plan` / `account:bigmodel-start-plan`）
+     *  解析成"折叠后清单里"的那条。
+     *
+     *  ⚠️ 顺序很重要（真机/测试都踩过）：**先看"哪个折叠条目的路由表包含它"，再看同名直配**。
+     *  否则 `provider='plan'` 会命中原始 `plan` 条目而不是折叠的 `ZCode`，
+     *  导致"上方下拉有 ZCode、下方降级下拉只有 默认套餐"这种**两侧不一致**。 */
+    const resolveFoldedChannel = (list, id) => {
+      if (!id) return null;
+      const byRoute = list.find((c) => c._routeOf && Object.values(c._routeOf).includes(id));
+      if (byRoute) return byRoute;
+      return list.find((c) => c.id === id)
+        ?? list.find((c) => Array.isArray(c.models) && c.models.includes(id)) ?? null;
+    };
+    /** 当前选中的**模型项** key：选项 key 形态随引擎不同 ——
+     *  · ZCode：`<路由id>::<模型名>`（存值里是 provider=路由、model=模型名）⇒ 反查 key；
+     *  · OpenCode/Qoder：key 就是模型名。
+     *  反查不到就不给值（select 会落到首项「顺序派发」——因为确实没绑定具体模型）。 */
+    const modelValueOf = (agg, provider, model) => {
+      if (!agg) return '';
+      if (agg.engine === 'zcode') {
+        if (!model) return '';
+        const key = `${provider}::${model}`;
+        return agg.models.includes(key) ? key : '';
+      }
+      return model ?? '';
+    };
+    /** 降级目标的模型项 key（与主通道**同一套规则**；`fbSel` 解析不到 ⇒ 退回存值，不猜）。 */
+    const fbModelValue = (fbSel, fbProvider, fbTarget) => (fbSel
+      ? modelValueOf(fbSel, fbProvider, fbTarget?.model)
+      : (fbTarget?.model ?? ''));
+    /** 某折叠条目的候选模型集（与对应「模型」下拉**同一套 key**）：模型表为空时退回当前值。 */
+    const seqCandidatesOf = (agg, provider, model) => {
+      const models = agg && Array.isArray(agg.models) ? agg.models : [];
+      if (models.length) return models;
+      const mv = modelValueOf(agg, provider, model);
+      return mv ? [mv] : [];
+    };
+    /** 构造"一块顺序列表"（主通道 / 降级目标 / 配置卡按引擎）所需的全部派生量 + 动作。
+     *  浮窗与配置卡共用；写入时**只发本块引擎**那一份 order（core 按引擎合并 ⇒ 互不干扰）。
+     *  `engineName`：调用方**已经知道引擎**时直接给（配置卡按引擎编辑，agg 可能为空）；
+     *  不给则从折叠条目推断（浮窗两块：主通道 / 降级目标）。 */
+    const makeSeqBlock = ({ owner, agg, candidates, channels, sequential, onSet, engineName }) => {
+      const engine = engineName ? engineOf(engineName) : (agg ? engineOf(agg.engine) : null);
+      const stored = engine && Array.isArray(sequential?.order?.[engine]) ? sequential.order[engine] : [];
+      /* 显示顺序 = 三段拼接（**从上到下 = 尝试次序**）：
+       *   ① 存了顺序、且当前仍可选的 —— 保持存下来的次序；
+       *   ② 当前可选、但不在 order 里的（**新增模型**）—— 追加在后面（绝不消失，用户要求）；
+       *   ③ order 里有、但当前候选集没有的（模型临时下线/探测没回来）—— 附在最后并标注
+       *      「当前不可用」，**保留用户的排序成果**（直接丢弃等于静默改配置）。 */
+      const inOrder = stored.filter((m) => candidates.includes(m));
+      const fresh = candidates.filter((m) => !stored.includes(m));
+      const stale = stored.filter((m) => !candidates.includes(m));
+      const list = [...inOrder, ...fresh, ...stale];
+      /** 列表项显示文案：与对应「模型」下拉**同一套**标签（免费额度带「免费」等）。 */
+      const labelOf = (m) => (candidates.includes(m)
+        ? modelLabelFor(agg?.engine, agg?._routeOf, agg?._modelOf, m)
+        : m);
+      /** 逐模型档位：`_routeOf` 把「模型项 key」映射回**具体通道 id**，取它自己的 `thinkingLevels`
+       *  （ZCode 是「路由×模型」，OpenCode/Qoder 是「模型」）；取不到 ⇒ 只给「默认」，不瞎列。 */
+      const levelsOf = (m) => {
+        const routeId = agg?._routeOf?.[m] ?? m;
+        const ch = routeId ? channels.find((c) => String(c.id) === String(routeId)) : null;
+        return Array.isArray(ch?.thinkingLevels) ? ch.thinkingLevels : [];
+      };
+      /** 某一项**已存**的档位（`levels` 与 `order` 同序；越界/缺失 = null = 引擎默认）。 */
+      const levelOf = (m) => {
+        const idx = stored.indexOf(m);
+        const lvs = engine && Array.isArray(sequential?.levels?.[engine]) ? sequential.levels[engine] : [];
+        const lv = idx >= 0 ? lvs[idx] : null;
+        return typeof lv === 'string' && lv !== '' ? lv : null;
+      };
+      /** 写该块的**引擎完整数组**（每项 `{route, reasoningLevel}`）。 */
+      const write = (routes, override) => {
+        if (!engine || typeof onSet !== 'function') return;
+        onSet({
+          order: {
+            [engine]: routes.map((r) => ({
+              route: r,
+              reasoningLevel: override && override.route === r ? (override.level || null) : levelOf(r),
+            })),
+          },
+        });
+      };
+      /** 上移 / 下移一格（相邻交换）—— 不用拖拽库（用户要求 ↑↓ 即可）。
+       *  ⚠️ 重排时**档位必须跟着项走**（`write` 负责）：只发 route 字符串会清掉档位。 */
+      const move = (idx, delta) => {
+        const to = idx + delta;
+        if (!engine || to < 0 || to >= list.length) return;
+        const next = list.slice();
+        const [moved] = next.splice(idx, 1);
+        next.splice(to, 0, moved);
+        write(next);
+      };
+      return {
+        owner, engine, list, stale, labelOf, levelsOf, levelOf, move,
+        setLevel: (m, lv) => write(list, { route: m, level: lv }),
+      };
+    };
+    /** 折叠清单里 provider 对应的条目（主通道 / 降级目标共用；provider 为空 ⇒ null）。
+     *  折叠定义已上提到本层（见 `foldChannels`），这里是"取某 provider 的折叠条目"的单一入口。 */
+    const foldedEntryFor = (channels, provider) => (provider
+      ? resolveFoldedChannel(foldChannels(Array.isArray(channels) ? channels : []), provider) ?? null
+      : null);
+    /** 顺序派发的"两块列表"（**浮窗**用）：
+     *  · 主通道模型为空 ⇒ 主块；
+     *  · 降级目标模型为空 ⇒ 降级块（与主块**同一引擎**时去重 —— 列表按引擎存，重复显示会误导成两份）。 */
+    const buildSeqBlocks = ({ channels, channel, fallback, sequential, onSet }) => {
+      const list = Array.isArray(channels) ? channels : [];
+      const provider = channel?.provider;
+      const sel = foldedEntryFor(list, provider) ?? list.find((c) => c.id === provider) ?? null;
+      const fbTarget = fallback?.target ?? null;
+      const fbProvider = fbTarget?.provider ?? '';
+      const fbSel = foldedEntryFor(list, fbProvider);
+      const fbModel = fbModelValue(fbSel, fbProvider, fbTarget);
+      const seqEnabled = channel?.model == null || channel?.model === '';
+      const seqFbOn = !!fallback?.enabled && fbTarget != null && fbSel != null && fbModel === '';
+      const blocks = [];
+      if (seqEnabled) {
+        blocks.push(makeSeqBlock({
+          owner: 'main', agg: sel, candidates: seqCandidatesOf(sel, provider, channel?.model),
+          channels: list, sequential, onSet,
+        }));
+      }
+      if (seqFbOn && (!seqEnabled || !sel || engineOf(fbSel.engine) !== engineOf(sel.engine))) {
+        blocks.push(makeSeqBlock({
+          owner: 'fallback', agg: fbSel, candidates: seqCandidatesOf(fbSel, fbProvider, fbTarget?.model),
+          channels: list, sequential, onSet,
+        }));
+      }
+      return blocks;
+    };
+    /** 某引擎的折叠条目（候选模型 + 路由表）；该引擎没有任何通道 ⇒ null。 */
+    const foldEngineAgg = (channels, engine) => foldChannels(Array.isArray(channels) ? channels : [])
+      .find((c) => engineOf(c.engine) === engineOf(engine)) ?? null;
+    /** **按引擎**构造顺序块（插件详情页配置卡用）——与"主通道/降级是否顺序派发"**解耦**：
+     *  只要选中该引擎就渲染它的列表。用户打开插件配置就是**去设置**，不能要求"先开了才有东西配"（鸡生蛋）。 */
+    const makeEngineSeqBlock = ({ channels, engine, sequential, onSet }) => {
+      const list = Array.isArray(channels) ? channels : [];
+      const agg = foldEngineAgg(list, engine);
+      return makeSeqBlock({
+        owner: engineOf(engine), engineName: engine, agg,
+        candidates: agg && Array.isArray(agg.models) ? agg.models : [],
+        channels: list, sequential, onSet,
+      });
+    };
+    /** 主通道当前引擎（按折叠条目解析 provider；解析不到 ⇒ null）。 */
+    const mainChannelEngine = (channels, channel) => {
+      const list = Array.isArray(channels) ? channels : [];
+      const sel = foldedEntryFor(list, channel?.provider) ?? list.find((c) => c.id === channel?.provider) ?? null;
+      return sel ? engineOf(sel.engine) : null;
+    };
+    /** 降级目标当前引擎 + 它是否处于顺序派发（`target.model` 为空）。 */
+    const fallbackEngineInfo = (channels, fallback) => {
+      const list = Array.isArray(channels) ? channels : [];
+      const target = fallback?.target ?? null;
+      const sel = target ? foldedEntryFor(list, target.provider) : null;
+      const model = target?.model;
+      return {
+        engine: sel ? engineOf(sel.engine) : null,
+        seq: !!fallback?.enabled && target != null && sel != null && (model == null || model === ''),
+      };
+    };
+    /** 卡片默认编辑的引擎（用户要求）：**主通道当前引擎** → 已有顺序的引擎 → ZCode。 */
+    const defaultSeqEngine = (channels, channel, sequential) => {
+      const main = mainChannelEngine(channels, channel);
+      if (main) return main;
+      const withOrder = KNOWN_ENGINES.find((e) => Array.isArray(sequential?.order?.[e]) && sequential.order[e].length);
+      return withOrder ?? 'zcode';
+    };
+    /** 某引擎**当前是否正在被顺序派发**（主通道用它 / 降级目标用它）—— 卡片的状态行据此渲染。 */
+    const seqEngineUsage = (channels, channel, fallback, engine) => {
+      const eng = engineOf(engine);
+      const main = mainChannelEngine(channels, channel) === eng && (channel?.model == null || channel?.model === '');
+      const fb = fallbackEngineInfo(channels, fallback);
+      return { main, fallback: fb.seq && fb.engine === eng };
+    };
+    /** 渲染顺序列表块（无块时返回 null ⇒ 调用方那一行什么都不渲染）。
+     *  · 默认（浮窗）：提示行用**完整** `seqHint`（浮窗空间足够，也把"主/降级两链"讲清）；
+     *  · 配置卡：传 `hint`（一行短句）+ `hintTitle`（完整说明进 tooltip）—— 见 DispatchConfigCard。 */
+    function SeqBlocksView({ blocks, offline, busy, hint, hintTitle }) {
+      if (!blocks || !blocks.length) return null;
+      return h('div', { className: 'dsp-stack', 'data-dsp-sequential': 'list' },
+        h('div', { className: 'dsp-note', role: 'status', title: hintTitle ?? (offline ? t('seqOfflineHint') : undefined) },
+          hint ?? t('seqHint')),
+        blocks.map((b) => h('div', {
+          className: 'dsp-stack', key: b.owner, 'data-dsp-seq-block': b.owner,
+        },
+          h('div', { className: 'dsp-note', role: 'status', title: t('seqOrderLabel') },
+            h('span', { className: 'dsp-badge' },
+              `${b.owner === 'fallback' ? `${t('fallbackTitle')} → ` : ''}${b.engine ? engLabel(b.engine) : '-'} · ${b.list.length}`)),
+          !b.engine || !b.list.length
+            ? h('div', { className: 'dsp-note', role: 'status' }, t('seqEmpty'))
+            : h('div', { className: 'dsp-field' },
+              h('span', { className: 'dsp-field-k' }, t('seqOrderLabel')),
+              h('span', { className: 'dsp-field-v', style: { display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '0' } },
+                b.list.map((m, i) => {
+                  /* ZB-52b：该行模型的档位下拉选项（取不到档位声明 ⇒ 只有「默认」，不瞎列）。 */
+                  const lvList = b.levelsOf(m);
+                  const curLv = b.levelOf(m);
+                  /* 存值不在当前档位集里（探测表变化 / 该模型档位暂时没探测到）⇒ 显式列出并标注，
+                   * 否则 <select value> 命不中 option 会显示首项「默认」，与真实存值不符（ZB-31 同类坑）。 */
+                  const lvStale = curLv != null && !lvList.includes(curLv);
+                  const lvAria = `${t('seqLevelLabel')}：${b.labelOf(m)}`;
+                  return h('div', {
+                    key: m, 'data-dsp-seq-item': m, 'data-dsp-seq-owner': b.owner,
+                    style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0' },
+                  },
+                    h('span', { className: 'dsp-note', style: { flex: '0 0 18px' } }, `${i + 1}.`),
+                    h('span', {
+                      className: 'dsp-note',
+                      style: { flex: '1', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+                      title: b.stale.includes(m) ? `${m}${t('seqUnavailable')}` : b.labelOf(m),
+                    }, b.stale.includes(m) ? `${b.labelOf(m)}${t('seqUnavailable')}` : b.labelOf(m)),
+                    /* 逐模型档位下拉：value = 原始档位字符串（'' = 引擎默认）；label = 中文标签。 */
+                    h('select', {
+                      className: 'dsp-select', 'data-dsp-seq-level': m,
+                      value: curLv ?? '',
+                      disabled: busy,
+                      title: lvAria, 'aria-label': lvAria,
+                      style: { flex: '0 0 auto', maxWidth: '108px', padding: '1px 6px' },
+                      onChange: (e) => b.setLevel(m, e.target.value),
+                    },
+                      h('option', { key: '__default', value: '' }, t('seqLevelDefault')),
+                      lvStale ? h('option', { key: '__stale', value: curLv }, `${thinkingLabel(curLv)}（${t('thinkingStale')}）`) : null,
+                      lvList.map((lv) => h('option', { key: lv, value: lv }, thinkingLabel(lv)))),
+                    /* ↑↓ 按钮（用户要求：上移/下移即可，不引拖拽库）。首/末项各自禁用对应方向。 */
+                    h('button', {
+                      className: 'dsp-btn2', type: 'button', style: { padding: '2px 8px' },
+                      disabled: i === 0, title: t('seqUp'),
+                      'aria-label': `${t('seqUp')}：${b.labelOf(m)}`,
+                      onClick: () => b.move(i, -1),
+                    }, '↑'),
+                    h('button', {
+                      className: 'dsp-btn2', type: 'button', style: { padding: '2px 8px' },
+                      disabled: i === b.list.length - 1, title: t('seqDown'),
+                      'aria-label': `${t('seqDown')}：${b.labelOf(m)}`,
+                      onClick: () => b.move(i, 1),
+                    }, '↓'));
+                }))))));
+    }
+
     /* 通道分区：切换器（provider+model+思考强度，不可用项置灰带原因）+ 自动降级开关。
      * ZB-30（用户要求）：「自动降级」改成**开关**（参考派发总开关：点击开/关、带指示灯），
      * 打开后下面才显示 通道 / 模型 / 思考强度 三个下拉（与上面「通道」分区同形）；关闭时不显示。
@@ -2272,97 +2643,6 @@ window.__ModuleLoader__.load({
        * ⚠️ 兼容：core 里"每模型一条通道"的数据仍在（工具 / 降级链 / 快照都不受影响）；
        * 旧存值若指向具体通道 id（`opencode/xyz` / `account:bigmodel-start-plan`），
        * `resolveFoldedChannel` 会把它映射回折叠条目并**还原出正确的模型选项**。 */
-      const FOLD_ENGINES = KNOWN_ENGINES; // 三引擎**全部**折叠（用户要求：通道只列引擎）
-      /** ZCode 折叠条目里的"免费额度"伪模型项（选中它会路由到专用通道 id）。 */
-      /** ZCode 折叠条目里，"模型项"就是**路由 id**（`plan` / `account:bigmodel-start-plan`）——
-       *  这样 Plan 与免费额度不会因"提供同样的模型名"而互相覆盖（真机反馈"ZCode 怎么剩 1 个？"）。
-       *  ⚠️ 这个常量仅保留给"旧存值兼容"路径使用，不再是下拉里的伪项。 */
-      const ZC_FREE_OPTION = '__zcode_free__';
-      const foldChannels = (list) => {
-        const out = [];
-        for (const c of list) {
-          const eng = engineOf(c.engine);
-          if (!FOLD_ENGINES.includes(eng)) { out.push(c); continue; }
-          /* 同一引擎的所有通道合并（首个出现的位置即聚合条目的位置）；id 用裸引擎名。 */
-          let agg = out.find((x) => x && x._foldEngine === eng);
-          if (!agg) {
-            agg = {
-              id: eng,
-              name: engLabel(eng),
-              engine: eng,
-              /* 可用性由子通道决定（见下）：**至少一个**可用即可用 ⇒ 初值 false，遇到可用的翻 true。 */
-              enabled: false,
-              reason: null,
-              endpoint: null,
-              models: [],
-              _foldEngine: eng,
-              _routeOf: Object.create(null),   // 模型项 key → 实际通道 id（回写时用）
-              _modelOf: Object.create(null),   // 模型项 key → 真实模型名（ZCode 才有 key）
-              _modelsByRoute: Object.create(null), // 路由 id → 该路由可用的模型名（档位/回显用）
-            };
-            out.push(agg);
-          }
-          /* 模型项：**ZCode 用"路由 id"、其它引擎用"模型名"**（用户要求：ZCode 要能看到
-           * Plan 与免费额度**两条**）。
-           *
-           * ⚠️ 为什么 ZCode 不能用模型名（真机反馈"ZCode 怎么剩 1 个？"）：
-           * `plan` 与 `account:bigmodel-start-plan` **提供同样的模型**（GLM-5.3 / GLM-5.3-Flash）
-           * ⇒ 按模型名去重时后者的路由会**覆盖**前者的 ⇒ 只剩"免费额度"一条，Plan 消失。
-           * 用**路由 id** 作选项值就不会撞车（每条路由天然唯一）。
-           *
-           * OpenCode/Qoder 没有这个问题（模型名本身唯一，且就是它们的执行目标），
-           * 故保持"模型名"作值 —— 也让「模型」下拉显示的是真正的模型名而不是内部路由 id。 */
-          /* ── 模型项 = **真实模型 × 路由**（用户要求：ZCode 要能选到具体模型）──
-           *
-           * 真机反馈演进（两次修正，别再倒退）：
-           *   ① 最初按"模型名"去重 ⇒ `plan` 与免费额度**提供同样的模型名**，后者覆盖前者 ⇒ ZCode 只剩 1 条；
-           *   ② 改成"用路由 id 当选项"能显示两条，但**看不到具体模型**（用户反馈"没有具体的模型可以选"）。
-           * 现在：**（模型, 路由）配对**作选项 —— 既能看到具体模型，又不会互相覆盖。
-           *   例：`GLM-5.3`（套餐） / `GLM-5.3-Flash`（套餐） / `GLM-5.3-Flash「免费」`（免费额度）。
-           *
-           * ⚠️ 只在**可用**通道上收集（真机被 fallback-ui 抓到）：不可用通道
-           * （如 `builtin:zai-coding-plan` / `oauth_provider_inactive`）不该出现在「模型」下拉里 ——
-           * 否则用户能选到一个**必然失败**的项。 */
-          const useRouteKeys = (eng === 'zcode');
-          if (c.enabled) {
-            const routeId = String(c.id);
-            const rawModels = Array.isArray(c.models) ? c.models : [c.id];
-            /* 免费额度路由**只列真正可用的模型**（用户实测：Start Plan 只给 GLM-5.3-Flash）。
-             * 数据源（ZCode 配置）里两条路由都声明了同名模型，故"哪些能用"只能由这里收窄 ——
-             * 见 `ZC_FREE_MODELS`（可配置常量）。 */
-            const isFreeRoute = /^account:.*start-plan$/.test(routeId);
-            const allowed = isFreeRoute ? rawModels.filter((m) => ZC_FREE_MODELS.includes(m)) : rawModels;
-            const models = allowed.length ? allowed : rawModels;
-            agg._modelsByRoute[routeId] = models;
-            for (const m of models) {
-              const key = useRouteKeys ? `${routeId}::${m}` : m;
-              if (!agg.models.includes(key)) agg.models.push(key);
-              agg._routeOf[key] = routeId;
-              agg._modelOf[key] = m;
-            }
-          } else {
-            /* 不可用通道仍**登记路由**（旧存值可能指向它 ⇒ 要能被解析成"该引擎条目"，而不是多固定一条），
-             * 但不进模型下拉。 */
-            agg._routeOf[String(c.id)] = c.id;
-          }
-          /* ⚠️ 思考强度档位要**取并集**带到折叠条目上：折叠后「通道」下拉只有一条，
-           * 而档位下拉（上面与降级区）都从**选中条目**读 `thinkingLevels` ——
-           * 不带上就会出现"档位下拉空掉"（真机被 fallback-ui 的真 DOM 渲染抓到）。 */
-          if (Array.isArray(c.thinkingLevels) && c.thinkingLevels.length) {
-            agg.thinkingLevels = [...new Set([...(agg.thinkingLevels ?? []), ...c.thinkingLevels])];
-          }
-          /* 额度条数据也要带到折叠条目上（ZCode 免费额度选中时用于显示剩余量）。 */
-          if (c.quota && (eng === 'zcode')) { agg.quota = c.quota; agg.quotaText = c.quotaText ?? null; }
-          /* ⚠️ 可用性判据（真机反馈修正）：**至少一个**子通道可用 ⇒ 折叠条目可用。
-           * 原先写的是"任一子通道不可用 ⇒ 整条不可用" ⇒ 实测发现 ZCode 里有一条禁用的
-           * `id:uuid` 路由，于是整条 `ZCode` 被置灰显示成「（不可用：-）」，
-           * 用户根本选不了（而后端 plan 完全可用）。语义上也错：
-           * 折叠条目的可用性 = "这组里还有能用的东西"。 */
-          if (c.enabled) agg.enabled = true;
-          if (c.recentQuotaExhausted) agg.recentQuotaExhausted = true;
-        }
-        return out;
-      };
       /** 把"折叠条目 + 模型项"映射回**真实的 provider/model**（回写核心，必须准确）。 */
       const routeForPick = (agg, model) => {
         if (!agg) return null;
@@ -2382,13 +2662,6 @@ window.__ModuleLoader__.load({
        *  ⚠️ 顺序很重要（真机/测试都踩过）：**先看"哪个折叠条目的路由表包含它"，再看同名直配**。
        *  否则 `provider='plan'` 会命中原始 `plan` 条目而不是折叠的 `ZCode`，
        *  导致"上方下拉有 ZCode、下方降级下拉只有 默认套餐"这种**两侧不一致**。 */
-      const resolveFoldedChannel = (list, id) => {
-        if (!id) return null;
-        const byRoute = list.find((c) => c._routeOf && Object.values(c._routeOf).includes(id));
-        if (byRoute) return byRoute;
-        return list.find((c) => c.id === id)
-          ?? list.find((c) => Array.isArray(c.models) && c.models.includes(id)) ?? null;
-      };
 
       const channels = channelsInfo?.channels ?? [];
       const warnings = channelsInfo?.warnings ?? [];
@@ -2406,15 +2679,6 @@ window.__ModuleLoader__.load({
        * · ZCode：`<路由id>::<模型名>`（存值里是 provider=路由、model=模型名）⇒ 反查 key；
        * · OpenCode/Qoder：key 就是模型名。
        * 反查不到就不给值（select 会落到首项「通道默认模型」——因为确实没选具体模型）。 */
-      const modelValueOf = (agg, provider, model) => {
-        if (!agg) return '';
-        if (agg.engine === 'zcode') {
-          if (!model) return '';
-          const key = `${provider}::${model}`;
-          return agg.models.includes(key) ? key : '';
-        }
-        return model ?? '';
-      };
       const modelValue = modelValueOf(sel, channel.provider, channel.model);
       /* ── ZB-33：免费额度（Start Plan）通道的**额度条** ──
        * 数据来自宿主 `action=channels` 的 `channels[].quota`（只读 ZCode 客户端日志，
@@ -2623,16 +2887,9 @@ window.__ModuleLoader__.load({
       /* ZB-51：与上面「通道」分区同一条转换 —— ZCode 的模型项是**路由 id**（存在 provider 里），
        * 其它引擎存的是 model。这样「通道」下拉的当前值才能命中折叠条目（不会多固定一条）。 */
       const fbValue = fbSel?.id ?? fbProvider;
-      /* 与上方同一套"模型项 key"解析（ZCode 是 `<路由id>::<模型名>`；其它引擎是模型名）。 */
-      const fbModel = (() => {
-        if (!fbSel) return fbTarget?.model ?? '';
-        if (fbSel.engine === 'zcode') {
-          if (!fbTarget?.model) return '';
-          const key = `${fbProvider}::${fbTarget.model}`;
-          return fbSel.models.includes(key) ? key : '';
-        }
-        return fbTarget?.model ?? '';
-      })();
+      /* 与上方同一套"模型项 key"解析（ZCode 是 `<路由id>::<模型名>`；其它引擎是模型名）。
+       * ZB-53：规则已上提到共用件 `fbModelValue()`（浮窗与插件详情页配置卡同一套，不重复实现）。 */
+      const fbModel = fbModelValue(fbSel, fbProvider, fbTarget);
       /* ZB-30b（用户要求「不要沿用原任务，就跟上面完全一致的选项逻辑」）：降级目标的模型/思考强度
        * 用与上面「通道」分区**逐字相同**的选项集与默认值 —— 模型首项 `（通道默认模型）`（值 ''）、
        * 思考强度首项 `Agent决定（按任务判断）`（值 'agent'）。语义也随之对齐：
@@ -2709,91 +2966,14 @@ window.__ModuleLoader__.load({
       const fbUnknown = fbEnabled && fbProvider && !resolveFoldedChannel(fbFolded, fbProvider);
 
       /* ── ZB-52d：顺序派发（**没有开关**；主通道与降级目标**各自一块列表、同屏显示**）──
-       * 唯一真相 = 该通道的 model 是否为空：
-       *   · 主通道 `channel.model` 为空 ⇒ 派发时按**主通道引擎**的顺序列表从上到下试；
-       *   · 降级目标 `target.model` 为空 ⇒ 降到它时按**降级目标引擎**的列表试。
-       * 两份列表本来就**按引擎**存 ⇒ 主（如 OpenCode）与降级（如 Qoder）可同时成立、互不影响。
-       *
-       * ⚠️ ZB-52d（用户要求"两个都能支持"）：**两块同时渲染**。此前只渲染"主优先，否则降级"的那一块
-       * ⇒ 用户把主通道设成顺序派发后，就再也看不到/编辑不了降级链那份列表（真缺口）。
-       * 注意：两条链是**同一个引擎**时只显示一块 —— 列表按引擎存，重复显示会让人以为有两份。
-       *
-       * 每块的派生量由**同一个工厂**产出（候选集 / 显示顺序 / 逐模型档位 / 写入），
-       * 两块逻辑不会各写一遍、不会漂移；写入时**只发本块引擎**那一份 order（按引擎合并 ⇒ 互不干扰）。
-       * 列表元素形态与 core 的 `expandSequentialChain()` **逐字对应**（见那里的注释）：
-       *   · ZCode：`<路由id>::<模型名>`；· OpenCode / Qoder：`opencode/<model>` / `qoder/<model>`。 */
-      /** 主通道是否顺序派发 = 模型为空（**唯一的真相**，不是开关）。 */
+       * 唯一真相 = 该通道的 model 是否为空：主通道模型为空 ⇒ 主块；降级目标模型为空 ⇒ 降级块。
+       * ⚠️ 块的构造已**上提为共用件** `buildSeqBlocks()`（ZB-53：浮窗「通道」分区与插件详情页配置卡
+       * 共用同一套实现，见上面的注释）。这里只保留"主通道是否顺序派发"这一个派生量 ——
+       * 主「思考强度」下拉要用它来决定"禁用 + 显示设置默认"。 */
       const seqEnabled = channel.model == null || channel.model === '';
-      /** 降级目标是否顺序派发 = 降级已开启 + 目标模型为空 + 目标通道可解析。 */
-      const seqFbOn = fbEnabled && fbTarget != null && fbSel != null && fbModel === '';
-      /** 构造"一块顺序列表"（主通道或降级目标）所需的全部派生量 + 动作。 */
-      const makeSeqBlock = (owner, agg) => {
-        const engine = agg ? engineOf(agg.engine) : null;
-        /** 候选集与对应「模型」下拉**同一套 key**：主通道用 modelOptions，降级用 fbModels。 */
-        const candidates = owner === 'main' ? modelOptions : fbModels;
-        const stored = engine && Array.isArray(sequential?.order?.[engine]) ? sequential.order[engine] : [];
-        /* 显示顺序 = 三段拼接（**从上到下 = 尝试次序**）：
-         *   ① 存了顺序、且当前仍可选的 —— 保持存下来的次序；
-         *   ② 当前可选、但不在 order 里的（**新增模型**）—— 追加在后面（绝不消失，用户要求）；
-         *   ③ order 里有、但当前候选集没有的（模型临时下线/探测没回来）—— 附在最后并标注
-         *      「当前不可用」，**保留用户的排序成果**（直接丢弃等于静默改配置）。 */
-        const inOrder = stored.filter((m) => candidates.includes(m));
-        const fresh = candidates.filter((m) => !stored.includes(m));
-        const stale = stored.filter((m) => !candidates.includes(m));
-        const list = [...inOrder, ...fresh, ...stale];
-        /** 列表项显示文案：与对应「模型」下拉**同一套**标签（免费额度带「免费」等）。 */
-        const labelOf = (m) => (candidates.includes(m)
-          ? modelLabelFor(agg?.engine, agg?._routeOf, agg?._modelOf, m)
-          : m);
-        /** 逐模型档位：`_routeOf` 把「模型项 key」映射回**具体通道 id**，取它自己的 `thinkingLevels`
-         *  （ZCode 是「路由×模型」，OpenCode/Qoder 是「模型」）；取不到 ⇒ 只给「默认」，不瞎列。 */
-        const levelsOf = (m) => {
-          const routeId = agg?._routeOf?.[m] ?? m;
-          const ch = routeId ? channels.find((c) => String(c.id) === String(routeId)) : null;
-          return Array.isArray(ch?.thinkingLevels) ? ch.thinkingLevels : [];
-        };
-        /** 某一项**已存**的档位（`levels` 与 `order` 同序；越界/缺失 = null = 引擎默认）。 */
-        const levelOf = (m) => {
-          const idx = stored.indexOf(m);
-          const lvs = engine && Array.isArray(sequential?.levels?.[engine]) ? sequential.levels[engine] : [];
-          const lv = idx >= 0 ? lvs[idx] : null;
-          return typeof lv === 'string' && lv !== '' ? lv : null;
-        };
-        /** 写该块的**引擎完整数组**（每项 `{route, reasoningLevel}`）。
-         *  ⚠️ **只发本块引擎**：core 的 `setSequential({order})` 是按引擎**合并**（未传的引擎原样保留）
-         *  ⇒ 另一块（另一个引擎）的顺序与档位**不会被这次写入碰到**。 */
-        const write = (routes, override) => {
-          if (!engine) return;
-          onSequentialSet({
-            order: {
-              [engine]: routes.map((r) => ({
-                route: r,
-                reasoningLevel: override && override.route === r ? (override.level || null) : levelOf(r),
-              })),
-            },
-          });
-        };
-        /** 上移 / 下移一格（相邻交换）—— 不用拖拽库（用户要求 ↑↓ 即可）。
-         *  ⚠️ 重排时**档位必须跟着项走**（`write` 负责）：只发 route 字符串会清掉档位。 */
-        const move = (idx, delta) => {
-          const to = idx + delta;
-          if (!engine || to < 0 || to >= list.length) return;
-          const next = list.slice();
-          const [moved] = next.splice(idx, 1);
-          next.splice(to, 0, moved);
-          write(next);
-        };
-        return {
-          owner, engine, list, stale, labelOf, levelsOf, levelOf, move,
-          setLevel: (m, lv) => write(list, { route: m, level: lv }),
-        };
-      };
-      /** 面板要渲染的块：主通道（顺序派发时）+ 降级目标（顺序派发、且与主通道**不同引擎**时）。 */
-      const seqBlocks = [];
-      if (seqEnabled) seqBlocks.push(makeSeqBlock('main', sel));
-      if (seqFbOn && (!seqEnabled || !sel || engineOf(fbSel.engine) !== engineOf(sel.engine))) {
-        seqBlocks.push(makeSeqBlock('fallback', fbSel));
-      }
+      const seqBlocks = buildSeqBlocks({
+        channels, channel, fallback, sequential, onSet: onSequentialSet,
+      });
 
       return h('div', { className: 'dsp-stack' },
         /* ZB-42（用户现场报告）：总开关关闭时**必须在通道分区里明说**。
@@ -2991,70 +3171,12 @@ window.__ModuleLoader__.load({
                   })),
               h('span', { className: 'dsp-note', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' } }, giftText)))
           : null,
-        /* ── ZB-52d：顺序派发列表（**没有开关**；主通道与降级目标**各自一块、同屏显示**） ──
+        /* ── ZB-52d/ZB-53：顺序派发列表（**没有开关**；主通道与降级目标**各自一块、同屏显示**） ──
          * 位置刻意放在「自动降级」之前：顺序派发是**同一引擎内**换模型，自动降级是**跨通道**续命，
          * core 的执行次序也是"先顺序、后降级"（顺序列表用尽 ⇒ 交回降级链）。
-         * 每块带归属徽标（`OpenCode · 3` / `自动降级 → Qoder · 2`），各自排各自的引擎列表、各自写入。
-         * 两条链是同一引擎时只有一块（`seqBlocks` 已去重）—— 列表按引擎存，重复显示会误导成两份。 */
-        seqBlocks.length
-          ? h('div', { className: 'dsp-stack', 'data-dsp-sequential': 'list' },
-            h('div', { className: 'dsp-note', role: 'status', title: offline ? t('seqOfflineHint') : undefined }, t('seqHint')),
-            seqBlocks.map((b) => h('div', {
-              className: 'dsp-stack', key: b.owner, 'data-dsp-seq-block': b.owner,
-            },
-              h('div', { className: 'dsp-note', role: 'status', title: t('seqOrderLabel') },
-                h('span', { className: 'dsp-badge' },
-                  `${b.owner === 'fallback' ? `${t('fallbackTitle')} → ` : ''}${b.engine ? engLabel(b.engine) : '-'} · ${b.list.length}`)),
-              !b.engine || !b.list.length
-                ? h('div', { className: 'dsp-note', role: 'status' }, t('seqEmpty'))
-                : h('div', { className: 'dsp-field' },
-                  h('span', { className: 'dsp-field-k' }, t('seqOrderLabel')),
-                  h('span', { className: 'dsp-field-v', style: { display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '0' } },
-                    b.list.map((m, i) => {
-                      /* ZB-52b：该行模型的档位下拉选项（取不到档位声明 ⇒ 只有「默认」，不瞎列）。 */
-                      const lvList = b.levelsOf(m);
-                      const curLv = b.levelOf(m);
-                      /* 存值不在当前档位集里（探测表变化 / 该模型档位暂时没探测到）⇒ 显式列出并标注，
-                       * 否则 <select value> 命不中 option 会显示首项「默认」，与真实存值不符（ZB-31 同类坑）。 */
-                      const lvStale = curLv != null && !lvList.includes(curLv);
-                      const lvAria = `${t('seqLevelLabel')}：${b.labelOf(m)}`;
-                      return h('div', {
-                        key: m, 'data-dsp-seq-item': m, 'data-dsp-seq-owner': b.owner,
-                        style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0' },
-                      },
-                        h('span', { className: 'dsp-note', style: { flex: '0 0 18px' } }, `${i + 1}.`),
-                        h('span', {
-                          className: 'dsp-note',
-                          style: { flex: '1', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-                          title: b.stale.includes(m) ? `${m}${t('seqUnavailable')}` : b.labelOf(m),
-                        }, b.stale.includes(m) ? `${b.labelOf(m)}${t('seqUnavailable')}` : b.labelOf(m)),
-                        /* 逐模型档位下拉：value = 原始档位字符串（'' = 引擎默认）；label = 中文标签。 */
-                        h('select', {
-                          className: 'dsp-select', 'data-dsp-seq-level': m,
-                          value: curLv ?? '',
-                          disabled: busy,
-                          title: lvAria, 'aria-label': lvAria,
-                          style: { flex: '0 0 auto', maxWidth: '108px', padding: '1px 6px' },
-                          onChange: (e) => b.setLevel(m, e.target.value),
-                        },
-                          h('option', { key: '__default', value: '' }, t('seqLevelDefault')),
-                          lvStale ? h('option', { key: '__stale', value: curLv }, `${thinkingLabel(curLv)}（${t('thinkingStale')}）`) : null,
-                          lvList.map((lv) => h('option', { key: lv, value: lv }, thinkingLabel(lv)))),
-                        /* ↑↓ 按钮（用户要求：上移/下移即可，不引拖拽库）。首/末项各自禁用对应方向。 */
-                        h('button', {
-                          className: 'dsp-btn2', type: 'button', style: { padding: '2px 8px' },
-                          disabled: i === 0, title: t('seqUp'),
-                          'aria-label': `${t('seqUp')}：${b.labelOf(m)}`,
-                          onClick: () => b.move(i, -1),
-                        }, '↑'),
-                        h('button', {
-                          className: 'dsp-btn2', type: 'button', style: { padding: '2px 8px' },
-                          disabled: i === b.list.length - 1, title: t('seqDown'),
-                          'aria-label': `${t('seqDown')}：${b.labelOf(m)}`,
-                          onClick: () => b.move(i, 1),
-                        }, '↓'));
-                    }))))))
-          : null,
+         * 渲染已抽成**共用件** `SeqBlocksView`（浮窗与插件详情页配置卡同一套 UI，见上面的注释）；
+         * 无块时它返回 null ⇒ 这里什么也不渲染（与"关闭不显示"同一纪律）。 */
+        h(SeqBlocksView, { blocks: seqBlocks, offline, busy }),
         /* ── ZB-30：自动降级（开关 + 开启后的目标三下拉） ── */
         h('div', { className: 'dsp-field' },
           h('button', {
@@ -3865,14 +3987,7 @@ window.__ModuleLoader__.load({
        * 短屏仍不会顶出屏幕（只影响"能显示多高"，不影响其它弹层）。 */
       const PANEL_MAX_HEIGHT = 'min(960px, calc(100vh - 140px))';
 
-      const cssVars = {
-        '--dsp-bg': T.bg, '--dsp-bgBar': T.bgBar, '--dsp-sunken': T.sunken, '--dsp-hover': T.hover,
-        '--dsp-accent': T.accent, '--dsp-onAccent': T.onAccent, '--dsp-border': T.border, '--dsp-shadow': T.shadow,
-        '--dsp-text': T.text, '--dsp-text2': T.text2, '--dsp-text3': T.text3, '--dsp-danger': T.danger, '--dsp-mono': T.mono,
-        '--dsp-st-queued': T.stQueued, '--dsp-st-running': T.stRunning, '--dsp-st-done': T.stDone,
-        '--dsp-st-failed': T.stFailed, '--dsp-st-killed': T.stKilled, '--dsp-st-interrupted': T.stInterrupted,
-        '--dsp-st-idle': T.stIdle,
-      };
+      const cssVars = DSP_CSS_VARS; // ZB-53：共用件（插件详情页配置卡也挂同一组 --dsp-* 令牌）
 
       const runningNow = ((snapshot && snapshot.counts && snapshot.counts.running) || 0) > 0;
       const connLabel = conn === 'demo' ? t('connDemo') : conn === 'ext' ? t('connExt') : conn === 'live' ? t('connLive') : conn === 'offline' ? t('connOffline') : t('connConnecting');
@@ -3928,6 +4043,106 @@ window.__ModuleLoader__.load({
             h(QuotaCards, { quota, planQuota })),
         ),
       );
+    }
+
+    /* ─────────── ZB-53：插件详情页**配置卡**（槽位 `plugins.bundle.config`，按包名派发） ───────────
+     * 用户真机反馈：详情页只有名字/描述、光秃秃没有配置区 —— 因为本插件从没往这个槽位注册过任何东西。
+     * 卡片内容 = **顺序派发设置**（用户本来就想放这儿的东西）：每引擎一块列表 + ↑↓ + 逐模型档位；
+     * 与浮窗「通道」分区**复用同一套** `buildSeqBlocks()` / `SeqBlocksView`（不重写、不会漂移）。
+     *
+     * ⚠️ 优雅降级（详情页可能在 host 未就绪时被渲染）：数据源一律走 `useWire()` 的降级链
+     * （远端面 → ext → demo → offline）；offline 下读写返回可读错误、`channels()` 给空表，
+     * 卡片据此渲染"未连接宿主 / 通道清单加载中"提示，**绝不白屏、绝不抛错**（组件内不直接碰 ctx/remote）。
+     * 样式沿用既有 `dsp-*` 类名 + 主题令牌（`DSP_CSS_VARS` 挂在卡片根上，否则 `var(--dsp-*)` 不解析）。 */
+    function DispatchConfigCard() {
+      const { conn, channels, channelGet, fallbackGet, sequentialGet, sequentialSet } = useWire();
+      const [channelsInfo, setChannelsInfo] = useState({ channels: [], warnings: [] });
+      const [channel, setChannelState] = useState({ provider: 'plan', model: 'GLM-5.3-Flash' });
+      const [fallback, setFallbackState] = useState({ enabled: false, chain: [], targets: [], target: null });
+      const [sequential, setSequentialState] = useState({
+        order: { zcode: [], opencode: [], qoder: [] },
+        levels: { zcode: [], opencode: [], qoder: [] },
+        sequentialCount: 0,
+      });
+      const [busy, setBusy] = useState(false);
+      const [err, setErr] = useState(null);
+      useEffect(() => {
+        let alive = true;
+        Promise.resolve(channels()).then((r) => {
+          if (!alive) return;
+          if (r && r.ok) setChannelsInfo({ channels: r.channels ?? [], warnings: r.warnings ?? [] });
+          else setErr(String((r && r.error) || 'channels() 未返回 ok'));
+        }).catch((e) => { if (alive) setErr(String(e?.message ?? e)); });
+        Promise.resolve(channelGet()).then((r) => {
+          if (alive && r && r.ok && r.channel && r.channel.provider) setChannelState(r.channel);
+        }).catch(() => { /* 保持初值（离线下由上面的提示说明原因） */ });
+        Promise.resolve(fallbackGet()).then((r) => {
+          if (alive && r && r.ok) {
+            setFallbackState({ enabled: !!r.enabled, chain: r.chain ?? [], targets: r.targets ?? [], target: r.target ?? null });
+          }
+        }).catch(() => { /* 同上 */ });
+        Promise.resolve(sequentialGet()).then((r) => {
+          if (alive && r && r.ok) setSequentialState(normSeqShape(r));
+        }).catch(() => { /* 同上 */ });
+        return () => { alive = false; };
+      }, [channels, channelGet, fallbackGet, sequentialGet]);
+      /** 写入顺序列表：与浮窗同一套 patch（`{order}` 单引擎）；失败只显示可读错误，不抛。 */
+      const onSet = useCallback((patch) => {
+        setBusy(true);
+        Promise.resolve(sequentialSet(patch)).then((r) => {
+          if (r && r.ok) { setSequentialState(normSeqShape(r)); setErr(null); }
+          else setErr(String((r && r.error) || '顺序设置写入失败'));
+        }).catch((e) => setErr(String(e?.message ?? e))).finally(() => setBusy(false));
+      }, [sequentialSet]);
+      /** 用户手动选中的编辑引擎（null = 还没选 ⇒ 用默认推导）。 */
+      const [pickedEng, setPickedEng] = useState(null);
+      const chans = channelsInfo.channels;
+      /* ZB-54（用户真机反馈「卡片只有说明、没有列表」）：**按引擎编辑**，与"主通道/降级是否顺序派发"解耦。
+       * 默认引擎 = 主通道当前引擎 → 已有顺序的引擎 → ZCode（用户要求）。 */
+      const activeEng = pickedEng ?? defaultSeqEngine(chans, channel, sequential);
+      const usage = seqEngineUsage(chans, channel, fallback, activeEng);
+      /* 选中的引擎**始终**渲染它的顺序列表（哪怕当前没被任何链使用 —— 否则就是"先开了才有东西配"的鸡生蛋）。 */
+      const block = makeEngineSeqBlock({ channels: chans, engine: activeEng, sequential, onSet });
+      const offline = conn === 'offline';
+      const noChannels = chans.length === 0;
+      /* 状态行：这个顺序**现在生效吗**（主通道用它 / 降级目标用它 / 都没用）—— 一行，用户要求。 */
+      const usageKey = usage.main && usage.fallback ? 'seqUseBoth'
+        : usage.main ? 'seqUseMain'
+          : usage.fallback ? 'seqUseFallback' : 'seqUseNone';
+      const usageState = usage.main && usage.fallback ? 'both' : usage.main ? 'main' : usage.fallback ? 'fallback' : 'none';
+      return h('div', {
+        className: 'dsp-stack',
+        style: { ...DSP_CSS_VARS, padding: '10px 12px', border: `1px solid ${T.border}`, borderRadius: '8px' },
+        'data-dsp-bundle-config': BUNDLE_CONFIG_KEY,
+      },
+        /* ① 引擎选择：ZCode / OpenCode / Qoder（小切换控件，沿用 dsp-btn2 + 主题令牌高亮） */
+        h('div', { className: 'dsp-field' },
+          h('span', { className: 'dsp-field-k' }, t('enginesTitle')),
+          h('span', { className: 'dsp-field-v', style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+            KNOWN_ENGINES.map((eng) => h('button', {
+              key: eng, type: 'button', className: 'dsp-btn2',
+              'data-dsp-seq-eng': eng,
+              'aria-pressed': activeEng === eng,
+              style: {
+                padding: '2px 8px',
+                ...(activeEng === eng ? { borderColor: T.accent, color: T.text } : { color: T.text2 }),
+              },
+              onClick: () => setPickedEng(eng),
+            }, engLabel(eng))))),
+        /* ② 状态行：该引擎当前是否正在被顺序派发（主 / 降级 / 都没用） */
+        h('div', { className: 'dsp-note', role: 'status', 'data-dsp-seq-usage': usageState }, t(usageKey)),
+        /* ③ 一行关键信息（完整说明进 tooltip `seqHint`；卡片不再被 ~300 字占满） + 该引擎的顺序列表 */
+        h(SeqBlocksView, {
+          blocks: [block], offline, busy,
+          hint: t('seqHintCard'), hintTitle: t('seqHint'),
+        }),
+        /* 未就绪 / 空清单：说清原因（而不是让用户对着空卡片猜）—— 复用既有文案键 */
+        offline || noChannels
+          ? h('div', { className: 'dsp-note', role: 'status' }, offline ? t('chanOfflineHint') : t('chanLoading'))
+          : null,
+        err
+          ? h('div', { className: 'dsp-feedback dsp-err', role: 'status' }, `${t('chanLoadFail')}: ${err}`)
+          : null);
     }
 
     return {
@@ -4016,6 +4231,18 @@ window.__ModuleLoader__.load({
            *   5 个子智能体 | DSH 派发台 | 智能体团队 | 创造模式 |（自带）后台任务(20) */
           ctx.slots.inject(HEADER_SLOT, () => ctx.slots.register({ name: HEADER_SLOT, id: 'dispatch', order: -25 },
             () => h(HeaderEntry)));
+          /* ZB-53（用户真机反馈「插件详情页没有配置区」）：在 **bundle 自己的配置槽位**注册一张配置卡。
+           * 槽位契约：`plugins.bundle.config`（keyed / scope: root），按**包名**派发
+           * ⇒ key 必须是 `dsh-dispatch`；priority 与本地参照插件（dsh-connect-zcode）一致取 30。
+           * 详情页可能在任何时刻被渲染（host 未必就绪）⇒ 卡片内部一律走 `useWire()` 的降级链，
+           * 这里的注册失败**只留痕**、绝不影响插件加载（与 apply 顶层"启动绝不因插件失败"同一纪律）。 */
+          try {
+            ctx.slots.inject(BUNDLE_CONFIG_SLOT, () => ctx.slots.register({
+              name: BUNDLE_CONFIG_SLOT, key: BUNDLE_CONFIG_KEY, priority: 30,
+            }, DispatchConfigCard));
+          } catch (e) {
+            try { console.warn('[dispatch] 插件详情页配置卡注册失败（仅影响详情页，不影响派发台）：', e && e.message); } catch { /* ignore */ }
+          }
         } catch (e) {
           try { console.warn('[dispatch] apply 降级（不阻塞启动）:', e && e.message); } catch { /* 连 console 都不可用就彻底静默 */ }
         }

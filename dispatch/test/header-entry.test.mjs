@@ -239,7 +239,18 @@ console.log('\nE. 真渲染（React 桩）：开合与弹窗内容');
     on: () => () => {}, locale: { formatMessage: (m) => String(m?.id ?? m) },
     remote: { $mount: () => Promise.resolve() },
   });
-  ok(regs.length === 1 && regs[0].o.name === 'conversation.session.header.actions', `E1 只注册了会话头槽位一个 cell（实际 ${regs.length} 个）`);
+  /* ⚠️ 本插件现在注册**两个**槽位（ZB-52：插件详情页配置卡是新增的第二个）：
+   *   ① `conversation.session.header.actions` —— 会话标题行的派发台入口（本文件的主角，仍是 regs[0]）
+   *   ② `plugins.bundle.config` —— 插件详情页的顺序派发配置卡（keyed by 包名）
+   * 故断言从"只有一个 cell"改为"**会话头 cell 存在且是第一个**，配置卡也注册了"——
+   * 否则这条会随任何新槽位变红（它本意是钉会话头入口，不是钉"只有它"）。 */
+  const headerCell = regs.find((r) => r.o.name === 'conversation.session.header.actions');
+  const bundleCard = regs.find((r) => r.o.name === 'plugins.bundle.config');
+  ok(regs[0]?.o.name === 'conversation.session.header.actions',
+    `E1 第一个注册的仍是会话头槽位 cell（实际 ${regs[0]?.o?.name}）`);
+  ok(!!headerCell && typeof headerCell.comp === 'function', 'E1 会话头 cell 已注册且是组件函数');
+  ok(!!bundleCard && bundleCard.o.key === 'dsh-dispatch' && typeof bundleCard.comp === 'function',
+    `E1b 插件详情页配置卡已注册（key=${bundleCard?.o?.key}，keyed 槽位按包名派发）`);
 
   const render = () => {
     let t = expand(regs[0].comp({}), 'hdr');
