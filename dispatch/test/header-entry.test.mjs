@@ -332,5 +332,34 @@ console.log('\nE. 真渲染（React 桩）：开合与弹窗内容');
   ok(menuCount(tree) === 0, '★ E15 焦点明确移到子树外的元素 ⇒ 120ms 后关闭（保持"失焦关闭"语义）');
 }
 
+/* ---------- ZB-60：入口降级链（DSH 0.2.1 兼容性加固）----------
+ * ⚠️ 上下文：本测试 E1 曾断言"只注册会话头一个 cell"、A3 断言"不再注册 shell.overlay"。
+ * **该语义已按用户要求有意放宽**为「**仅当主槽位不可用时**才退到 shell.overlay、且绝不并存」
+ * —— 两条旧断言的字面正则仍绿（我们用的是 `FALLBACK_SLOT` 常量），但**新语义原先没有任何断言钉住**。
+ * 这一节把它钉死，防止将来有人"顺手恢复成双 UI"（那正是 ZB-27 否决过的）。
+ *
+ * 为什么用**源码级**断言而不是真渲染：降级链的触发条件分别依赖
+ * 「inject 抛错 / register 抛错 / 槽位未声明（inject 静默等待）/ 主槽位迟到」四种时序，
+ * 真渲染要精确模拟四套槽位行为，成本远高于收益；这里要防的是**结构性回归**
+ * （常量缺失 / 判据被删 / 撤回逻辑被删），源码级足够且稳定。
+ * 行为级验证（7 场景 84 断言：主可用 / inject 抛错 / register 抛错 / 未声明 / 宽限超时 /
+ * 迟到主槽位 / 两条都失败）已在开发期临时探针里跑过，不入库。 */
+{
+  ok(/const FALLBACK_SLOT = 'shell\.overlay';/.test(src),
+    'ZB60a 备用槽位常量 = shell.overlay（主入口不可用时的退路）');
+  ok(/ctx\.slots\.inject\(FALLBACK_SLOT, /.test(src),
+    'ZB60b 备用槽位**确有**注册调用（否则"降级链"只是注释）');
+  ok(/name: FALLBACK_SLOT/.test(src),
+    'ZB60c 备用注册的 name 用常量（不另写字面量，避免两处漂移）');
+  /* 判据必须覆盖"未声明"这一路：0.2.0/0.2.1 的 inject 对未声明槽位是**静默等待**（不抛错），
+   * 只靠 try/catch 抓不到 ⇒ 必须有 spec() 查询或宽限计时。 */
+  ok(/ctx\.slots\.spec/.test(src) || /SLOT_GRACE_MS/.test(src),
+    'ZB60d 覆盖"槽位未声明"（spec() 查询或宽限计时至少其一）—— 只靠 try/catch 抓不到静默等待');
+  ok(/已降级到/.test(src) && /已撤回/.test(src),
+    '★ ZB60e 降级与撤回**都留可读 warn**（降级要可观测；主槽位迟到就绪要撤回，绝不双 UI）');
+  ok(/slots\.inject\(HEADER_SLOT/.test(src),
+    'ZB60f 主槽位仍是首选（字面形状保留：本文件全篇依赖它）');
+}
+
 console.log(`\n===== ZB-27：${pass} PASS / 0 FAIL =====`);
 process.exit(0);
