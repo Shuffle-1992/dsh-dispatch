@@ -230,6 +230,19 @@ export function createSettleNotifier({ dispatcher, agents, log, config = {}, ctx
       return;
     }
     const message = createNoticeMessage(buildSettleNotice(job));
+    /* ⚠️ ZB-62 真机事故（2026-10-17，与 ZB-25 的 kill 顺序同一个坑）：**必须先登记消息 id，再投递**。
+     * `agent.followup/inject` 内部是**同步**的 inbox splice ⇒ `agent/inbox/inserted` 会在**本次调用栈内**
+     * 就发出来。第一版先投递、后 `remember(deliveredIds, id)`，于是事件回调跑的那一刻 `deliveredIds` 还是空的，
+     * 被 `has()` 判掉 ⇒ 计数器永远 0（真机复现：wake-stats.json 里 delivered=1 / insertAcked=0 / unconfirmed=1；
+     * 而单测当时是"投递后再 fire 事件"，所以看不出问题）。
+     * 顺序错了不会报错，只会**静默少记一次确认** —— 所以既修代码，也在单测里加"同步 emit"用例钉死它。 */
+    remember(deliveredIds, message.id);
+    pendingInsert.set(message.id, Date.now());
+    while (pendingInsert.size > TRACK_CAP) {
+      const oldest = pendingInsert.keys().next().value;
+      if (oldest === undefined) break;
+      pendingInsert.delete(oldest);
+    }
     const idle = agent.status === 'idle';
     if (idle && wakeBudget > 0) {
       const used = spentWakes.get(agentId) ?? 0;
@@ -239,8 +252,6 @@ export function createSettleNotifier({ dispatcher, agents, log, config = {}, ctx
         agent.inject(message);
         counter.inject += 1;
         counter.delivered += 1;
-        remember(deliveredIds, message.id);
-        pendingInsert.set(message.id, Date.now());
         persistStats();
         return;
       }
@@ -250,14 +261,6 @@ export function createSettleNotifier({ dispatcher, agents, log, config = {}, ctx
     else agent.inject(message);
     counter[idle ? 'followup' : 'inject'] += 1;
     counter.delivered += 1;
-    /* ZB-62：登记消息 id 等 inserted 对账；未确认的留在 pendingInsert（= 诊断"悄悄没入队"）。 */
-    remember(deliveredIds, message.id);
-    pendingInsert.set(message.id, Date.now());
-    while (pendingInsert.size > TRACK_CAP) {
-      const oldest = pendingInsert.keys().next().value;
-      if (oldest === undefined) break;
-      pendingInsert.delete(oldest);
-    }
     persistStats();
   }
 

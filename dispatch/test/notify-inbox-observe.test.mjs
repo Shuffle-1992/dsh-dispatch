@@ -35,8 +35,10 @@ function harness({ config = {} } = {}) {
     id: 'sess-1',
     status: 'idle',
     calls: [],
-    followup(m) { this.calls.push(['followup', m]); },
-    inject(m) { this.calls.push(['inject', m]); },
+    /** 测试可注入"发送瞬间的回调"：真实宿主是在 followup/inject 内部**同步**发 inserted 的。 */
+    onSend: null,
+    followup(m) { this.calls.push(['followup', m]); if (this.onSend) this.onSend(m); },
+    inject(m) { this.calls.push(['inject', m]); if (this.onSend) this.onSend(m); },
   };
   const handlers = new Map();
   const ctx = {
@@ -184,4 +186,22 @@ test('⑦ 没有 jobsFile / 没有 ctx.on 时也不抛（纯降级）', () => {
   assert.doesNotThrow(() => notifier.persistStats(), '无 jobsFile ⇒ 落盘静默跳过');
   assert.equal(notifier.stats().unconfirmed, 0);
   notifier.dispose();
+});
+
+test('⑧ 真机时序回归：followup/inject 内部**同步**发 inserted 也必须对上账（ZB-62 事故）', () => {
+  /* 真机事故（2026-10-17）：`agent.inject()` 内部是同步的 inbox splice ⇒ `agent/inbox/inserted`
+   * 在**本次调用栈内**就发出来。第一版先投递、后登记消息 id，事件回调那一刻 `deliveredIds` 还是空的
+   * ⇒ 被 `has()` 判掉，计数器永远 0（真机 wake-stats.json：delivered=1 / insertAcked=0 / unconfirmed=1）。
+   * 本用例把"同步 emit"钉死：只有"先登记 id 再投递"才能过。 */
+  const h = harness();
+  try {
+    h.agent.onSend = (m) => h.fire('agent/inbox/inserted', { message: m }); // 宿主同步发事件
+    h.notifier.track('j-8', 'sess-1');
+    h.dispatcher.settle(job('j-8'));
+    const s = h.notifier.stats();
+    assert.equal(s.delivered, 1);
+    assert.equal(s.insertAcked, 1, '同步 inserted 必须被记上（先登记 id、再投递）');
+    assert.equal(s.unconfirmed, 0);
+    assert.equal(h.readStats().insertAcked, 1, '落盘也同步反映');
+  } finally { h.cleanup(); }
 });
