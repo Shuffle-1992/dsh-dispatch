@@ -349,6 +349,12 @@ const TOOL_PARAMETERS = {
   },
   id: { type: 'string', description: 'kill/tail/retry：job id（形如 j-xxxx）' },
   n: { type: 'integer', description: 'tail：行数（≥ 1，默认 30，上限 200）' },
+  /* ZB-61：list 的**有界 + 紧凑**开关（默认紧凑、默认 50 条）。
+   * 背景：宿主会把超预算的工具结果从中间截断（spill），旧形状 96 条 job = 212 KB ⇒
+   * 模型只看到首尾两段，中间的 job 直接读不到。紧凑形状保留 id/state/model/tag/lockWait 等
+   * 「挑下一个动作」必需字段，实测同数据 25.5 KB。 */
+  limit: { type: 'integer', description: 'list：最多回多少条 job（默认 50，上限 200；按 running→queued→paused→终态、同状态内新→旧排序）。省略的条数会写在返回的 note 里' },
+  full: { type: 'boolean', description: 'list：true = 旧完整形状（含每条 job 的派发原文 spec.body、progress、usage、lockPaths）。默认 false = 紧凑形状（更省上下文，且不会被宿主截断）；两种形状都受 limit 约束' },
   retryModel: { type: 'string', description: 'retry：目标模型（同通道续跑时不允许传——--resume 带 --model 必失败）' },
   /* ZB-30：降级目标 = 有序数组；元素为通道 id 字符串（工具 schema 只允许字符串数组——
    * 对象形状留给面板/CLI 经 face.setFallbackChain 直传）。单目标 = provider + model + thinking。 */
@@ -371,7 +377,7 @@ const TOOL_DESCRIPTION_BODY = [
   '- **思考强度（thinking，默认 agent=「Agent决定」）**：传 `agent` 时，**由你（调用方）根据本任务自行判断并改传具体档位**——判断准则：探索/查询/机械修改/短问答 ⇒ 低档（GLM-5.3 系用 `low`，deepseek 系可用 `disabled`）；多步实现、架构改动、疑难排查、长链规划 ⇒ 高档（`high`/`max`）。判断完成后**传具体档位，不要传 agent**；保持 agent 时按 **ZCode 默认规则**执行（= 该模型档位集的最后一档：GLM-5.3 系 ⇒ `max`、deepseek 系 ⇒ `max`），runner 会解析并**显式注入**——进程上显示的就是实际生效档位，而不是「Agent决定」字样。规则：① 合法档位**随模型声明不同**（ZB-31 实测：GLM-5.3/Flash：`low|high|max`；deepseek 系：`disabled|low|high|max`），以 action=channels 返回的 `channels[].thinkingLevels` 为准；② 非法档位会被 runner 按 builtin 声明 fail-fast 拒绝（报错列出可用值），不会静默降级；③ 档位仅对**新建会话**生效，`--resume` 续跑沿用原会话档位（runner 警告并忽略）；④ **不传 thinking ⇒ 按通道默认思考强度执行**（`action=channel` 可设通道默认：`agent`=Agent决定 或具体档位——**这就是给派发 Agent 的规定**；未设置即 agent）；⑤ job 上可核对：`reasoningLevel`（请求档：agent/具体档）与 `reasoningLevelApplied`（实际生效档）。**OpenCode 通道**：同一套 `thinking` 参数映射为 OpenCode 的 **`--variant`**（OpenCode 把思考档位叫 variant，模型相关，如 `high`/`max`/`minimal`）；档位同样以 `channels[].thinkingLevels` 为准（缺失 = 未探测到，传 `agent` 即可，不要猜枚举）。',
   '- **paused 与超时**：run 非 0 退出（非 kill）且输出命中暂停签名 → paused（签名按优先级：plan-not-entitled → provider-signing → config-error → quota-exhausted；字段 pauseReason/pauseDetail/pausedAt）；未命中保持 failed（pauseReason=unknown 仅作信息）；paused 不占锁不占并发，需人决定 retry 续跑或换通道。timeoutMin 无上限（>0）：**runner 自身超时 → failed**（exit 124，timedOut=true、timedOutBy=runner）；**dispatcher 看门狗在 timeoutMin+120s 宽限后仍未退出 → killed**（timedOutBy=watchdog，watchdogSec=开火秒数）；interrupted 与超时无关（仅 dispatcher 重启时的残留清理）。',
   '- action=wait：等待 job 落到终态或 paused（id 必填，timeoutSec 可选，缺省取该任务 timeoutMin 的秒数）。paused 也返回（不干等，让调用方决定 retry 续跑还是换通道交接）；超时返回 timedOut:true 与当前状态，不谎报完成。**已经 wait 到落地的 job 不再发落地通知**（结果你已拿到）。',
-  '- action=list：列出全部 run（running/queued 优先，含状态/锁/用量/上下文占用；不含 tail 内容）。**queued 行带 lockWait（ZB-28 排队可观测）**：position=队列位次、ahead/aheadIds=前方同类任务、blockers=被谁挡住（锁名+持有者+已运行秒+剩余上界）、estWaitSec=预计等待上界（仅当阻塞者都声明 timeoutMin 时可估，否则 null 不猜）——被整仓锁挡住时不再盲等。',
+  '- action=list：列出 run（running→queued→paused→终态，同状态内新→旧）。**默认紧凑形状 + 默认最多 50 条**（`limit` 可调到 200）：每条只给 id/state/tag/kind/engine/model/provider/时间/elapsedSec/exitCode/responseChars/contextRatio/turnCount/tailCount/stage/lastTool，外加 `total` 与 `counts`（按状态计数）；**省略的条数写在 `note` 里**（不静默截断）。要用旧完整形状（含每条 job 的派发原文 `spec.body`、progress、usage、lockPaths）加 `full=true`。**紧凑是刻意的**：完整形状在多历史 job 时会达到数百 KB，宿主 spill 策略会从**中间**截断它 —— 那时你反而读不到中间的 job。**queued 行带 lockWait（ZB-28 排队可观测）**：position=队列位次、ahead/aheadIds=前方同类任务、blockers=被谁挡住（锁名+持有者+已运行秒+剩余上界）、estWaitSec=预计等待上界（仅当阻塞者都声明 timeoutMin 时可估，否则 null 不猜）——被整仓锁挡住时不再盲等。单条输出永远用 action=tail。',
   '- action=kill：按 id 终止。queued 直接移除；running 发终止信号后落 killed。**自己 kill 的 job 不发落地通知**。',
   '- action=dismiss：把 paused/终态 job 从列表移除（queued/running 必须先 kill）。',
   '- action=tail：按 id 取最近输出，参数 n 默认 30（上限 200）。',

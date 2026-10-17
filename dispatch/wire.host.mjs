@@ -232,6 +232,69 @@ export function slimJob(job) {
   };
 }
 
+/* ── ZB-61（上下文成本）：`list` 的**紧凑投影** ──────────────────────────────
+ * 真机实测（2026-10-17，本机 96 条历史 job）：`action=list` 走 slimJob 的载荷是
+ * **212 KB**，而宿主 `@deepseek-ai/dsh-spill-policy` 会把超预算的工具结果**从中间截断**，
+ * 只把首尾两段 + 「Omitted N bytes」提示交给模型（完整文本落到 spill 文件）——
+ * 也就是说：列表越长，模型反而**越读不到中间的 job**（越需要列表时越瞎）。
+ * 紧凑投影只保留「挑下一个动作」必需的事实：实测同一份数据 **22.0 KB**（含缩进渲染 ≈5.6K token，
+ * 宿主预算是 12500），且**永不省略 id/state**，所以模型拿到的一定是可用信息。
+ *
+ * 取舍（写下来免得后人再猜）：
+ *   · 去掉 `spec.body`（派发原文，最长 2000 字/条 —— 列表里没人靠它选动作，要看用 action=tail）；
+ *   · 去掉 `lockPaths` / `progress` 全量 / `parseWarnings` / `usage` / 附件类字段；
+ *   · **保留 `lockWait`**（ZB-28 排队可观测："为什么在排队"正是列表要回答的问题之一）；
+ *   · 保留 id / state / tag / kind / engine / model / provider / 时间 / elapsed / exitCode /
+ *     responseChars / contextRatio / turnCount / hopCount / stalled / stage / lastTool / tailCount。
+ * 要旧形状（含 spec.body、progress、usage、lockPaths）用 `action=list full=true`。 */
+/** 紧凑列表默认条数（够看当前活跃 + 最近历史；`limit` 可调，上限见下）。 */
+export const LIST_LIMIT_DEFAULT = 50;
+export const LIST_LIMIT_MAX = 200;
+
+/**
+ * 单条 job 的紧凑投影（`action=list` 默认形状）。
+ * @param {object} job core serialize 后的 job（或 slimJob 的输出——两者字段兼容）
+ * @returns {object|null} 只含"挑下一个动作"所需字段的纯 JSON 记录
+ */
+export function briefJob(job) {
+  if (!job) return null;
+  const spec = job.spec && typeof job.spec === 'object' ? job.spec : {};
+  const progress = job.progress && typeof job.progress === 'object' ? job.progress : null;
+  const attempts = Array.isArray(job.attempts) ? job.attempts : [];
+  const paused = job.state === 'paused';
+  const stalled = job.state === 'running' && (!job.lastProgressAt || Date.now() - job.lastProgressAt > 150_000);
+  /* 空值不占位：宿主 spill 预算按 **chars/4** 估算（dsh-token-meter CHARS_PER_TOKEN=4），
+   * 而键名本身才是大头（一条记录 ~490 B 里约一半是键名）——省略 null 字段既省预算也更少噪音。
+   * ⚠️ 只删 null/undefined：`exitCode: 0`、`hopCount: 0` 是有意义的值，不能当空值删掉。 */
+  const out = {
+    id: job.id ?? null,
+    state: job.state ?? null,
+    tag: spec.tag ?? null,
+    kind: spec.kind ?? null,
+    engine: job.engine ?? spec.engine ?? null,
+    model: job.model ?? spec.model ?? null,
+    provider: job.provider ?? spec.provider ?? null,
+    queuedAt: job.queuedAt ?? null,
+    finishedAt: job.finishedAt ?? null,
+    elapsedSec: job.elapsedSec ?? null,
+    exitCode: job.exitCode ?? null,
+    responseChars: job.responseChars ?? null,
+    turnCount: job.turnCount ?? null,
+    contextRatio: job.contextRatio ?? null,
+    tailCount: Array.isArray(job.tailLines) ? job.tailLines.length : (job.tailCount ?? 0),
+    ...(job.hopCount ? { hopCount: job.hopCount } : {}),
+    ...(attempts.length ? { attempts: attempts.length } : {}),
+    /* ZB-28：排队可观测 —— 紧凑形状也**必须**带它（"为什么在排队"是列表的核心用途之一）。 */
+    ...(job.lockWait ? { lockWait: job.lockWait } : {}),
+    ...(stalled ? { stalled: true, lastProgressAgoSec: Math.round((Date.now() - job.lastProgressAt) / 1000) } : {}),
+    ...(progress ? { stage: progress.stage ?? null, ...(progress.lastTool ? { lastTool: progress.lastTool } : {}) } : {}),
+    ...(paused ? { pauseReason: job.pauseReason ?? null, ...(job.pauseDetail ? { pauseDetail: trunc(job.pauseDetail, 160) } : {}) } : {}),
+    ...(job.parentJobId ? { parentJobId: job.parentJobId } : {}),
+  };
+  for (const k of Object.keys(out)) if (out[k] == null) delete out[k];
+  return out;
+}
+
 /** 用量聚合裁剪成 UI 需要的三窗口字段；ledger 不可用时返回 available:false，不抛错。 */
 export function quotaWindows(ledgerPath) {
   if (!ledgerPath) return { available: false, reason: 'ledgerPath 未配置', windows: null };
@@ -497,8 +560,32 @@ export function createActionHandler(dispatcher, config = {}) {
             ...(hint ?? {}),
           };
         }
-        case 'list':
-          return { ok: true, jobs: dispatcher.list().map(slimJob).filter(withoutDismissed(dispatcher)) };
+        case 'list': {
+          /* ZB-61：默认**紧凑 + 有界**（见 briefJob 的注释：212 KB → 22 KB，不再触发 spill 截断）。
+           * `full=true` 回到旧形状（含 spec.body/progress/usage/lockPaths），仍受同一个 limit 约束。 */
+          const full = p.full === true || p.full === 'true';
+          const rawLimit = Number(p.limit);
+          const limit = Number.isFinite(rawLimit) && rawLimit > 0
+            ? Math.min(LIST_LIMIT_MAX, Math.floor(rawLimit))
+            : LIST_LIMIT_DEFAULT;
+          const all = dispatcher.list().filter(withoutDismissed(dispatcher));
+          const page = all.slice(0, limit);
+          const counts = {};
+          for (const j of all) counts[j.state] = (counts[j.state] ?? 0) + 1;
+          const omitted = all.length - page.length;
+          return {
+            ok: true,
+            total: all.length,
+            counts,
+            shape: full ? 'full' : 'brief',
+            jobs: page.map(full ? slimJob : briefJob),
+            ...(omitted > 0
+              ? {
+                note: `已省略 ${omitted} 条更早的 job（共 ${all.length} 条，本次只回前 ${limit} 条）：取更多用 action=list limit=<n>（上限 ${LIST_LIMIT_MAX}）；要完整字段（含派发原文）加 full=true；单条输出用 action=tail id=<jobId>。`,
+              }
+              : {}),
+          };
+        }
         case 'kill': {
           const id = p.id ?? p.jobId;
           if (!id) return { ok: false, error: 'kill 需要参数 id' };
