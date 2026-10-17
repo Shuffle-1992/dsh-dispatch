@@ -60,7 +60,8 @@ async function waitTerminal(d, id, timeoutMs = 20000) {
 test('★ 整仓锁挡住：blockers 指认持有者；阻塞者无 timeoutMin ⇒ estWaitSec=null 不猜', async () => {
   const d = createDispatcher({ runnerPath: FAKE_RUNNER, workRoot: newWorkRoot(), maxConcurrent: 1 });
   const a = d.dispatch({ kind: 'prompt', prompt: 'a', tag: 'HOLDER' });
-  await waitFor(() => d.get(a.id).state === 'running', 'A running');
+  /* dispatch 同步拿锁+启动 ⇒ 不再轮询 running 瞬时态（慢机上会错过窗口 → waitFor 触顶假红）。 */
+  assert.equal(d.get(a.id).state, 'running', 'A 已启动并持整仓锁');
   const b = d.dispatch({ kind: 'prompt', prompt: 'b', tag: 'WAITER' });
   assert.equal(d.get(b.id).state, 'queued');
   const lw = d.get(b.id).lockWait;
@@ -83,7 +84,7 @@ test('★ 整仓锁挡住：blockers 指认持有者；阻塞者无 timeoutMin �
 test('estWaitSec：阻塞者声明 timeoutMin ⇒ 给剩余上界（timeoutMin*60+宽限−已运行）', async () => {
   const d = createDispatcher({ runnerPath: FAKE_RUNNER, workRoot: newWorkRoot(), maxConcurrent: 1, timeoutGraceSec: 0 });
   const a = d.dispatch({ kind: 'prompt', prompt: 'a', tag: 'HOLDER', timeoutMin: 1 });
-  await waitFor(() => d.get(a.id).state === 'running', 'A running');
+  assert.equal(d.get(a.id).state, 'running', 'A 已启动并持整仓锁');
   const b = d.dispatch({ kind: 'prompt', prompt: 'b', tag: 'WAITER' });
   const lw = d.get(b.id).lockWait;
   assert.equal(lw.blockers.length, 1);
@@ -98,7 +99,7 @@ test('estWaitSec：阻塞者声明 timeoutMin ⇒ 给剩余上界（timeoutMin*6
 test('ahead：同类前方任务计数（文件锁类与整仓库锁类分开数，与 pump 优先级同尺）', async () => {
   const d = createDispatcher({ runnerPath: FAKE_RUNNER, workRoot: newWorkRoot(), maxConcurrent: 1 });
   const h = d.dispatch({ kind: 'prompt', prompt: 'h', tag: 'H' }); // 整仓库，占住并发与锁
-  await waitFor(() => d.get(h.id).state === 'running', 'H running');
+  assert.equal(d.get(h.id).state, 'running', 'H 已启动并持整仓锁');
   const r1 = d.dispatch({ kind: 'prompt', prompt: 'r1', tag: 'R1' }); // 整仓库 queued
   const f1 = d.dispatch({ kind: 'prompt', prompt: 'f1', tag: 'F1', write: ['F:/proj/x.ts'] }); // 文件锁 queued
   const r2 = d.dispatch({ kind: 'prompt', prompt: 'r2', tag: 'R2' }); // 整仓库 queued
@@ -117,7 +118,7 @@ test('ahead：同类前方任务计数（文件锁类与整仓库锁类分开数
 test('文件锁挡住：blockers.lock 以 file: 开头并指认持有者；无冲突者不排队', async () => {
   const d = createDispatcher({ runnerPath: FAKE_RUNNER, workRoot: newWorkRoot(), maxConcurrent: 4 });
   const a = d.dispatch({ kind: 'prompt', prompt: 'a', tag: 'A', write: ['F:/proj/a.ts'] });
-  await waitFor(() => d.get(a.id).state === 'running', 'A running');
+  assert.equal(d.get(a.id).state, 'running', 'A 已启动并持文件锁');
   const b = d.dispatch({ kind: 'prompt', prompt: 'b', tag: 'B', write: ['F:/proj/a.ts'] });
   assert.equal(d.get(b.id).state, 'queued', '写同一文件 ⇒ 排队');
   const lw = d.get(b.id).lockWait;
@@ -126,14 +127,14 @@ test('文件锁挡住：blockers.lock 以 file: 开头并指认持有者；无�
   assert.ok(lw.blockers[0].lock.includes('a.ts'), '条目带归一化文件路径');
   assert.equal(lw.blockers[0].holderJobId, a.id);
   const c = d.dispatch({ kind: 'prompt', prompt: 'c', tag: 'C', write: ['F:/proj/b.ts'] });
-  await waitFor(() => d.get(c.id).state === 'running', '写其它文件 ⇒ 无冲突直接跑');
+  assert.equal(d.get(c.id).state, 'running', '写其它文件 ⇒ 无冲突直接跑');
   await Promise.all([a, b, c].map((x) => waitTerminal(d, x.id)));
 });
 
 test('跨层级：整仓库锁持有期间，文件锁任务的 blockers 给出 cross 条目并指认持有者', async () => {
   const d = createDispatcher({ runnerPath: FAKE_RUNNER, workRoot: newWorkRoot(), maxConcurrent: 1 });
   const a = d.dispatch({ kind: 'prompt', prompt: 'a', tag: 'WHOLE' }); // 整仓库
-  await waitFor(() => d.get(a.id).state === 'running', 'A running');
+  assert.equal(d.get(a.id).state, 'running', 'A 已启动并持整仓锁');
   const b = d.dispatch({ kind: 'prompt', prompt: 'b', tag: 'FILE', write: ['F:/proj/y.ts'] });
   assert.equal(d.get(b.id).state, 'queued', '整仓库锁涵盖所有文件 ⇒ 文件锁任务等待');
   const lw = d.get(b.id).lockWait;
@@ -148,7 +149,7 @@ test('非 queued 恒 null；wire 层 list 动作（slimJob）原样透传 lockWa
   const d = createDispatcher({ runnerPath: FAKE_RUNNER, workRoot: newWorkRoot(), maxConcurrent: 1 });
   const handle = createActionHandler(d, {});
   const a = d.dispatch({ kind: 'prompt', prompt: 'a', tag: 'A' });
-  await waitFor(() => d.get(a.id).state === 'running', 'A running');
+  assert.equal(d.get(a.id).state, 'running', 'A 已启动');
   assert.equal(d.get(a.id).lockWait, null, 'running 的 lockWait=null');
   const b = d.dispatch({ kind: 'prompt', prompt: 'b', tag: 'B' });
   const listed = await handle('list', {});

@@ -106,17 +106,21 @@ test('listChannels：通道带 thinkingLevels（plan 别名继承选中 provider
    * 曾把面板写成 map 取值（lvMap[model]）⇒ 下拉只剩 Agent决定（现场 bug，此处防复发）。 */
   assert.ok(Array.isArray(plan.thinkingLevels), '★ thinkingLevels 是数组（面板据此渲染档位选项）');
   const clientSrc = readFileSync(join(HERE, '..', 'client.js'), 'utf8');
+  /* 面板消费契约在**剥注释后**的源码上断言：注释里提到某个标识符不应该算"实现了它"
+   * （所以 D 段用 code 而不是 src）。实现与 panel-style / toolview-card 逐字一致。 */
+  const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  const clientCode = stripComments(clientSrc);
   /* ZB-51：面板改为取**该引擎下所有子通道的并集**（`Array.isArray(sel.thinkingLevels)` 仍是其中一环）。
    * 形状契约不变 —— 消费的是**数组**，不是 map。 */
-  assert.ok(/Array\.isArray\(sel\.thinkingLevels\)/.test(clientSrc),
-    '★ 面板按数组消费 sel.thinkingLevels（不是 map 取值）');
+  assert.ok(/Array\.isArray\(sel\.thinkingLevels\)/.test(clientCode),
+    '★ 面板按数组消费 sel.thinkingLevels（不是 map 取值；剥注释后判定）');
   /* ★ ZB-29e：档位**中文显示** —— 值仍传原始字符串（disabled/enabled/…），只在显示层映射标签；
    * 未知档位原样显示（不隐藏、不猜语义）。 */
-  assert.ok(/const THINKING_LABEL_KEY = \{ disabled: 'thinkDisabled'/.test(clientSrc),
+  assert.ok(/const THINKING_LABEL_KEY = \{ disabled: 'thinkDisabled'/.test(clientCode),
     '★ 档位中文标签映射表存在（disabled/enabled/low/high/max）');
-  assert.ok(/const thinkingLabel = \(lv\) => \(lv == null \|\| lv === '' \? '' : t\(THINKING_LABEL_KEY\[lv\] \?\? ''\) \|\| lv\)/.test(clientSrc),
+  assert.ok(/const thinkingLabel = \(lv\) => \(lv == null \|\| lv === '' \? '' : t\(THINKING_LABEL_KEY\[lv\] \?\? ''\) \|\| lv\)/.test(clientCode),
     '★ thinkingLabel：命中映射走中文，未知档位原样回退（不隐藏）');
-  assert.ok(/h\('option', \{ key: lv, value: lv \}, thinkingLabel\(lv\)\)/.test(clientSrc),
+  assert.ok(/h\('option', \{ key: lv, value: lv \}, thinkingLabel\(lv\)\)/.test(clientCode),
     '★ 通道下拉：option value 仍是原始档位字符串，label 用中文');
   const zh = JSON.parse(readFileSync(join(HERE, '..', 'locale', 'zh.json'), 'utf8'));
   const en = JSON.parse(readFileSync(join(HERE, '..', 'locale', 'en.json'), 'utf8'));

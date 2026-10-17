@@ -52,15 +52,16 @@ async function waitTerminal(d, id, timeoutMs = 20000) {
   }, `terminal:${id}`, timeoutMs);
   return d.get(id);
 }
-const runningIds = (d) => d.list().filter((j) => j.state === 'running').map((j) => j.tag).sort();
 const F = (n) => `F:/proj/${n}`;
 
 test('★ 文件锁任务优先：整仓库锁在队头也不阻塞后面的文件锁任务', async () => {
   process.env.FAKE_SLEEP_MS = '900';
   const d = createDispatcher({ runnerPath: FAKE_RUNNER, workRoot: newWorkRoot(), maxConcurrent: 4 });
-  /* 先让一个"占位"任务持整仓库锁，制造"整仓库锁正在跑"的局面 */
+  /* 先让一个"占位"任务持整仓库锁。dispatch() 是**同步**拿锁+启动的（拿不到锁才 queued），
+   * 所以这里不再轮询 `state === 'running'`（running 是瞬时态：慢机/负载抖动时轮询可能整个错过
+   * 它的窗口，waitFor 会一直等到超时 → 偶发假红）。直接断言同步结果即可。 */
   const holder = d.dispatch({ kind: 'prompt', prompt: 'h', tag: 'HOLDER' }); // 默认 = 整仓库锁
-  await waitFor(() => d.get(holder.id).state === 'running', 'HOLDER running');
+  assert.equal(d.get(holder.id).state, 'running', 'HOLDER 已启动并持有整仓库锁');
 
   /* 现在队头放一个**整仓库锁**任务（拿不到锁 ⇒ 旧实现会在此 break），
    * 后面放两个**文件锁**任务（本可并行，但旧实现被队头堵住）。 */
@@ -79,13 +80,18 @@ test('★ 文件锁任务优先：整仓库锁在队头也不阻塞后面的文�
 
   await waitTerminal(d, holder.id); // HOLDER 释放
 
-  // 释放后：F1/F2 应立刻并行起来，而 WHOLE 仍在等（因为 F1/F2 持文件锁 ⇒ 与整仓库锁冲突）
-  await waitFor(() => runningIds(d).length > 0, '有人跑起来');
-  const nowRunning = runningIds(d);
-  assert.deepEqual(nowRunning, ['F1', 'F2'], `应优先放行文件锁任务，实际跑的是 ${JSON.stringify(nowRunning)}`);
-  assert.equal(d.get(whole.id).state, 'queued', 'WHOLE（整仓库锁）仍在等待 —— 符合"文件锁优先"');
+  /* 释放后按**稳定时间戳**核对原语义（原断言读 runningIds 瞬时快照，慢机上一拍就可能错过窗口）：
+   *   ① F1/F2 应并行 ⇒ 两者执行区间重叠；
+   *   ② WHOLE 必须等 F1/F2 释放文件锁（跨层级冲突）⇒ 其 startedAt 晚于两者 finishedAt。 */
+  const [ra, rb, rw] = await Promise.all([waitTerminal(d, f1.id), waitTerminal(d, f2.id), waitTerminal(d, whole.id)]);
+  assert.ok(ra.startedAt && rb.startedAt && rw.startedAt, '三者都真正启动过（startedAt 已落库）');
+  const overlapped = Date.parse(ra.startedAt) < Date.parse(rb.finishedAt)
+    && Date.parse(rb.startedAt) < Date.parse(ra.finishedAt);
+  assert.equal(overlapped, true,
+    `应优先放行文件锁任务且两者并行，实际 F1=[${ra.startedAt},${ra.finishedAt}] F2=[${rb.startedAt},${rb.finishedAt}]`);
+  assert.ok(Date.parse(rw.startedAt) >= Math.max(Date.parse(ra.finishedAt), Date.parse(rb.finishedAt)),
+    'WHOLE（整仓库锁）在 F1/F2 释放文件锁之后才跑 —— 符合"文件锁优先"');
 
-  await Promise.all([waitTerminal(d, f1.id), waitTerminal(d, f2.id), waitTerminal(d, whole.id)]);
   assert.ok(!existsSync(d.lockPaths.repo), '结束后仓库锁释放');
   assert.equal(d.listFileLocks().length, 0, '结束后文件锁释放');
   delete process.env.FAKE_SLEEP_MS;
@@ -94,12 +100,13 @@ test('★ 文件锁任务优先：整仓库锁在队头也不阻塞后面的文�
 test('整仓库锁执行时，文件锁任务等待（跨层级互斥，非优先级问题）', async () => {
   process.env.FAKE_SLEEP_MS = '700';
   const d = createDispatcher({ runnerPath: FAKE_RUNNER, workRoot: newWorkRoot(), maxConcurrent: 4 });
-  const whole = d.dispatch({ kind: 'prompt', prompt: 'w', tag: 'WHOLE' }); // 先派 ⇒ 先拿到整仓库锁
-  await waitFor(() => d.get(whole.id).state === 'running', 'WHOLE running');
+  const whole = d.dispatch({ kind: 'prompt', prompt: 'w', tag: 'WHOLE' }); // 先派 ⇒ 同步拿到整仓库锁
+  assert.equal(d.get(whole.id).state, 'running', 'WHOLE 已启动并持有整仓库锁');
   const f1 = d.dispatch({ kind: 'prompt', prompt: '1', write: [F('a.ts')], tag: 'F1' });
   assert.equal(d.get(f1.id).state, 'queued', '整仓库锁执行时，文件锁任务必须等待');
-  await waitTerminal(d, whole.id);
-  await waitTerminal(d, f1.id);
+  const jw = await waitTerminal(d, whole.id);
+  const jf = await waitTerminal(d, f1.id);
+  assert.ok(Date.parse(jf.startedAt) >= Date.parse(jw.finishedAt), '文件锁任务在整仓库锁释放之后才开始');
   delete process.env.FAKE_SLEEP_MS;
 });
 
@@ -121,16 +128,18 @@ test('同类内保持 FIFO：多个文件锁任务按队列顺序放行', async 
 test('文件锁任务优先于整仓库锁：整仓库锁排在前面也不会先跑', async () => {
   process.env.FAKE_SLEEP_MS = '600';
   const d = createDispatcher({ runnerPath: FAKE_RUNNER, workRoot: newWorkRoot(), maxConcurrent: 2 });
-  /* 先派整仓库锁（会立刻 running，占住），再派文件锁（排队）；
-   * 释放后文件锁应优先 —— 但这里整仓库锁已跑完，故直接验证"文件锁先于后续整仓库锁" */
+  /* 先派整仓库锁（dispatch 同步启动并占住锁），再派文件锁（排队）——
+   * 三个 dispatch 之间不 await，队列快照因此是确定的（不依赖"某瞬时态还看得见"）。 */
   const whole1 = d.dispatch({ kind: 'prompt', prompt: 'w1', tag: 'WHOLE1' });
-  await waitFor(() => d.get(whole1.id).state === 'running', 'WHOLE1 running');
+  assert.equal(d.get(whole1.id).state, 'running', 'WHOLE1 已启动并持有整仓库锁');
   const whole2 = d.dispatch({ kind: 'prompt', prompt: 'w2', tag: 'WHOLE2' }); // 整仓库锁，排队
   const f = d.dispatch({ kind: 'prompt', prompt: 'f', write: [F('x.ts')], tag: 'F' }); // 文件锁，排队
   assert.deepEqual(d.snapshot().queue.map((id) => d.get(id).tag), ['WHOLE2', 'F'], '队列：WHOLE2 在 F 前');
-  await waitTerminal(d, whole1.id);
-  await waitFor(() => runningIds(d).includes('F'), 'F 应优先跑起来');
-  assert.ok(!runningIds(d).includes('WHOLE2'), 'WHOLE2 应仍在等（文件锁优先）');
-  await Promise.all([waitTerminal(d, f.id), waitTerminal(d, whole2.id)]);
+  /* 释放后按**稳定时间戳**核对原语义（不再用 runningIds 瞬时快照：
+   * F 只跑 600ms，慢机轮询可能整段错过 ⇒ waitFor 一直等到超时 = 偶发假红）。 */
+  const jw1 = await waitTerminal(d, whole1.id);
+  const [jf, jw2] = await Promise.all([waitTerminal(d, f.id), waitTerminal(d, whole2.id)]);
+  assert.ok(Date.parse(jf.startedAt) >= Date.parse(jw1.finishedAt), 'F 在 WHOLE1 释放之后才起步');
+  assert.ok(Date.parse(jf.startedAt) < Date.parse(jw2.startedAt), 'F 应优先跑起来，WHOLE2 仍在等（文件锁优先）');
   delete process.env.FAKE_SLEEP_MS;
 });

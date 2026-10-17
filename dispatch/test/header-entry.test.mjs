@@ -23,7 +23,11 @@ const ok = (c, m) => { assert.ok(c, m); pass += 1; console.log(`  ✓ ${m}`); };
 console.log('A. 槽位与注册契约');
 ok(/const HEADER_SLOT = 'conversation\.session\.header\.actions';/.test(code), 'A1 HEADER_SLOT 指向会话标题行槽位');
 ok(/id: 'dispatch', order: -25/.test(code), '★ A2 order=**-25**（插在子智能体目录 -30 与智能体团队 -20 之间 = 用户要求「移到子智能体后面」）');
-ok(!/ctx\.slots\.inject\(SLOT,/.test(code), '★ A3 不再注册 shell.overlay（右下角浮窗已取消，避免两份 UI）');
+/* ★ A3（2026-10-17 审计 C 修正）：原断言 `!/ctx\.slots\.inject\(SLOT,/` 用的是**已改名的旧常量**
+ * （现为 `FALLBACK_SLOT`）⇒ 恒绿、零保护，读起来却在"防双 UI"。真正的降级链语义由文末 ZB-60 一节钉住
+ * （常量存在 / 判据 / 绝不并存）。这里换成一条**真的会红**的结构断言：
+ * 任何人都不得绕过常量直接以字面量注册备用槽位（那正是"恢复成双 UI"的典型写法）。 */
+ok(!/ctx\.slots\.register\(\{\s*name:\s*'shell\.overlay'/.test(code), '★ A3 不得以字面量直接注册 shell.overlay（备用槽位只能经 FALLBACK_SLOT 走降级链）');
 ok(!/dispatch\.console/.test(code), '★ A4 旧浮层 cell id（dispatch.console）已移除');
 
 console.log('\nB. 入口样式**逐项对齐官方源码**（ui-jobs/JobListAction —— 同槽位的「按钮 + 弹层」入口）');
@@ -305,14 +309,24 @@ console.log('\nE. 真渲染（React 桩）：开合与弹窗内容');
   tree = render();
   ok(menuCount(tree) === 1, '★ E10 再次点击**不再收起**（点击只负责打开，避免指针停在入口上一点就关）');
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  /* ★ 稳定性（2026-10-17 审计 C 点名）：E11/E12/E15 原先固定 `wait(180)` 等 120ms 定时器、
+   * 余量只剩 50-60ms —— 多线并行跑测试（本机常有 3-4 条测试进程抢 CPU）时会偶发假红。
+   * 改为**轮询到条件成立**（上限 2.5s）：断言语义完全不变，只是不再赌调度延迟。
+   * E14 是"**不该**关"，方向相反 ⇒ 改用**更长的固定等待**（等得越久越能证明它确实不关）。 */
+  const settle = async (pred, ms = 2500, step = 20) => {
+    const t0 = Date.now();
+    for (;;) {
+      if (pred(render())) return true;
+      if (Date.now() - t0 > ms) return false;
+      await wait(step);
+    }
+  };
   entryOf(tree).props.onMouseLeave();
-  await wait(180);
+  ok(await settle((t) => menuCount(t) === 0), '★ E11 指针离开 ⇒ 120ms 后收起（官方同款延时可避免穿过缝隙时闪）');
   tree = render();
-  ok(menuCount(tree) === 0, '★ E11 指针离开 ⇒ 120ms 后收起（官方同款延时可避免穿过缝隙时闪）');
   entryOf(tree).props.onMouseEnter();
-  await wait(200);
+  ok(await settle((t) => menuCount(t) === 1), '★ E12 指针进入 ⇒ 150ms 后展开（无需点击）');
   tree = render();
-  ok(menuCount(tree) === 1, '★ E12 指针进入 ⇒ 150ms 后展开（无需点击）');
   /* 焦点离开子树（键盘 Tab 走开）也应关闭；焦点仍在子树内（如移进弹窗）时不关。 */
   const inside = chipOf(tree);
   const fakeRoot = { contains: (n) => n === inside };
@@ -323,13 +337,11 @@ console.log('\nE. 真渲染（React 桩）：开合与弹窗内容');
   /* ★ ZB-27aa：relatedTarget 为空 = 焦点落到 document.body（点击弹窗内不可聚焦元素的标准行为），
    * 绝不能据此关闭 —— 否则"点进程行要展开内容"会把整个面板关掉（用户实际报告）。 */
   entryOf(tree).props.onBlur({ currentTarget: fakeRoot, relatedTarget: null });
-  await wait(180);
+  await wait(400); /* 方向相反（应"不关"）⇒ 用更长等待证明它确实没关，别用轮询 */
   tree = render();
   ok(menuCount(tree) === 1, '★ E14 relatedTarget 为空（焦点落到 body，点弹窗内不可聚焦元素）⇒ **不关**（修「点进程行面板就关」）');
   entryOf(tree).props.onBlur({ currentTarget: fakeRoot, relatedTarget: outsideNode });
-  await wait(180);
-  tree = render();
-  ok(menuCount(tree) === 0, '★ E15 焦点明确移到子树外的元素 ⇒ 120ms 后关闭（保持"失焦关闭"语义）');
+  ok(await settle((t) => menuCount(t) === 0), '★ E15 焦点明确移到子树外的元素 ⇒ 120ms 后关闭（保持"失焦关闭"语义）');
 }
 
 /* ---------- ZB-60：入口降级链（DSH 0.2.1 兼容性加固）----------

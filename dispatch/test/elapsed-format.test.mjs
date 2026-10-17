@@ -8,6 +8,10 @@ import { strict as assert } from 'node:assert';
 
 const SRC = 'F:\\My Code\\dsh-dispatch\\dispatch\\client.js';
 const src = readFileSync(SRC, 'utf8');
+/* 反断言（"旧格式/旧实现已消失"）在**剥注释后**的源码上做 —— 否则源码里一句提到旧写法的
+ * 解释性注释就会假红。实现与 panel-style / toolview-card / shared-wire-liveness 逐字一致。 */
+const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+const code = stripComments(src);
 
 let pass = 0;
 const ok = (c, m) => { assert.ok(c, m); pass += 1; console.log(`  ✓ ${m}`); };
@@ -43,7 +47,7 @@ ok(fmtSec('abc') === '0时00分00秒', 'B5 非数字兜底为 0（不出现 NaN 
 ok(fmtSec('123') === '0时02分03秒', 'B6 数字字符串可被接受');
 
 console.log('\n只改展示层（数据契约不动）');
-ok(!/elapsedSec\s*=\s*fmtSec/.test(src), 'C1 不把格式化结果写回 elapsedSec（数据层仍是秒数）');
+ok(!/elapsedSec\s*=\s*fmtSec/.test(code), 'C1 不把格式化结果写回 elapsedSec（数据层仍是秒数；剥注释后判定）');
 ok(/h\('span', \{ className: 'dsp-dim' \}, fmtSec\(job\.elapsedSec\)\)/.test(src), 'C2 进程行耗时走 fmtSec（展示层）');
 ok(/fmtSec\(lk\.heldSec\)/.test(src), 'C3 文件锁持有时长同格式（同一函数，不产生两套风格）');
 {
@@ -54,7 +58,7 @@ ok(/fmtSec\(lk\.heldSec\)/.test(src), 'C3 文件锁持有时长同格式（同�
 }
 
 console.log('\n旧格式已清除');
-ok(!/toFixed\(1\)\}s`/.test(src), 'D1 渲染层不再有 `${Number(s).toFixed(1)}s` 旧格式');
-ok(!/`\$\{Number\(s\)\.toFixed\(1\)\}s`/.test(src), 'D2 确认旧 fmtSec 实现已移除');
+ok(!/toFixed\(1\)\}s`/.test(code), 'D1 渲染层不再有 `${Number(s).toFixed(1)}s` 旧格式（剥注释后判定）');
+ok(!/`\$\{Number\(s\)\.toFixed\(1\)\}s`/.test(code), 'D2 确认旧 fmtSec 实现已移除（剥注释后判定）');
 
 console.log(`\n===== ZB-13：${pass} PASS / 0 FAIL =====`);

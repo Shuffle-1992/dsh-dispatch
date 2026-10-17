@@ -75,7 +75,10 @@ test('声明不同 write 文件 ⇒ 可并行（这是本改造的收益）', as
   const d = createDispatcher({ runnerPath: FAKE_RUNNER, workRoot: newWorkRoot(), maxConcurrent: 4 });
   const a = d.dispatch({ kind: 'prompt', prompt: 'a', write: [FILE_A], tag: 'A' });
   const b = d.dispatch({ kind: 'prompt', prompt: 'b', write: [FILE_B], tag: 'B' });
-  await waitFor(() => d.get(a.id).state === 'running' && d.get(b.id).state === 'running', 'A/B 并行运行');
+  /* dispatch() 是**同步**拿锁+启动的 ⇒ 这里直接读状态/锁表（不再轮询 running 瞬时态：
+   * 慢机/负载抖动时轮询可能整个错过窗口，waitFor 会等到超时 = 偶发假红）。 */
+  assert.equal(d.get(a.id).state, 'running', 'A 已启动');
+  assert.equal(d.get(b.id).state, 'running', 'B 已启动（不同文件 ⇒ 无锁冲突）');
   const locks = d.listFileLocks();
   assert.equal(locks.length, 2, '两个文件各有一把锁');
   /* 与 snapshot 用例同理：listFileLocks 返回**归一化后**的路径（win32 上整体小写 + /）。 */
@@ -85,7 +88,14 @@ test('声明不同 write 文件 ⇒ 可并行（这是本改造的收益）', as
   const who = Object.fromEntries(locks.map((l) => [l.file, l.tag]));
   assert.equal(who[norm(FILE_A)], 'A', 'a.ts 由 A 持有');
   assert.equal(who[norm(FILE_B)], 'B', 'b.md 由 B 持有');
-  await Promise.all([waitTerminal(d, a.id), waitTerminal(d, b.id)]);
+  const [ra, rb] = await Promise.all([waitTerminal(d, a.id), waitTerminal(d, b.id)]);
+  /* "可并行"的稳定判据：两者执行区间重叠（原断言读的是瞬时 running 状态，语义相同但会错过窗口）。 */
+  assert.ok(ra.startedAt && rb.startedAt, 'A/B 都真正启动过（startedAt 已落库）');
+  assert.equal(
+    Date.parse(ra.startedAt) < Date.parse(rb.finishedAt) && Date.parse(rb.startedAt) < Date.parse(ra.finishedAt),
+    true,
+    `A/B 执行区间应重叠（不同文件集并行），实际 A=[${ra.startedAt},${ra.finishedAt}] B=[${rb.startedAt},${rb.finishedAt}]`,
+  );
   assert.equal(d.listFileLocks().length, 0, '任务结束后文件锁全部释放');
 });
 
@@ -94,8 +104,9 @@ test('声明同一 write 文件 ⇒ 后者排队（细粒度互斥仍成立）',
   const a = d.dispatch({ kind: 'prompt', prompt: 'a', write: [FILE_A], tag: 'A' });
   const b = d.dispatch({ kind: 'prompt', prompt: 'b', write: [FILE_A], tag: 'B' });
   assert.equal(d.get(b.id).state, 'queued', 'B 写同一文件 ⇒ 应排队');
+  /* A 释放后 B 才起步：等两者都落终态，再用**时间戳**断言原语义
+   * （原实现是轮询瞬时 running 状态，慢机上可能错过 B 的窗口）。 */
   const ja = await waitTerminal(d, a.id);
-  await waitFor(() => d.get(b.id).state === 'running', 'A 释放后 B 应起步');
   const jb = await waitTerminal(d, b.id);
   assert.ok(Date.parse(jb.startedAt) >= Date.parse(ja.finishedAt), 'B 必须在 A 释放文件锁之后才开始');
   assert.equal(d.listFileLocks().length, 0, '结束后文件锁清空');
@@ -162,7 +173,8 @@ test('lockBlockersFor：能报出被什么挡住（"为什么在排队"）', asy
 test('文件锁目录与快照：fileLocks 出现在 snapshot 里（UI 展示来源）', async () => {
   const d = createDispatcher({ runnerPath: FAKE_RUNNER, workRoot: newWorkRoot(), maxConcurrent: 4 });
   const a = d.dispatch({ kind: 'prompt', prompt: 'a', write: [FILE_A], tag: 'A' });
-  await waitFor(() => d.get(a.id).state === 'running', 'A running');
+  /* dispatch 同步拿锁+启动 ⇒ 立刻读快照（不再轮询 running 瞬时态）。 */
+  assert.equal(d.get(a.id).state, 'running', 'A 已启动并持文件锁');
   const snap = d.snapshot();
   assert.ok(Array.isArray(snap.fileLocks), 'snapshot.fileLocks 应是数组');
   assert.equal(snap.fileLocks.length, 1);

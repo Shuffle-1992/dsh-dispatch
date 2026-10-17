@@ -172,6 +172,17 @@ let { selects, buttons } = collect(tree);
 const toggleOf = (b) => b.find((x) => typeof x.props?.className === 'string' && x.props.className.includes('dsp-toggle')
   && String((x.children ?? []).join('')).includes('自动降级'));
 
+/* ★ 稳定性（2026-10-17 审计 C 点名）：本文件原先用固定 `setTimeout(20/30)` 等 effect 与写入，
+ * 首帧调度慢一点就假红（多线并行时尤甚）。改为**轮询到条件成立**（上限 2s），断言语义不变。 */
+const waitFor = async (pred, ms = 2000, step = 10) => {
+  const t0 = Date.now();
+  for (;;) {
+    if (pred()) return true;
+    if (Date.now() - t0 > ms) return false;
+    await new Promise((r) => setTimeout(r, step));
+  }
+};
+
 /* 首帧 effect 尚未跑 → fallback 初值 {enabled:false} ⇒ 只有开关、没有目标下拉。
  * （这一步同时证明"关闭时不显示"。） */
 ok(selects.length === 3, `关闭态只有「通道」分区的 3 个下拉（实际 ${selects.length}）`);
@@ -182,7 +193,7 @@ ok(!!dotOf(toggleOf(buttons)), '① 开关带指示灯（.dsp-dot）');
 ok(String(dotOf(toggleOf(buttons)).props.style.background).includes('state-error'), '① 关闭态指示灯用错误/危险状态色令牌（非字面色值）');
 
 /* ---------- ② effect 跑完（fallbackGet 返回 enabled=true）→ 重渲染 ---------- */
-await new Promise((r) => setTimeout(r, 30));
+await waitFor(() => collect(render(false)).selects.length === 6);
 tree = render(false);
 ({ selects, buttons } = collect(tree));
 const toggle = toggleOf(buttons);
@@ -253,9 +264,12 @@ ok(chanTh.every((l) => fbTh.includes(l)) && fbTh.every((l) => chanTh.includes(l)
 /* ---------- ④ 点开关 → 关闭（wire 收到 null） ---------- */
 const before = fallbackCalls.length;
 toggle.props.onClick();
-await new Promise((r) => setTimeout(r, 20));
+await waitFor(() => fallbackCalls.length === before + 1);
 ok(fallbackCalls.length === before + 1, '④ 点击开关触发一次 fallback 写入');
 ok(fallbackCalls[fallbackCalls.length - 1].chain === null, '★ 关闭时 wire 收到 chain:null（不是 ["null"] 的旧缺陷）');
+/* ⚠️ 这里必须**等状态更新落地**再断言：`fallbackSet` 是异步的，point ④ 的写入计数同步就 +1 了，
+ * 但组件把 enabled 变成 false 要等 promise 兑现后的那次 setState ⇒ 直接 render 会看到 6 个下拉。 */
+await waitFor(() => collect(render(false)).selects.length === 3);
 tree = render(false);
 ({ selects } = collect(tree));
 ok(selects.length === 3, `④ 关闭后目标下拉消失（回到 3 个，实际 ${selects.length}）`);
@@ -274,7 +288,7 @@ ok(/let demoTargets = \[\];/.test(src) && !/let demoChain/.test(src), '⑤ 旧�
   const modelSel = fbSelects[1];
   const n0 = fallbackCalls.length;
   modelSel.props.onChange({ target: { value: '' } }); // 选「顺序派发」（空值 = 不绑定模型）
-  await new Promise((r) => setTimeout(r, 20));
+  await waitFor(() => fallbackCalls.length === n0 + 1);
   ok(fallbackCalls.length === n0 + 1, '⑥ 改模型触发一次写入');
   const wrote = fallbackCalls[fallbackCalls.length - 1].chain;
   ok(wrote.model === null, '⑥ 模型选「（通道默认模型）」⇒ 写 null（交接时不传 --model）');

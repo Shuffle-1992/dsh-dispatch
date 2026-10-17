@@ -7,6 +7,11 @@ import { strict as assert } from 'node:assert';
 
 const SRC = 'F:\\My Code\\dsh-dispatch\\dispatch\\client.js';
 const src = readFileSync(SRC, 'utf8');
+/* 反断言（"旧东西不存在"）必须在**剥注释后**的源码上做：
+ * 否则有人在源码里写一句解释性注释提到旧标识符（如 "旧的 ctxPct 已删除"）就会假红。
+ * 与 panel-style / toolview-card / shared-wire-liveness 用同一个实现（`[^:]` 守卫保住 `https://`）。 */
+const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+const code = stripComments(src);
 
 let pass = 0;
 const ok = (c, m) => { assert.ok(c, m); pass += 1; console.log(`  ✓ ${m}`); };
@@ -60,7 +65,7 @@ ok(ctxLabel({}, fmtCtx) === '—', 'C5 两者都缺 → —');
 ok(ctxLabel(null, fmtCtx) === '—', 'C6 job 为 null → —');
 
 console.log('\n接线（源码断言）');
-ok(!/ctxPct/.test(src), 'D1 旧函数 ctxPct 已完全移除（无死代码）');
+ok(!/ctxPct/.test(code), 'D1 旧函数 ctxPct 已完全移除（无死代码；剥注释后判定，注释里提及不算）');
 ok(/const ctxLabel = \(j\) =>/.test(src), 'D2 新增 ctxLabel');
 /* 不用 `[^)]*` 这类脆弱写法：该行含模板串与 `??`，会让正则提前截断（本文件已踩一次）。
  * 改为分两段独立断言：① 进程行调用 ctxLabel；② title 里带 tokens 单位。 */

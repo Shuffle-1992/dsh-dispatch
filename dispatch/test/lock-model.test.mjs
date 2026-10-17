@@ -71,7 +71,8 @@ test('memory / both 已删除：传入应报错（旧调用方立刻暴露，不
 test('默认（不传 write）= 锁整仓库', async () => {
   const d = createDispatcher({ runnerPath: FAKE_RUNNER, workRoot: newWorkRoot(), maxConcurrent: 4 });
   const a = d.dispatch({ kind: 'prompt', prompt: 'a', tag: 'A' });
-  await waitFor(() => d.get(a.id).state === 'running', 'A running');
+  /* dispatch 同步拿锁+启动 ⇒ 直接断言（不再轮询 running 瞬时态：慢机上会错过窗口 → 假红）。 */
+  assert.equal(d.get(a.id).state, 'running', 'A 已启动');
   assert.equal(d.get(a.id).lock, 'repo', '默认应锁整仓库');
   assert.ok(existsSync(d.lockPaths.repo), 'repo.lock 应存在');
   assert.ok(!existsSync(join(d.workRoot, 'locks', 'memory.lock')), 'memory.lock 不应被创建');
@@ -84,11 +85,13 @@ test('★ 不同文件集可并发（用户要求 ④ 的核心）', async () =>
   const a = d.dispatch({ kind: 'prompt', prompt: 'a', write: [F('a.ts')], tag: 'A' });
   const b = d.dispatch({ kind: 'prompt', prompt: 'b', write: [F('b.ts')], tag: 'B' });
   const c = d.dispatch({ kind: 'prompt', prompt: 'c', write: [F('c.ts')], tag: 'C' });
-  await waitFor(() => [a, b, c].every((x) => d.get(x.id).state === 'running'), 'A/B/C 三路并行');
+  /* 三路都无锁冲突 ⇒ dispatch 同步全部启动；直接读状态与锁表（不轮询瞬时态）。 */
+  assert.deepEqual([a, b, c].map((x) => d.get(x.id).state), ['running', 'running', 'running'], 'A/B/C 三路并行');
   assert.equal(d.listFileLocks().length, 3, '三个文件各一把锁');
   const files = d.listFileLocks().map((l) => l.file).sort();
   assert.deepEqual(files, [F('a.ts'), F('b.ts'), F('c.ts')].map((s) => s.replace(/\\/g, '/').toLowerCase()).sort());
-  await Promise.all([a, b, c].map((x) => waitTerminal(d, x.id)));
+  const [ra, rb, rc] = await Promise.all([a, b, c].map((x) => waitTerminal(d, x.id)));
+  assert.ok(ra.startedAt && rb.startedAt && rc.startedAt, '三者都真正启动过（startedAt 已落库）');
   assert.equal(d.listFileLocks().length, 0, '全部释放');
 });
 
@@ -107,7 +110,9 @@ test('部分重叠的文件集：重叠者排队、不重叠者并行', async ()
   const a = d.dispatch({ kind: 'prompt', prompt: 'a', write: [F('a.ts'), F('b.ts')], tag: 'A' });
   const c = d.dispatch({ kind: 'prompt', prompt: 'c', write: [F('c.ts')], tag: 'C' }); // 无交集
   const e = d.dispatch({ kind: 'prompt', prompt: 'e', write: [F('a.ts')], tag: 'E' }); // 与 A 重叠
-  await waitFor(() => d.get(a.id).state === 'running' && d.get(c.id).state === 'running', 'A/C 并行');
+  /* dispatch 同步判定：A 拿 {a,b}、C 拿 {c} 都能起；E 与 A 重叠 ⇒ 当场排队。 */
+  assert.equal(d.get(a.id).state, 'running', 'A 已启动');
+  assert.equal(d.get(c.id).state, 'running', 'C 与 A 无交集 ⇒ 直接跑（并行）');
   assert.equal(d.get(e.id).state, 'queued', 'E 与 A 重叠 ⇒ 排队');
   await Promise.all([waitTerminal(d, a.id), waitTerminal(d, c.id), waitTerminal(d, e.id)]);
   assert.equal(d.listFileLocks().length, 0, '全部释放');
@@ -117,7 +122,9 @@ test("lock='none'：明确不取锁 ⇒ 与任何任务都不互斥", async () =
   const d = createDispatcher({ runnerPath: FAKE_RUNNER, workRoot: newWorkRoot(), maxConcurrent: 4 });
   const a = d.dispatch({ kind: 'prompt', prompt: 'a', tag: 'A' });                    // 默认锁整仓库
   const b = d.dispatch({ kind: 'prompt', prompt: 'b', lock: 'none', tag: 'B' });      // 不取锁
-  await waitFor(() => d.get(a.id).state === 'running' && d.get(b.id).state === 'running', 'A/B 并行');
+  /* 两者都应同步启动（none 不参与互斥）。 */
+  assert.equal(d.get(a.id).state, 'running', 'A 已启动（整仓库锁）');
+  assert.equal(d.get(b.id).state, 'running', 'B 不取锁 ⇒ 与 A 并行');
   assert.equal(d.get(b.id).lock, '', `none 不应持锁（实际 "${d.get(b.id).lock}"）`);
   await Promise.all([waitTerminal(d, a.id), waitTerminal(d, b.id)]);
 });
@@ -125,7 +132,7 @@ test("lock='none'：明确不取锁 ⇒ 与任何任务都不互斥", async () =
 test('锁文件里能看到"哪个进程锁哪些文件"（用户要求 ②）', async () => {
   const d = createDispatcher({ runnerPath: FAKE_RUNNER, workRoot: newWorkRoot(), maxConcurrent: 4 });
   const a = d.dispatch({ kind: 'prompt', prompt: 'a', write: [F('a.ts'), F('b.ts')], tag: 'job-A' });
-  await waitFor(() => d.get(a.id).state === 'running', 'A running');
+  assert.equal(d.get(a.id).state, 'running', 'A 已启动并持文件锁');
   const locks = d.listFileLocks();
   assert.equal(locks.length, 2, '两个文件两把锁');
   for (const lk of locks) {

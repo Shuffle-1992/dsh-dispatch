@@ -195,6 +195,11 @@ test('C. wire：fallback 动作接受 对象/数组/null；face.setFallbackChain
 /* ---------- D. client.js：开关形态 + 关闭不显示 + 与「通道」分区同形 ---------- */
 test('D. ★ client.js：降级开关带指示灯（.dsp-dot）、aria-pressed；关闭时不渲染目标三下拉；档位走中文标签', () => {
   const src = readFileSync(join(HERE, '..', 'client.js'), 'utf8');
+  /* 反断言（"旧形态/旧文案键已彻底移除"）必须在**剥注释后**的源码上做：
+   * 否则源码里一句提到旧键名的解释性注释就会假红（本文件曾被这种注释坑过）。
+   * 实现与 panel-style / toolview-card / shared-wire-liveness 逐字一致。 */
+  const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  const code = stripComments(src);
   /* 开关：按钮 + 指示灯 + aria-pressed（与标题栏派发开关同一套视觉语言） */
   assert.ok(/className: 'dsp-switch dsp-toggle'/.test(src), '★ 降级开关是 dsp-switch 按钮（与派发开关同类）');
   assert.ok(/h\('span', \{ className: 'dsp-dot', style: \{ background: fbEnabled \? T\.stDone : T\.danger \} \}\)/.test(src),
@@ -216,13 +221,13 @@ test('D. ★ client.js：降级开关带指示灯（.dsp-dot）、aria-pressed�
     '★ 降级模型首项 = （通道默认模型），与上面「通道」分区同一个文案键');
   assert.ok(/h\('option', \{ value: 'agent' \}, t\('thinkingAgent'\)\)/.test(src),
     '★ 降级档位首项 = Agent决定（按任务判断），与上面「通道」分区同一个文案键');
-  assert.ok(!/fallbackKeepModel|fallbackKeepThinking/.test(src),
-    '★ 「沿用原任务…」文案键已彻底移除（用户明确要求）');
+  assert.ok(!/fallbackKeepModel|fallbackKeepThinking/.test(code),
+    '★ 「沿用原任务…」文案键已彻底移除（用户明确要求；剥注释后判定）');
   assert.ok(/disabled: busy \|\| !fbSel \|\| !fbSel\.enabled/.test(src),
     '★ 降级模型下拉的禁用判据与上面一致（跟随所选通道是否可用）');
-  assert.ok(!/fallbackPh|fallbackSave|fallbackOffBtn|fallbackConfirm2/.test(src),
-    '★ 旧的「逗号输入 + 二次确认按钮」形态已彻底移除（不留死代码）');
-  assert.ok(!/fallbackEmptyErr/.test(src) && !/fallbackSaved/.test(src), '旧文案键不再被引用');
+  assert.ok(!/fallbackPh|fallbackSave|fallbackOffBtn|fallbackConfirm2/.test(code),
+    '★ 旧的「逗号输入 + 二次确认按钮」形态已彻底移除（不留死代码；剥注释后判定）');
+  assert.ok(!/fallbackEmptyErr/.test(code) && !/fallbackSaved/.test(code), '旧文案键不再被引用（剥注释后判定）');
   /* 档位中文标签仍走 thinkingLabel（ZB-29e 不回退） */
   assert.ok(/fbLevels\.map\(\(lv\) => h\('option', \{ key: lv, value: lv \}, thinkingLabel\(lv\)\)\)/.test(src),
     '★ 降级档位下拉：value 仍原始字符串，label 中文');
