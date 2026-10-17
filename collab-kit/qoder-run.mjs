@@ -118,6 +118,9 @@ export function parseArgs(argv) {
       /* --auto：**默认关**，只有 core 显式传才放行（硬约束「不默认开」）。 */
       case '--auto': opt.auto = true; break;
       case '--list-models': case '--list-providers': opt.listModels = true; break;
+      /* ZB-52：与 opencode-run 的 `--with-variants` 同构 —— 探测模式下**追加**打印档位表行。
+       * 默认不打（保持 stdout 只有裸模型名）。 */
+      case '--with-efforts': opt.withEfforts = true; break;
       case '--version': case '-v': opt.version = true; break;
       case '--help': case '-h': opt.help = true; break;
       /* 明确不支持 ⇒ fail-fast（绝不静默忽略，与 opencode-run 同纪律）。 */
@@ -154,6 +157,11 @@ export function parseArgs(argv) {
     }
   }
   if (unknown.length) throw new CliError(`未知参数: ${unknown.join(', ')}（用法见 ${PREFIX} --help）`);
+  /* ZB-52：`--with-efforts` 只在探测模式下有意义（单独给会让人以为带上了档位信息）⇒ fail-fast。
+   * 与 opencode-run 的 `--with-variants` 同纪律。 */
+  if (opt.withEfforts && !opt.listModels) {
+    throw new CliError('--with-efforts 仅在 --list-models / --list-providers 下有效');
+  }
   return opt;
 }
 
@@ -411,8 +419,49 @@ function probe(cli, args, timeoutMs = 20000) {
   }
 }
 
+/**
+ * ZB-52：探测 Qoder 的**思考强度档位**（`--reasoning-effort` 的合法值）。
+ *
+ * 为什么这么实现（**实测依据**，别改成"抄一张表"）：
+ *   · CLI **没有**任何只读出口能列出逐模型支持的档位（`--list-models` 只给模型名、
+ *     `status -o json` 只给账号、`config get` 不暴露模型目录）—— 队友实测确认。
+ *   · 但把**非法值**喂给 CLI，它会用自己的校验器报出**权威合法集合**：
+ *       `--reasoning-effort zzz_bogus --list-models` ⇒
+ *       `Valid values are: auto, none, low, medium, high, xhigh, max, ultracode.`
+ *   · 而且 `--list-models` 是**只读**的（不执行任务、不写文件）⇒ 可以用它安全地问校验器。
+ *
+ * 故本函数**不写死**档位枚举：
+ *   ① 先发一个必然非法的哨兵值，让 CLI 报出合法集合（探测不到就返回 null，**绝不编造**）；
+ *   ② 再逐个候选值实测是否被接受（exit=0）—— 防"校验器说合法但实际不支持"。
+ *
+ * 返回 `{ levels: string[], evidence: {...} }` 或 `null`（探测失败：调用方**不打**该行）。
+ *
+ * ⚠️ 已知边界（如实标注，不假装完整）：逐**模型**的档位子集拿不到 —— CLI 只在真正开会话时
+ * 才判定"模型×档位"匹配，只读探测拿不到。故这里给的是**引擎级合法集合**，不是逐模型表。
+ */
+const EFFORT_SENTINEL = 'zzz_zb52_bogus';
+
+function probeEfforts(cli) {
+  /* ① 用哨兵值逼出权威合法集合。**必须带 --list-models**（只读、不执行任务）。 */
+  const sentinel = probe(cli, ['--reasoning-effort', EFFORT_SENTINEL, '--list-models'], 25000);
+  const text = `${sentinel.stdout}\n${sentinel.stderr}`;
+  const m = text.match(/Valid values are:\s*([^\n.]+)/i);
+  if (!m) return null; // 探测不到 ⇒ null（调用方不打该行，绝不自造枚举）
+  const levels = m[1].split(',').map((s) => s.trim()).filter((s) => /^[A-Za-z][A-Za-z0-9_-]*$/.test(s));
+  if (levels.length === 0) return null;
+
+  /* ② 逐个实测是否真的被接受（只接受的才算），并发会打爆 CLI ⇒ **顺序**跑。 */
+  const accepted = [];
+  const rejected = [];
+  for (const lv of levels) {
+    const r = probe(cli, ['--reasoning-effort', lv, '--list-models'], 25000);
+    if (r.code === 0) accepted.push(lv); else rejected.push(lv);
+  }
+  return { levels: accepted, evidence: { declared: levels, rejected, source: 'valid-values-probe' } };
+}
+
 /** `--list-models`：只吐**裸模型名**（core 会加 `qoder/` 前缀）。不写死枚举。 */
-function listModels(cli) {
+function listModels(cli, opt = {}) {
   const r = probe(cli, ['--list-models'], 25000);
   const text = `${r.stdout}\n${r.stderr}`;
   if (/not logged in/i.test(text)) {
@@ -426,6 +475,21 @@ function listModels(cli) {
   const lines = String(r.stdout).split('\n').map((s) => s.trim())
     .filter((s) => s && !/^[-=]+$/.test(s) && !/^(model|models|id|name)\b/i.test(s));
   for (const m of lines) out(m); // 裸模型名（每行一个），与 opencode-run 的 --list-models 同契约
+
+  /* ZB-52：`--with-efforts` 时追加档位表行 —— 格式与 opencode-run 的 `variants` 同族，
+   * core 的 `reasoning-efforts` 关键词据此解析出通道的 `thinkingLevels`（面板「思考强度」下拉）。
+   * ⚠️ 探测不到就**不打**（绝不编造档位）；给的是**引擎级**合法集合（逐模型子集拿不到，见 probeEfforts 注释）。 */
+  if (opt.withEfforts) {
+    const eff = probeEfforts(cli);
+    if (eff && eff.levels.length) {
+      for (const m of lines) out(`${PREFIX} reasoning-efforts ${m}=${eff.levels.join(',')}`);
+      if (eff.evidence.rejected.length) {
+        note(`档位探测：CLI 声明 ${eff.evidence.declared.length} 个，实测被拒 ${eff.evidence.rejected.length} 个（${eff.evidence.rejected.join(',')}）——已剔除`);
+      }
+    } else {
+      note('档位探测失败（拿不到权威合法集合）：本轮不输出 reasoning-efforts 行（不编造档位）');
+    }
+  }
   return 0;
 }
 
@@ -571,7 +635,14 @@ const HELP = `${PREFIX} Qoder 执行器（第三个引擎）
   qoder-run --task <任务包绝对路径> [同上]
   qoder-run --target <目标描述> [同上]
   qoder-run --list-models      # 只读：列出可用模型（裸名，每行一个）
+  qoder-run --list-models --with-efforts   # 只读：追加「reasoning-efforts 模型=档位,档位」行
   qoder-run --version          # 只读：打印 CLI 版本
+
+思考强度（--reasoning-effort）：
+  合法值由 CLI 自己声明，本执行器**探测获取、不写死**（见 probeEfforts 注释）：
+  先发一个非法哨兵值让 CLI 报出权威集合，再逐个实测是否被接受。
+  ⚠️ 逐**模型**的子集拿不到（CLI 只在真正开会话时才判定"模型×档位"），
+     故 --with-efforts 给的是**引擎级**合法集合；档位与模型不匹配时由 CLI 自行报错。
 
 权限（默认已是最优，无需关心）：
   默认 --permission-mode accept_edits + --add-dir <cwd>：无头下可修改工作目录内文件。
@@ -609,7 +680,7 @@ async function main(argv) {
     process.stdout.write(`${v ? v[1] : (disc.version ?? '(unknown)')}\n`);
     return 0;
   }
-  if (opt.listModels) return listModels(disc.cli);
+  if (opt.listModels) return listModels(disc.cli, opt);
 
   if (!opt.kind) {
     process.stderr.write(`${PREFIX} 必须给出 --task / --prompt / --target 之一\n`);

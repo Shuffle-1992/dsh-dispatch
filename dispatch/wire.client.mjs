@@ -113,6 +113,10 @@ export const TYPERT_REMOTE = {
     ['channels', [], 'channels(): Promise<{channels, warnings}>', [], '{channels, warnings}（5s 缓存）'],
     ['channel', [], 'channel(): Promise<channel>', [], '当前通道数据对象'],
     ['fallbackChain', [], 'fallbackChain(): Promise<{enabled, chain}>', [], '{enabled, chain}'],
+    /* ZB-52：顺序派发（面板入口）。读回 {enabled, order:{zcode,opencode,qoder}, sequentialCount}；
+     * 写接受 `{enabled?}` 或 `{order?}`（**互不覆盖** —— 面板开关与排序列表各自保存）。 */
+    ['sequentialGet', [], 'sequentialGet(): Promise<{enabled, order, sequentialCount}>', [], '{enabled, order:{zcode:[],opencode:[],qoder:[]}, sequentialCount}'],
+    ['sequentialSet', ['patch'], 'sequentialSet(patch): Promise<{enabled, order, sequentialCount}|{ok:false, error}>', ['patch'], '{enabled, order, sequentialCount}（patch={enabled?}|{order?}）'],
   ].map(([method, parameters, , optionals]) => ({
     id: `dsh-dispatch#${FACE_NAME}/${method}`,
     service: FACE_NAME,

@@ -42,10 +42,12 @@ globalThis.localStorage = { getItem: (k) => (ls.has(k) ? ls.get(k) : null), setI
  * 它把方法名透传到 ext[name] —— 故这里直接给 channels/channel/fallback 三个方法。 */
 const fallbackCalls = [];
 const CHANNELS = [
-  { id: 'plan', name: '默认套餐', enabled: true, reason: null, models: ['GLM-5.3', 'GLM-5.3-Flash'], thinkingLevels: ['disabled', 'enabled'] },
+  /* ⚠️ ZB-52：面板现在**按选中模型过滤档位**（用户要求「思考强度没有按模型过滤好」）——
+   * 当前选中项是 `plan::GLM-5.3` ⇒ 上方「思考强度」取的是**该通道**的档位集，不再是引擎并集。
+   * 故这里给 `plan` 四档，让"档位中文标签"与"降级区两侧一致"两条断言有可验内容。 */
+  { id: 'plan', name: '默认套餐', enabled: true, reason: null, models: ['GLM-5.3', 'GLM-5.3-Flash'], thinkingLevels: ['disabled', 'low', 'high', 'max'] },
   /* ZB-51：ZCode 白名单**只留 plan 与免费额度**，故 fixture 必须用这两条的真实形状
-   * （原先用的 `personal`/`builtin:*` 已被白名单剔除 ⇒ 折叠后两侧选项集不一致，测试失去意义）。
-   * 免费额度这条带四档，用于验证「档位中文标签」与「降级区选项与上面对齐」。 */
+   * （原先用的 `personal`/`builtin:*` 已被白名单剔除 ⇒ 折叠后两侧选项集不一致，测试失去意义）。 */
   { id: 'account:bigmodel-start-plan', name: '免费额度（Start Plan）', enabled: true, reason: null, models: ['GLM-5.3', 'GLM-5.3-Flash'], thinkingLevels: ['disabled', 'low', 'high', 'max'] },
   /* ZB-33b：**不可用通道**（真实形状：runner 会给出 enabled=false + reason）——
    * 用于断言"下拉里不再列出不可用项"。它现在**不在白名单内**（core 会剔除），
@@ -231,7 +233,11 @@ ok(JSON.stringify(fbChanSel) === JSON.stringify(chanSel),
   `★ 降级「通道」下拉与上方逐字相同（实际 ${JSON.stringify(fbChanSel)}）`);
 const chanModel = selects.slice(1, 2).flatMap(optLabels);
 const fbModel = selects.slice(4, 5).flatMap(optLabels);
-ok(chanModel[0] === 'Agent决定', `★ 上面「模型」首项 = Agent决定（实际 ${JSON.stringify(chanModel[0])}）`);
+/* ZB-52（用户要求）：首项由「Agent决定」**改名**为「顺序派发」——
+ * 语义：不绑定模型（值 ''）⇒ 按顺序列表从上到下尝试，报错换下一个。
+ * ⚠️ 开关未开时该选项**置灰**并追加「（需先开启）」（如实告知怎么生效，不静默误导）。 */
+ok(/^顺序派发/.test(chanModel[0] ?? ''),
+  `★ 上面「模型」首项 = 顺序派发（实际 ${JSON.stringify(chanModel[0])}）`);
 ok(fbModel[0] === '（通道默认模型）', `★ 降级「模型」首项 = 通道默认模型（实际 ${JSON.stringify(fbModel[0])}）`);
 ok(JSON.stringify(chanModel.slice(1)) === JSON.stringify(fbModel.slice(1)),
   `★ 除首项外，模型项两侧一致（上 ${JSON.stringify(chanModel.slice(1))} / 降 ${JSON.stringify(fbModel.slice(1))}）`);

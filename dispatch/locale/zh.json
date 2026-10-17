@@ -194,6 +194,21 @@
     "zcRouteFree": "Start Plan(免费)",
     "zcFreeSuffix": "免费",
     "modelAgentDecide": "Agent决定",
-    "modelAgentDecideHint": "未指定模型：由派发 Agent 按任务自行选择（它可换成任意可用模型）"
+    "modelAgentDecideHint": "未指定模型：由派发 Agent 按任务自行选择（它可换成任意可用模型）",
+    "seqTitle": "顺序派发",
+    "seqEnableTitle": "顺序派发：点击开启/关闭。开启后任务报错（额度耗尽、限流暂停等）就按下面列表从上到下换模型重跑；列表试完仍失败才报错（之后才轮到「自动降级」）",
+    "seqHint": "按下面列表从上到下尝试：上一个报错就换下一个（额度耗尽 / 限流暂停同样换），全试完仍失败才报错 —— 之后才轮到「自动降级」。列表只作用于当前引擎（ZCode / OpenCode / Qoder 各自一份）。注意：换模型 = 新开会话，前面已完成的文件改动会保留、模型会被告知接着做。每一行右边的「档位」可单独设置该模型的思考强度（「默认」= 用引擎默认档位）—— 顺序派发模式下全局档位不可改：各模型支持的档位不同。",
+    "seqHintShort": "顺序派发已开启：未指定模型 ⇒ 报错时按「顺序派发」列表从上到下换模型",
+    "seqOrderLabel": "尝试顺序",
+    "seqUp": "上移",
+    "seqDown": "下移",
+    "seqEmpty": "（该引擎当前没有可选模型；列表为空时顺序派发不生效）",
+    "seqUnavailable": "（当前不可用）",
+    "seqOfflineHint": "未连接宿主：顺序设置存在宿主工作目录，连接后才可读写",
+    "seqNeedEnable": "需先开启",
+    "seqThinkingDefault": "设置默认",
+    "seqThinkingDefaultHint": "顺序派发模式：档位由顺序列表里**逐个模型**设置（模型不同、支持的档位也不同），此处不可改",
+    "seqLevelLabel": "档位",
+    "seqLevelDefault": "默认"
   }
 }

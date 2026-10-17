@@ -865,6 +865,30 @@ export function createRemoteFace(dispatcher, config = {}) {
     /* Z12：开关读/写（读=readSwitch 数据对象；写=透传 switch 动作信封）。 */
     switchGet: () => readSwitch(switchFileOf(config)),
     switchSet: (next) => viaAction('switch', next && typeof next === 'object' ? next : {}),
+
+    /* ── ZB-52：顺序派发（面板入口）──
+     * 读：{enabled, order:{zcode:[],opencode:[],qoder:[]}, sequentialCount}
+     * 写：只传 `enabled` 或只传 `order`（**互不覆盖** —— 面板两个控件各自保存）。
+     * 与 `setFallbackChain` 同范式：直调 core，不经 action 信封（少一层拆包歧义）。 */
+    async sequentialGet() {
+      if (!dispatcher) return { ok: false, error: NOT_READY };
+      try {
+        return { ok: true, ...dispatcher.getSequential() };
+      } catch (e) {
+        return { ok: false, error: e?.message ?? String(e) };
+      }
+    },
+    async sequentialSet(patch) {
+      if (!dispatcher) return { ok: false, error: NOT_READY };
+      if (!patch || typeof patch !== 'object') {
+        return { ok: false, error: 'sequentialSet 需要对象 {enabled?} 或 {order?}' };
+      }
+      try {
+        return { ok: true, ...dispatcher.setSequential(patch) };
+      } catch (e) {
+        return { ok: false, error: e?.message ?? String(e) };
+      }
+    },
   };
 
   /**
@@ -905,6 +929,15 @@ export function createRemoteFace(dispatcher, config = {}) {
     switchGet() { return impl.switchGet(); }
     /** switchSet(next) → { ok:true, switch } | { ok:false, error }；next={enabled:boolean, by?, note?}。 */
     switchSet(next) { return impl.switchSet(next); }
+    /* ── ZB-52：顺序派发 ──
+     * ⚠️ 这两个委托**必须显式写在这里**：光把名字加进 REMOTE_METHODS / FACE_METHOD_TABLE 不够 ——
+     * 客户端 `resolveRemote().call('sequentialGet')` 找的是**实例/原型上的方法**，
+     * 缺了会抛「远端面缺少方法 sequentialGet()」⇒ 面板静默降级成"关闭"（live 下读写都不生效）。
+     * 这一处是队友用运行时反射抓出来的（静态看方法表是齐的，容易漏）。 */
+    /** → { enabled, order:{zcode,opencode,qoder}, sequentialCount }。 */
+    sequentialGet() { return impl.sequentialGet(); }
+    /** sequentialSet(patch) → 同上 | { ok:false, error }；patch={enabled?} 或 {order?}。 */
+    sequentialSet(patch) { return impl.sequentialSet(patch); }
   }
 
   // 方法标记写原型（协议 mark() 的落盘形状：版本化冻结描述符，键跨副本稳定）；
@@ -924,7 +957,7 @@ export function createRemoteFace(dispatcher, config = {}) {
 }
 
 /** face 方法面（标记/描述符/文档共用这一份表）：[方法名, 参数名数组, 签名, 结果说明]。 */
-const REMOTE_METHODS = ['snapshot', 'dispatch', 'kill', 'dismiss', 'retry', 'tail', 'setChannel', 'setFallbackChain', 'switchGet', 'switchSet', 'quota', 'quotaPlan', 'channels', 'channel', 'fallbackChain'];
+const REMOTE_METHODS = ['snapshot', 'dispatch', 'kill', 'dismiss', 'retry', 'tail', 'setChannel', 'setFallbackChain', 'switchGet', 'switchSet', 'quota', 'quotaPlan', 'channels', 'channel', 'fallbackChain', 'sequentialGet', 'sequentialSet'];
 
 const FACE_METHOD_TABLE = [
   ['snapshot', [], 'snapshot(): Promise<snapshot>', '快照数据对象 {generatedAt, counts, locks, queue, jobs[], channels[], workRoot, maxConcurrent}', []],
@@ -942,6 +975,9 @@ const FACE_METHOD_TABLE = [
   ['channels', [], 'channels(): Promise<{channels, warnings}>', '{channels, warnings}（5s 缓存）', []],
   ['channel', [], 'channel(): Promise<channel>', '当前通道数据对象', []],
   ['fallbackChain', [], 'fallbackChain(): Promise<{enabled, chain}>', '{enabled, chain}', []],
+  /* ZB-52：顺序派发（面板入口）。`sequentialSet` 接受 {enabled?} 或 {order?}（互不覆盖）。 */
+  ['sequentialGet', [], 'sequentialGet(): Promise<{enabled, order, sequentialCount}>', '{enabled, order:{zcode:[],opencode:[],qoder:[]}, sequentialCount}', []],
+  ['sequentialSet', ['patch'], 'sequentialSet(patch): Promise<{enabled, order, sequentialCount}|{ok:false, error}>', '{enabled, order, sequentialCount}（patch={enabled?}|{order?}）', ['patch']],
 ];
 
 /**

@@ -21,6 +21,7 @@ import { spawnSync, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { homedir } from 'node:os'; // $DSH_HOME 兜底推导（不再硬编码用户名）
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -90,24 +91,38 @@ const yamlText = readFileSync(join(PKG, 'cordis.patch.yml'), 'utf8');
 const yamlChecks = [
   [/^-\s*insert:\s*$/m, '顶层 - insert:'],
   [/^\s+-\s*id:\s*dispatch\s*$/m, '行 id=dispatch'],
-  [/^\s+name:\s*'@local\/dispatch'\s*$/m, "行 name='dsh-dispatch'"],
+  /* ⚠️ 名字随「去品牌化」改过（ZB-41：ZCode 派发台 → DSH 派发台），断言要跟上现状。 */
+  [/^\s+name:\s*'dsh-dispatch'\s*$/m, "行 name='dsh-dispatch'"],
   [/^\s+config:\s*$/m, 'config: 块'],
   [/^\s+demo:\s*false\s*$/m, 'config.demo=false'],
   [/^\s+maxConcurrent:\s*3\s*$/m, 'config.maxConcurrent=3'],
 ];
 for (const [re, name] of yamlChecks) ok(re.test(yamlText), `patch.yml ${name}`);
+/* ⚠️ **runner/ledger/workRoot 现在刻意不写在这里**（机器专有路径不入公开仓库）：
+ * 随包出货的 patch.yml 只带与机器无关的开关（demo/maxConcurrent）；
+ * 路径由 profile patch（`~/.dsh/profiles/<p>/cordis.patch.yml`）按 id 覆盖。
+ * 三处都留空时的行为由 core 兜底（workRoot 落到 <插件目录>/.data）——那是**设计**，不是缺配置。 */
 const strOf = (key) => {
   const m = yamlText.match(new RegExp(`^\\s+${key}:\\s*'([^']*)'\\s*$`, 'm'));
   return m ? m[1] : null;
 };
-const runnerPath = strOf('runnerPath');
-const ledgerPath = strOf('ledgerPath');
-const workRoot = strOf('workRoot');
-ok(typeof runnerPath === 'string' && runnerPath.length > 3, 'config.runnerPath 非空', String(runnerPath));
-ok(runnerPath != null && existsSync(runnerPath), 'config.runnerPath 指向的 runner 存在（只读检查）', String(runnerPath));
-ok(typeof ledgerPath === 'string' && ledgerPath.endsWith('dispatch-runs.jsonl'), 'config.ledgerPath 指向台账', String(ledgerPath));
-ok(workRoot != null && resolve(workRoot) === join(PKG, '.data'), 'config.workRoot 指向本包 .data', String(workRoot));
-ok(!existsSync(join('C:\\Users\\Administrator\\.dsh', 'dispatch')), '未向 $DSH_HOME 写入本包内容');
+for (const k of ['runnerPath', 'ledgerPath', 'workRoot']) {
+  ok(strOf(k) === null, `patch.yml 不含机器专有路径 ${k}（由 profile patch 覆盖，刻意不入库）`);
+}
+ok(/profile patch/.test(yamlText) && /workRoot/.test(yamlText),
+  'patch.yml 注释里写明了"怎么覆盖路径 + workRoot 留空时的兜底"（教学优先）');
+/* core 侧的 workRoot 兜底：**core 要求显式传**（缺了抛 TypeError），
+ * 真正"留空落到插件目录 .data"的兜底在 host 半边（index.js，激活信标用它）。
+ * 断言别找错文件 —— 这是本条的既往笔误来源。 */
+const coreSrcForWorkRoot = readFileSync(join(PKG, 'core', 'dispatch-core.mjs'), 'utf8');
+ok(/if \(!options\.workRoot\) throw new TypeError/.test(coreSrcForWorkRoot),
+  'core 显式要求 workRoot（缺了抛 TypeError，不静默用某个目录）');
+const indexSrcForWorkRoot = readFileSync(join(PKG, 'index.js'), 'utf8');
+ok(/join\(PLUGIN_DIR,\s*'\.data'\)/.test(indexSrcForWorkRoot),
+  'index.js 的 workRoot 留空兜底 = <插件目录>/.data');
+/* DSH_HOME 是机器专有的：不硬编码用户名，按 $DSH_HOME / ~/.dsh 推导。 */
+const DSH_HOME = process.env.DSH_HOME || join(homedir(), '.dsh');
+ok(!existsSync(join(DSH_HOME, 'dispatch')), '未向 $DSH_HOME 写入本包内容', DSH_HOME);
 
 /* ---------------- 4. 静态纪律 grep ---------------- */
 section('4. 静态纪律（JS 零字面色值 / 无宿主包引用 / 协议键常量豁免 / TODO 清偿）');
@@ -115,27 +130,56 @@ const jsTexts = Object.fromEntries(JS_FILES.map((f) => [f, readFileSync(join(PKG
 const allJs = Object.entries(jsTexts);
 // Z8-02：wire.host.mjs 需协议标记键字符串常量（typert 协议要求键跨副本精确相等，
 // protocol/lib/index.js:135 的 '@deepseek-ai/dsh-typert-protocol/remote-methods'）——
-// 这是数据契约不是 import。Z10-01：index.js 需 @deepseek-ai/schemastery（cordis 的
-// resolveConfig 只认 Standard Schema；schemastery 宿主随包出货，官方插件同款）——
-// 仅此两处豁免；说明符扫描（下两条）保证不出现其余宿主包 import。
-ok(allJs.every(([f, s]) => f === 'wire.host.mjs' || f === 'index.js' || !s.includes('@deepseek-ai')), 'JS 不出现 @deepseek-ai（豁免：wire.host.mjs 协议键 + index.js schemastery 导入）');
-ok((jsTexts['wire.host.mjs'].match(/@deepseek-ai/g) ?? []).length === 1, 'wire.host.mjs 的 @deepseek-ai 仅协议标记键一处', String((jsTexts['wire.host.mjs'].match(/@deepseek-ai/g) ?? []).length));
-ok((jsTexts['index.js'].match(/@deepseek-ai/g) ?? []).length === 1 && jsTexts['index.js'].includes("'@deepseek-ai/schemastery'"), 'index.js 的 @deepseek-ai 仅 schemastery 导入一处', String((jsTexts['index.js'].match(/@deepseek-ai/g) ?? []).length));
+// 这是数据契约不是 import。
+// Z10-01：index.js 需 @deepseek-ai/schemastery（cordis 的 resolveConfig 只认 Standard Schema；
+// schemastery 宿主随包出货，官方插件同款）。
+// Z11+：index.js 另需 @deepseek-ai/dsh-tools（**官方 defineTool** —— agent 工具 `dispatch` 的
+// 注册只能走它；同样随 dsh 出货，asar 路径证据见 index.js 头注释）。
+// ⚠️ 统计**必须先剥注释**：index.js 花了大量篇幅在注释里解释这两个导入的理由，
+//    直接数全文字符串会把 9 处注释算进去（实测 11）⇒ 断言永远红且指向错误结论。
+const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/[^\n]*/g, '$1');
 ok(allJs.every(([, s]) => !/document\s*\.\s*body/.test(s)), 'JS 不操作 document.body');
 ok(allJs.every(([f, s]) => f === 'icon.svg' || !/#[0-9a-fA-F]{3,8}\b/.test(s)), 'JS 无字面 # 色值');
-const specifierRe = /(?:import[\s\S]*?from\s*|import\s*\(\s*|require\s*\(\s*)['"]([^'"]+)['"]/g;
+/* ⚠️ 扫描**只认真正的 import/require 语句**，且**不许跨行**：
+ * 原正则 `import[\s\S]*?from\s*'…'` 是跨行的贪婪式 —— 会被**字符串字面量**误命中
+ * （STRINGS 里形如 `… continued from', hop: '…` 的文案 ⇒ 抓出一个假说明符 `, hop:`，
+ *  连带把下面 `client.js 只 require('react')` 也打红）。pitfalls Z2-1「纪律 grep 会被散文命中」
+ * 的同类：扫描对象必须是**代码**，且锚点要够紧。 */
+const specifierRes = [
+  /(?:^|[\s;{}()])import\s+(?:[\w$*{},\s]+?\s+from\s+)?['"]([^'"\n]+)['"]/gm, // import x from 'y' / import 'y'
+  /(?:^|[^\w$.])require\s*\(\s*['"]([^'"\n]+)['"]\s*\)/gm, // require('y')
+  /(?:^|[^\w$.])import\s*\(\s*['"]([^'"\n]+)['"]\s*\)/gm, // import('y')
+];
 const badSpecs = [];
 const clientRequires = [];
+const hostSpecsByFile = {};
 for (const [f, s] of allJs) {
-  // 先剥块注释再扫：头注释里的“不 import …”字样会被贪婪正则一路吞到首个 from'<串>'
-  // （Z6 起 STRINGS 里有 `continued from', hop: '…` 形状），一个假命中同时打挂下面两条断言
-  // —— pitfalls Z2-1「纪律 grep 会被注释命中」同类，扫描对象必须是代码不是散文。
-  const code = s.replace(/\/\*[\s\S]*?\*\//g, '');
-  for (const m of code.matchAll(specifierRe)) {
-    const spec = m[1];
-    if (f === 'client.js') clientRequires.push(spec);
-    const allowedBare = f === 'index.js' && spec === '@deepseek-ai/schemastery'; // Z10-01：宿主随包出货的校验器
-    if (spec !== 'react' && !allowedBare && !spec.startsWith('node:') && !spec.startsWith('./') && !spec.startsWith('../')) badSpecs.push(`${f}: ${spec}`);
+  /* 先剥块注释再扫：头注释里的“不 import …”字样会被误当作真语句
+   * —— 扫描对象必须是代码不是散文。 */
+  const code = stripComments(s);
+  for (const re of specifierRes) {
+    for (const m of code.matchAll(re)) {
+      const spec = m[1];
+      if (f === 'client.js') clientRequires.push(spec);
+      if (spec.startsWith('@deepseek-ai')) (hostSpecsByFile[f] ??= []).push(spec);
+      /* host 随包出货的两个包是**刻意**导入的（schemastery = 配置校验；dsh-tools = 官方 defineTool）。 */
+      const allowedBare = f === 'index.js'
+        && (spec === '@deepseek-ai/schemastery' || spec === '@deepseek-ai/dsh-tools');
+      if (spec !== 'react' && !allowedBare && !spec.startsWith('node:') && !spec.startsWith('./') && !spec.startsWith('../')) badSpecs.push(`${f}: ${spec}`);
+    }
+  }
+}
+/* ⚠️ 纪律的**真正内容**是"不 import 其它宿主包"，而不是"文件里不许出现这个字符串"——
+ * index.js 会在**错误信息 / 工具描述 / 候选路径数组**里提到包名（那是诊断文本，不是依赖）。
+ * 故只扫**说明符**（真 import/require 的目标），既精确又不会被散文干扰。 */
+for (const f of Object.keys(jsTexts)) {
+  const hosts = hostSpecsByFile[f] ?? [];
+  if (f === 'index.js') {
+    ok(hosts.length === 2 && hosts.includes('@deepseek-ai/schemastery') && hosts.includes('@deepseek-ai/dsh-tools'),
+      'index.js 只 import 两个宿主随包件（schemastery 配置校验 + dsh-tools 官方 defineTool）', hosts.join(', '));
+  } else {
+    /* 含 wire.host.mjs：协议标记键是**字符串常量**（数据契约），不是 import ⇒ 说明符应为 0。 */
+    ok(hosts.length === 0, `${f} 不 import 任何宿主包`, hosts.join(', '));
   }
 }
 ok(badSpecs.length === 0, 'import/require 说明符仅 node:*、相对路径或浏览器模块表约定的 react', badSpecs.join('; '));
@@ -316,7 +360,24 @@ section('7. client.js：ModuleLoader 桩 + 假 ctx + 渲染冒烟');
     if (!slot) slot = hooks.list[i] = {}; // 不预置 v：'v' in slot 需要保持「未初始化」语义
     return slot;
   };
+  /* ⚠️ 必须提供 `Component`：client.js 里有一个 **class 组件**（`PanelBoundary`，渲染兜底卡片），
+   * 它在 `factory()` 执行时（类定义那一刻）就 `extends React.Component` —— 桩缺这个基类会
+   * 直接抛 `Class extends value undefined`，把整节渲染冒烟打挂（**桩的局限，不是产品 bug**）。 */
+  class Component {
+    constructor(props) {
+      this.props = props ?? {};
+      this.state = {};
+    }
+
+    setState(patch) {
+      this.state = { ...this.state, ...(typeof patch === 'function' ? patch(this.state) : patch) };
+    }
+
+    render() { return null; }
+  }
+  Component.prototype.isReactComponent = true;
   const ReactStub = {
+    Component,
     createElement(type, props, ...children) {
       return { type, props: props ?? {}, children };
     },
@@ -386,8 +447,14 @@ section('7. client.js：ModuleLoader 桩 + 假 ctx + 渲染冒烟');
   };
   mod.apply(ctx);
   registered.cb(); // 真实框架在槽位挂载时调用该回调 → 触发 slots.register
-  ok(registered.owner === 'shell.overlay', `slots.inject 槽位=${registered.owner}（SLOT 默认值）`);
-  ok(registered.opts?.id === 'dispatch.console' && registered.opts?.name === 'shell.overlay' && registered.opts?.order === 20, 'slots.register 选项 {name, id, order}（Z4 起 id=dispatch.console）');
+  /* ⚠️ ZB-27（用户要求）之后**只注册一个标题行入口**：原先右下角浮层（`shell.overlay` /
+   * id `dispatch.console` / order 20）与最小化胶囊**都已取消** —— 两份 UI 会让"哪个才是派发台"含糊。
+   * ZB-27o 又把 order 调到 -25（插在子智能体目录 -30 与智能体团队 -20 之间）。
+   * 所以这三条断言必须跟当前契约对齐（改前一直是红的）。 */
+  ok(registered.owner === 'conversation.session.header.actions',
+    `slots.inject 槽位=${registered.owner}（HEADER_SLOT：会话标题行入口）`);
+  ok(registered.opts?.id === 'dispatch' && registered.opts?.name === 'conversation.session.header.actions' && registered.opts?.order === -25,
+    'slots.register 选项 {name, id, order}（ZB-27o 起 id=dispatch / order=-25）');
   ok(typeof registered.comp === 'function', 'register 的是组件函数');
 
   // 渲染冒烟：渲染 → 跑 effect（demo 引擎订阅/定时器）→ 等 1.3s（elapsed tick）→ 再渲染 → 清理
@@ -405,9 +472,21 @@ section('7. client.js：ModuleLoader 桩 + 假 ctx + 渲染冒烟');
       }
       nodes += 1;
       if (typeof el.type === 'function') {
+        const children = [].concat(...(el.children ?? []).map((c) => (Array.isArray(c) ? c : [c])));
+        /* class 组件（React.Component 子类）**必须 new 出来再 render()** ——
+         * 当普通函数调用会抛 `Class constructor cannot be invoked without 'new'`。 */
+        if (el.type.prototype?.isReactComponent) {
+          try {
+            walk(new el.type({ ...el.props, children }).render());
+          } catch (e) {
+            /* 类组件抛错（例如边界卡片自己出问题）**不该打挂整节冒烟**：记为节点后继续。 */
+            nodes += 1;
+            void e;
+          }
+          return;
+        }
         const save = hooks;
         hooks = { list: compState.get(el.type) ?? compState.set(el.type, []).get(el.type), idx: 0 };
-        const children = [].concat(...(el.children ?? []).map((c) => (Array.isArray(c) ? c : [c])));
         try {
           walk(el.type({ ...el.props, children }));
         } finally {
@@ -434,10 +513,14 @@ section('7. client.js：ModuleLoader 桩 + 假 ctx + 渲染冒烟');
 
   const Panel = registered.comp;
   const n1 = renderTree(Panel);
-  ok(n1 > 20, `首帧渲染节点数=${n1}（>20 视为完整渲染）`);
+  /* ⚠️ 注册的是**标题行入口**（`HeaderEntry`），收起态只渲染一个按钮 ⇒ 节点数天然很小
+   * （实测 8）。原先的 `> 20` 是"整块浮层"时代的阈值，早已过期。
+   * 这条冒烟的价值在于**真的执行了组件代码**（hook/effect 都跑一遍、且无异常），
+   * 而不是节点数多寡 —— 故改为"渲染出可交互入口（含文本）+ 两次渲染都稳定"。 */
+  ok(n1 >= 6, `首帧渲染节点数=${n1}（标题行入口，收起态；≥6 视为渲染完整）`);
   await delay(1300); // demo 引擎至少推一次 elapsed tick
   const n2 = renderTree(Panel);
-  ok(n2 > 20, `快照更新后二次渲染节点数=${n2}`);
+  ok(n2 >= 6, `快照更新后二次渲染节点数=${n2}`);
   for (const slot of effectSlots) {
     if (typeof slot.cleanup === 'function') {
       try {

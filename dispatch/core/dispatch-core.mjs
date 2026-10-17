@@ -717,6 +717,24 @@ export function createDispatcher(options = {}) {
    * （面板开启降级后可选模型与思考强度，与「通道」分区同形）。null 字段 = 沿用原任务该维度。 */
   let fallbackTargets = [];
 
+  /* ── ZB-52：**顺序派发**（用户要求）──
+   * 「模型」下拉里的「顺序派发」= 按**面板显示的模型顺序从上自下**依次尝试：
+   * 前一个报错就换下一个，直到成功或用完整个列表。**每通道（引擎）各自一份顺序**。
+   *
+   * 解决的现实问题：免费模型有额度上限 / 用的人太多会临时报错 —— 逐个试过去总能撞上一个可用的。
+   *
+   * 实现要点（**复用既有交接机制**，不新造调度器）：
+   *   失败时（见下方的顺序派发触发点）把该引擎的顺序列表展开成**模型级目标链**，
+   *   交给既有的 `retry(provider/model)` 做交接重跑 —— 它有五要素提示词、跳数封顶、attempts 审计。
+   *   ⚠️ 换模型 = 换进程（甚至换引擎）⇒ **会话无法继承**，只能是"新会话 + 交接提示词接着做"；
+   *   磁盘上已完成的改动仍然留着。 */
+  const sequentialFile = join(dirState, 'sequential.json');
+  /** mode=是否开启顺序派发；order[engine]=该引擎的有序路由 id 列表（`opencode/<model>` 形态）。 */
+  let seqMode = false;
+  let seqOrder = {};
+  /** 顺序派发在当前任务上的交接状态：jobId → { engine, chain:[{provider,model}], idx }。 */
+  const seqRuns = new Map();
+
   const isTerminal = (job) => TERMINAL_STATES.has(job.state);
   const nextId = () => `j-${Date.now().toString(36)}-${(seqCounter++).toString(36)}-${randomBytes(2).toString('hex')}`;
 
@@ -1629,7 +1647,23 @@ export function createDispatcher(options = {}) {
     emit('job-updated', job);
     releaseLocks(job);
     pump();
-    if (state === 'paused' && AUTO_FALLBACK_REASONS.has(job.pauseReason)) maybeAutoFallback(job);
+    /* ── ZB-52：失败后的**顺序派发**（先）与**自动降级链**（后）──
+     *
+     * 用户选定：顺序派发模式下「任何失败都延续，除参数错误」。
+     * 故这里的触发面比降级链宽：
+     *   · `failed`（非 0 退出 / 无输出 / spawn 失败）⇒ 延续
+     *   · `paused` ⇒ 延续（不管暂停原因属于哪一类：限流、额度、模型不可用都该换下一个）
+     *   · 例外 `config-error`：**参数/配置错**，换任何模型都一样 ⇒ 不延续（延续只是白烧额度）。
+     *
+     * 顺序列表用尽 ⇒ `advanceSequential` 返回 false ⇒ 交回降级链（跨通道续命）。 */
+    /* 顺序派发的触发面（用户选定「任何失败都延续，除参数错误」）：
+     *   · failed（非 0 退出 / spawn 失败 / 无输出）⇒ 延续
+     *   · paused ⇒ 延续，**不限暂停原因**（限流 / 额度 / 模型不可用都该换下一个）
+     *   · 唯一例外 `config-error`：参数/配置错，换任何模型都一样 ⇒ 不延续（免得白烧额度）。 */
+    const seqReason = state === 'paused' ? (job.pauseReason ?? '暂停') : `退出码 ${job.exitCode ?? '-'}`;
+    const seqSkipped = state === 'paused' && job.pauseReason === 'config-error';
+    const seqHandled = seqSkipped ? false : advanceSequential(job, seqReason);
+    if (!seqHandled && state === 'paused' && AUTO_FALLBACK_REASONS.has(job.pauseReason)) maybeAutoFallback(job);
   }
 
   /* ---------- Z6：通道 / retry / 交接重跑 / 自动降级链 ---------- */
@@ -1642,13 +1676,31 @@ export function createDispatcher(options = {}) {
    */
   function maybeAutoFallback(job) {
     if (fallbackTargets.length === 0) return;
-    if (Number(job.hopCount ?? 0) >= fallbackTargets.length) {
+    /* ⚠️ 封顶必须只数**降级链自己的**跳数（ZB-52 修的真 bug，队友测试报出来的）：
+     *
+     * 原先用 `job.hopCount`（**所有**交接的总跳数）与 `fallbackTargets.length` 比较 ——
+     * 而**顺序派发**的交接也会让 hopCount +1（它复用同一条 retry 通道）⇒ 两者**共用同一份预算**。
+     * 后果：只要「降级目标数 ≤ 已发生的顺序跳数」，顺序列表用尽后**降级永远被拦**，
+     * 实测最小复现：1 个降级目标 + 2 个顺序模型 ⇒ 第 2 个 job 就 hopCount=1 ≥ 1 ⇒
+     * 直接留「已达目标数上限（1 跳）」并停止 —— 与"顺序用尽 ⇒ 交回降级链"的语义不符。
+     *
+     * 故改为数**降级专属跳数**：从 attempts 里数 `reason === 'auto-fallback'` 的条数
+     * （顺序派发用 `handoff-retry`，两者可区分）。旧记录没有该 reason ⇒ 退化为 hopCount（保守）。 */
+    const fbHops = countFallbackHops(job);
+    if (fbHops >= fallbackTargets.length) {
       job.parseWarnings.push(`fallback-chain: 已达目标数上限（${fallbackTargets.length} 跳），停止自动降级`);
       persist();
       emit('job-updated', job);
       return;
     }
-    const startIdx = fallbackTargets.findIndex((t) => t.provider === (job.spec.provider ?? 'plan'));
+    /* ⚠️ 起点下标（ZB-52 修的第二个真 bug）：
+     * `findIndex` 找不到时返回 **-1**，而循环从 `startIdx + 1` 开始 ⇒ 会**从 index 1 起找**，
+     * 于是**唯一的那个降级目标被静默跳过**（真机最小复现：降级目标只有 1 个时永远不降级）。
+     * 语义应该是：当前通道**在列表里** ⇒ 从它的下一项找；**不在列表里** ⇒ 从**头**找
+     * （顺序派发的 job 就属于后者：provider 是 `opencode`，本来就不在降级目标里）。
+     * 这也是队友报的"降级被拦"的**真正根因** —— 跳数预算只是掩盖它的一层。 */
+    const startIdxRaw = fallbackTargets.findIndex((t) => t.provider === (job.spec.provider ?? 'plan'));
+    const searchFrom = startIdxRaw < 0 ? 0 : startIdxRaw + 1;
     void (async () => {
       try {
         const cur = jobs.get(job.id);
@@ -1661,7 +1713,7 @@ export function createDispatcher(options = {}) {
         }
         const live = jobs.get(job.id);
         if (!live || live.state !== 'paused') return;
-        for (let i = startIdx + 1; i < fallbackTargets.length; i += 1) {
+        for (let i = searchFrom; i < fallbackTargets.length; i += 1) {
           const target = fallbackTargets[i];
           const ch = channels.find((c) => c.id === target.provider);
           if (ch && ch.enabled) {
@@ -1671,6 +1723,7 @@ export function createDispatcher(options = {}) {
               model: target.model,
               reasoningLevel: target.reasoningLevel,
               autoFallback: true,
+              hopReason: 'auto-fallback', // 与顺序派发换模型区分开（各自独立跳数预算）
             });
             return;
           }
@@ -1687,6 +1740,151 @@ export function createDispatcher(options = {}) {
         }
       }
     })();
+  }
+
+  /* ---------------- ZB-52：顺序派发的**执行**（展开模型链 + 失败推进） ---------------- */
+
+  /**
+   * 把「顺序派发」的配置展开成**模型级目标链**（每项 `{provider, model}`）。
+   *
+   * @param engine 目标引擎（只取该引擎自己的顺序列表 —— 用户要求「每通道各自一份」）
+   * @returns {{provider, model}[]} 空数组 = 该引擎没配顺序（顺序派发对它不生效，不是错误）
+   *
+   * ⚠️ **必须保持面板显示的顺序**：`seqOrder[engine]` 就是从上到下的次序，
+   * 这里不做任何排序/重排（用户拖动的结果就是派发次序）。
+   *
+   * route id 两种形态（与面板「模型」下拉的模型项 key 对应）：
+   *   · `<通道id>::<模型名>` —— ZCode 的路由×模型（如 `plan::GLM-5.3`）；
+   *   · `opencode/<model>` / `qoder/<model>` —— 该引擎的一个模型（provider=裸引擎名）。
+   */
+  function expandSequentialChain(engine) {
+    const eng = normalizeEngine(engine);
+    const list = seqOrder[eng] ?? [];
+    const chain = [];
+    for (const entry of list) {
+      const route = typeof entry === 'string' ? entry : entry?.route;
+      if (typeof route !== 'string' || !route) continue;
+      /* ZB-52：每项自带档位（用户要求「顺序思考强度档位设置」）；null = 该模型用引擎默认。 */
+      const rl = (typeof entry === 'object' && entry ? entry.reasoningLevel : null) ?? null;
+      const sep = route.indexOf('::');
+      if (sep > 0) {
+        /* ZCode 形态：`<provider>::<model>` */
+        const provider = route.slice(0, sep);
+        const model = route.slice(sep + 2);
+        if (provider && model) chain.push({ provider, model, reasoningLevel: rl });
+        continue;
+      }
+      /* 其它引擎：路由 id 就是模型 id，provider 用裸引擎名（core 认）。 */
+      chain.push({ provider: eng, model: route, reasoningLevel: rl });
+    }
+    return chain;
+  }
+
+  /** 该任务当前是否处于「顺序派发」管辖（开关开 + 该引擎有顺序 + 任务指定了该引擎）。 */
+  function sequentialChainFor(job) {
+    if (!seqMode) return null;
+    const eng = normalizeEngine(job?.spec?.engine ?? job?.engine ?? DEFAULT_ENGINE);
+    const chain = expandSequentialChain(eng);
+    return chain.length ? { engine: eng, chain } : null;
+  }
+
+  /**
+   * 失败后推进到顺序列表的**下一个模型**（用户要求：报错就换下一个，直到跑完整个列表）。
+   *
+   * 与「自动降级链」的分工（两者可同时存在，先顺序、后降级）：
+   *   · 顺序派发：**同一引擎内**换模型（用户为这个引擎排的序）；
+   *   · 自动降级：跨通道（面板另配的目标）。
+   * 顺序列表跑完 ⇒ 交回降级链处理；都没有 ⇒ 停在失败/paused。
+   *
+   * ⚠️ 触发面（用户选定「任何失败都延续，除参数错误」）：
+   *   `config-error` 不延续 —— 那是**参数/配置错**，换任何模型都一样（延续只是白烧额度）。
+   */
+  function advanceSequential(job, reason) {
+    const seq = sequentialChainFor(job);
+    if (!seq) return false;
+    /* 定位"当前正在跑哪一项"：从 attempts 里最后一条属于本引擎的记录取，取不到则按链首算。 */
+    let run = seqRuns.get(job.id);
+    if (!run) {
+      run = { engine: seq.engine, chain: seq.chain, idx: indexOfCurrent(job, seq) };
+      seqRuns.set(job.id, run);
+    }
+    const nextIdx = run.idx + 1;
+    if (nextIdx >= run.chain.length) {
+      job.parseWarnings.push(`顺序派发: 已试完 ${run.chain.length} 个模型（${reason}），列表用尽`);
+      seqRuns.delete(job.id);
+      persist();
+      emit('job-updated', job);
+      return false; // 交回降级链
+    }
+    const target = run.chain[nextIdx];
+    run.idx = nextIdx;
+    job.parseWarnings.push(
+      `顺序派发: 第 ${run.idx + 1}/${run.chain.length} 个模型 ${target.provider}/${target.model}（上一个失败：${reason}）`,
+    );
+    retry(job.id, {
+      provider: target.provider,
+      model: target.model,
+      /* ZB-52：档位取**该模型在顺序列表里自己的设置**（用户要求「顺序思考强度档位设置」）；
+       * 没设 ⇒ 沿用原任务的档位（不猜、不覆写）。 */
+      reasoningLevel: target.reasoningLevel ?? job.spec?.reasoningLevel ?? null,
+      /* ⚠️ `autoFallback` 必须为 **false**：它是给**降级链**用的标记。
+       * 顺序派发请求的 provider 常与 job 当前 provider 相同 ⇒ 会走 retry 的 **resume 分支**，
+       * 而 resume 分支**不写 hopReason** ⇒ 那两条记录都成了"悬空的源条目"，
+       * 被 `countFallbackHops` 误判成降级跳（真机插桩实测：降级 job 自己失败时 fbHops=2 而被误拦）。
+       * 这里用自己的 `hopReason:'seq-model'` 标记即可。 */
+      autoFallback: false,
+      hopReason: 'seq-model',
+    });
+    return true;
+  }
+
+  /** 从任务的 attempts 里推断"当前项在顺序链里的下标"（找得到就接着往下，找不到从头判断）。 */
+  function indexOfCurrent(job, seq) {
+    const attempts = Array.isArray(job.attempts) ? job.attempts : [];
+    for (let i = attempts.length - 1; i >= 0; i -= 1) {
+      const a = attempts[i];
+      const idx = seq.chain.findIndex((t) => t.provider === a.provider && t.model === a.model);
+      if (idx >= 0) return idx;
+    }
+    const p = job.spec?.provider ?? null;
+    const m = job.spec?.model ?? null;
+    const here = seq.chain.findIndex((t) => t.provider === p && t.model === m);
+    return here >= 0 ? here : -1; // -1 ⇒ 从链首开始
+  }
+
+  /** 数**降级链专属**跳数（ZB-52）：从 attempts 里数 `reason === 'auto-fallback'` 的条数。
+   *
+   *  为什么必须区分：顺序派发的交接也会让 `hopCount` 加一（它复用同一条 retry 通道）。
+   *  若直接拿 `hopCount` 当降级链的预算，两者会**共用一份预算** ⇒
+   *  只要「降级目标数 ≤ 顺序跳数」，顺序用尽后降级就被误拦（真 bug，见 maybeAutoFallback 注释）。
+   *
+   *  旧记录（没有该 reason）⇒ 退化为 `hopCount`（保守：宁可少降一次，也不无限跳）。 */
+  function countFallbackHops(job) {
+    const attempts = Array.isArray(job?.attempts) ? job.attempts : [];
+    /* ⚠️ 判据与扫描方式都被实测纠正过（**纯函数单测**发现第一版算错）：
+     *
+     * ① **不能用 `reason.startsWith('auto-fallback')` 当判据**：
+     *    那条"源 job"记录的 reason 是 `auto-fallback:<pauseReason>`，而**顺序派发也传 autoFallback:true**
+     *    ⇒ 两者格式完全一样，按它数必然把顺序跳算成降级跳（实测：1 个顺序交接算出 1）。
+     * ② **必须顺序无关地扫描**：attempts 是"源条目在前、目标条目在后"的成对结构，
+     *    单遍"用下一条回填上一条"会让最后一条悬空 ⇒ 漏数。
+     *
+     * 做法：只认 `hopReason`（调用方显式写入两条记录），用 pending 标记处理配对顺序 ——
+     * 先遇目标条目 ⇒ 此刻计一次；先遇源条目 ⇒ 挂起，等它的目标条目到来时再计（且只计一次）。 */
+    let n = 0;
+    let pendingSource = false;
+    for (const a of attempts) {
+      if (!a) continue;
+      if (a.hopReason === 'auto-fallback') {
+        if (!pendingSource) n += 1;
+        pendingSource = false;
+      } else if (a.hopReason === 'seq-model') {
+        pendingSource = false; // 顺序跳：不计
+      } else {
+        pendingSource = true; // 源条目（reason 形如 auto-fallback:* / handoff-retry）
+      }
+    }
+    return n;
   }
 
   /** 当前默认通道（dispatch 未显式指定 provider/model 时采用；reasoningLevel=通道默认思考强度）。 */
@@ -1842,6 +2040,112 @@ export function createDispatcher(options = {}) {
     } catch { /* 无文件/损坏：默认关 */ }
   }
 
+  /* ---------------- ZB-52：顺序派发（状态 + 公开 API） ---------------- */
+
+  /** 顺序派发的**归一**：每项 = `{route, reasoningLevel|null}`。
+   *
+   *  ⚠️ ZB-52 第二轮（用户要求「新增顺序思考强度档位设置」）：顺序项从**纯字符串**升级为
+   *  「路由 + 该模型自己的档位」。为什么必须这样：档位是**逐模型**的（实测 OpenCode 6/10 个模型
+   *  有档位、且集合各不相同）—— 一个全局档位对"轮换多个模型"根本说不通。
+   *
+   *  **向后兼容**：旧存值（字符串数组）照常读入，档位为 null = 该模型用引擎默认。
+   *  去重按 **route** 去重（同一路由只出现一次；后出现的档位覆盖先出现的）。 */
+  function normSeqOrder(list) {
+    if (!Array.isArray(list)) return [];
+    const out = [];
+    for (const item of list) {
+      const route = typeof item === 'string'
+        ? item.trim()
+        : String(item?.route ?? item?.id ?? '').trim();
+      if (!route) continue;
+      const rl = normReasoning(item?.reasoningLevel ?? item?.thinking ?? null, null);
+      const prev = out.findIndex((x) => x.route === route);
+      const entry = { route, reasoningLevel: rl };
+      if (prev >= 0) out[prev] = entry; else out.push(entry);
+    }
+    return out;
+  }
+
+  /** 对外形状：`order[engine]` 保持**字符串数组**（客户端既有渲染契约不变）；档位单独走 `levels`。
+   *  这样面板不必改写取值的全部逻辑，也能拿到逐模型档位。 */
+  function seqRouteIds(engine) {
+    return (seqOrder[engine] ?? []).map((x) => x.route);
+  }
+
+  function persistSequential() {
+    atomicWrite(sequentialFile, `${JSON.stringify({
+      version: 1,
+      mode: seqMode,
+      order: seqOrder,
+      updatedAt: new Date(nowMs()).toISOString(),
+    }, null, 2)}\n`);
+  }
+
+  function loadSequentialState() {
+    try {
+      const data = JSON.parse(readFileSync(sequentialFile, 'utf8'));
+      if (data && typeof data === 'object') {
+        seqMode = data.mode === true;
+        seqOrder = {};
+        if (data.order && typeof data.order === 'object') {
+          for (const [eng, list] of Object.entries(data.order)) {
+            const arr = normSeqOrder(list);
+            if (arr.length) seqOrder[eng] = arr;
+          }
+        }
+      }
+    } catch { /* 无文件/损坏：默认关（不猜） */ }
+  }
+
+  /** 面板/工具读：`{enabled, order, levels, sequentialCount}`。
+   *  · `order[engine]` = **路由 id 数组**（从上到下 = 尝试次序；客户端既有渲染契约不变）；
+   *  · `levels[engine]` = 与 `order[engine]` **同序**的档位数组（null = 该模型用引擎默认）。
+   *  永远给出**三个引擎的键**（哪怕为空）—— 客户端据此渲染，不必自己知道有哪些引擎。 */
+  function getSequential() {
+    const order = {};
+    const levels = {};
+    for (const eng of ENGINES) {
+      const list = seqOrder[eng] ?? [];
+      order[eng] = list.map((x) => x.route);
+      levels[eng] = list.map((x) => x.reasoningLevel ?? null);
+    }
+    return {
+      enabled: seqMode,
+      order,
+      levels,
+      sequentialCount: Object.values(order).reduce((n, l) => n + l.length, 0),
+    };
+  }
+
+  /** 面板写：{enabled?, order?}。
+   *  · `enabled` 只改开关；`order` **按引擎合并**（patch 里出现的引擎覆盖，未出现的保留）。
+   *  · 只传其一时另一项不动（面板两个控件各自保存，不互相覆盖）。 */
+  function setSequential(patch) {
+    if (patch == null || typeof patch !== 'object') throw new TypeError('setSequential: 需要对象 {enabled?, order?}');
+    if ('enabled' in patch) seqMode = patch.enabled === true;
+    if ('order' in patch) {
+      /* ⚠️ **按引擎合并**，不是整体替换（队友真渲染探针抓到的真 bug）：
+       * 原先 `seqOrder = next` ⇒ 调用方只想改**一个**引擎时（`{order:{opencode:[…]}}`），
+       * 别的引擎（如已排好的 zcode）会被**当场静默清空** —— 而面板/CLI 很容易这么传。
+       * 现在：patch 里出现的引擎**覆盖**该引擎（传空数组/null = 显式清空它），未出现的**原样保留**。 */
+      const src = patch.order ?? {};
+      if (src && typeof src === 'object' && !Array.isArray(src)) {
+        for (const [eng, list] of Object.entries(src)) {
+          /* ⚠️ 必须先判**原样**的引擎名再归一：`normalizeEngine()` 对未知值会**回退成默认引擎**
+           * （zcode）—— 若先归一，`bogus:['x']` 会被静默写进 zcode 的顺序里（冒烟测出来的）。
+           * 顺序派发的键必须是**已知引擎**，否则丢弃（不猜、不静默改名）。 */
+          const key = String(eng).trim().toLowerCase();
+          if (!ENGINES.includes(key)) continue;
+          if (list == null) { delete seqOrder[key]; continue; } // 显式清空该引擎
+          const arr = normSeqOrder(list);
+          if (arr.length) seqOrder[key] = arr; else delete seqOrder[key];
+        }
+      }
+    }
+    persistSequential();
+    return getSequential();
+  }
+
   /**
    * ZB-33：免费额度（Start Plan）通道的展示名。
    *
@@ -1905,7 +2209,7 @@ export function createDispatcher(options = {}) {
   /* ---------- ZB-44：OpenCode 只读探测（`--list-models` / `--version`，与派发**同用一个脚本**） ---------- */
 
   /** 跑一次只读子命令，返回 {ok, stdout, code, error}。**永不抛**（spawn 失败/超时都降级成 error 文案）。 */
-  function runOpenCodeProbe(args) {
+  function runOpenCodeProbe(args, timeoutMs = 15000) {
     return new Promise((done) => {
       let child;
       try {
@@ -1925,8 +2229,10 @@ export function createDispatcher(options = {}) {
       };
       const timer = setTimeout(() => {
         try { child.kill(); } catch { /* 已退出 */ }
-        finish({ ok: false, stdout: out, code: null, error: '探测超时（15s）' });
-      }, 15000);
+        /* ⚠️ 超时可配：默认 15s 够用于 `--list-models` / `--version`，
+         * 但 ZB-52 的 `--with-variants`（要跑 `models --verbose`）更慢 ⇒ 会被误杀。 */
+        finish({ ok: false, stdout: out, code: null, error: `探测超时（${Math.round(timeoutMs / 1000)}s）` });
+      }, timeoutMs);
       child.stdout?.setEncoding('utf8');
       child.stdout?.on('data', (d) => { out += d; });
       child.stderr?.setEncoding('utf8');
@@ -2036,15 +2342,60 @@ export function createDispatcher(options = {}) {
       const m = String(v.stdout).match(/\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/);
       version = m ? m[1] : (String(v.stdout).trim().split('\n')[0].trim() || null);
     }
+    /* ZB-52：档位表（思考强度）。**不阻塞本次清单** —— 真机实测 `--with-efforts` 约 2 分钟
+     * （15 模型 × 9 次 CLI 调用），若同步等它，面板每次拉通道都要卡两分钟。
+     * 故：本次用缓存值（可能为空），同时**后台预热**下次就有值。 */
+    const levels = qoderEffortCache?.value ?? null;
+    if (qoderEffortCache == null || nowMs() - qoderEffortCache.at >= QODER_EFFORT_TTL_MS) {
+      void refreshQoderEfforts();
+    }
     return {
       models: all,
       version,
+      levels,
       warning: all.length === 0 ? 'Qoder 模型探测未返回任何合法模型名 —— Qoder 通道为空（不影响其它引擎）' : null,
     };
   }
 
+  /* ── ZB-52：Qoder **档位表**探测（`--with-efforts`）的缓存 ──
+   * 与 `engineDiscovery` 同一套范式（TTL + 后台刷新 + in-flight 去重）：
+   * 贵（约 2 分钟）⇒ 绝不能挡在通道清单的同步路径上。TTL 取 30 分钟（档位随上游模型目录变化，
+   * 但变化很慢；执行器侧还有自己的探测缓存）。 */
+  const QODER_EFFORT_TTL_MS = 30 * 60 * 1000;
+  let qoderEffortCache = null;
+  let qoderEffortInFlight = null;
+
+  function refreshQoderEfforts() {
+    if (qoderEffortInFlight) return qoderEffortInFlight;
+    qoderEffortInFlight = (async () => {
+      try {
+        const r = await runQoderProbe(['--list-models', '--with-efforts'], 240000);
+        if (r.ok) {
+          /* 解析 `[qoder-run] reasoning-efforts <模型>=<a,b,c>` →
+           * levels=各模型档位集的**并集**（引擎级；逐模型子集 CLI 拿不到，见执行器注释）。 */
+          const set = new Set();
+          for (const line of String(r.stdout ?? '').split('\n')) {
+            const m = line.match(/reasoning-efforts\s+(.+?)=([^\s]+)\s*$/);
+            if (!m) continue;
+            for (const lv of m[2].split(',').map((s) => s.trim()).filter(Boolean)) set.add(lv);
+          }
+          qoderEffortCache = { at: nowMs(), value: set.size ? [...set] : null };
+        } else if (qoderEffortCache == null) {
+          /* 探测失败且没有旧值 ⇒ 留 null（**不编造档位**；面板会显示"无档位"）。 */
+          qoderEffortCache = { at: nowMs(), value: null };
+        }
+        return qoderEffortCache.value;
+      } catch {
+        return qoderEffortCache?.value ?? null;
+      } finally {
+        qoderEffortInFlight = null;
+      }
+    })();
+    return qoderEffortInFlight;
+  }
+
   /** Qoder 只读探测（spawn 一次，带超时；永不抛）。 */
-  async function runQoderProbe(args) {
+  async function runQoderProbe(args, timeoutMs = 30000) {
     return new Promise((done) => {
       let child;
       try {
@@ -2054,7 +2405,10 @@ export function createDispatcher(options = {}) {
         return;
       }
       let stdout = ''; let stderr = '';
-      const timer = setTimeout(() => { try { child.kill(); } catch { /* 尽力 */ } done({ ok: false, error: 'timeout' }); }, 30000);
+      /* ⚠️ 超时**必须可配**：默认 30s 够用于 `--list-models` / `--version`，
+       * 但 ZB-52 的 `--with-efforts` 真机约 2 分钟（15 模型 × 9 次 CLI 调用）⇒ 会被误杀。
+       * 调用方按需传（见 refreshQoderEfforts）。 */
+      const timer = setTimeout(() => { try { child.kill(); } catch { /* 尽力 */ } done({ ok: false, error: 'timeout' }); }, timeoutMs);
       child.stdout?.setEncoding?.('utf8');
       child.stderr?.setEncoding?.('utf8');
       child.stdout?.on('data', (c) => { stdout += c; });
@@ -2088,13 +2442,56 @@ export function createDispatcher(options = {}) {
     let version = null;
     const v = await runOpenCodeProbe(['--version']);
     if (v.ok) version = String(v.stdout).trim().split('\n')[0].trim() || null;
+    /* ZB-52：思考强度档位（`--variant`）。与 Qoder 同策略：**不阻塞本次清单** —— 用缓存值，
+     * 同时后台预热。OpenCode 的档位是**逐模型**的（实测 `big-pickle` 等 4 个模型根本没有
+     * variants 键），故这里按 **modelId → levels** 记录，而不是给一个引擎级并集。 */
+    const ocLevels = opencodeEffortCache?.value ?? null;
+    if (opencodeEffortCache == null || nowMs() - opencodeEffortCache.at >= QODER_EFFORT_TTL_MS) {
+      void refreshOpenCodeEfforts();
+    }
     return {
       models,
       version,
+      perModelLevels: ocLevels, // Map/对象：`opencode/<model>` → [档位]
       warning: all.length === 0
         ? 'OpenCode 模型探测未返回任何合法模型 id（形态 opencode/<model>）—— OpenCode 通道为空（ZCode 通道不受影响）'
         : null,
     };
+  }
+
+  /* ── ZB-52：OpenCode **逐模型**档位探测（`--with-variants`）的缓存 ──
+   * 与 Qoder 侧同一套范式（TTL + 后台刷新 + in-flight 去重）。`models --verbose` 需要跑 CLI，
+   * 故同样不能挡在通道清单的同步路径上。 */
+  let opencodeEffortCache = null;
+  let opencodeEffortInFlight = null;
+
+  function refreshOpenCodeEfforts() {
+    if (opencodeEffortInFlight) return opencodeEffortInFlight;
+    opencodeEffortInFlight = (async () => {
+      try {
+        const r = await runOpenCodeProbe(['--list-models', '--with-variants'], 180000);
+        if (r.ok) {
+          /* 解析 `[opencode-run] variants <modelId>=<a,b,c>` → {modelId: [levels]}。
+           * **只为真的报了档位的模型建条目**：没有档位维度的模型（真机 4 个）如实缺席。 */
+          const map = Object.create(null);
+          for (const line of String(r.stdout ?? '').split('\n')) {
+            const m = line.match(/variants\s+(.+?)=([^\s]+)\s*$/);
+            if (!m) continue;
+            const lv = m[2].split(',').map((s) => s.trim()).filter(Boolean);
+            if (lv.length) map[m[1]] = lv;
+          }
+          opencodeEffortCache = { at: nowMs(), value: Object.keys(map).length ? map : null };
+        } else if (opencodeEffortCache == null) {
+          opencodeEffortCache = { at: nowMs(), value: null }; // 探测失败且无旧值 ⇒ 留空（不编造）
+        }
+        return opencodeEffortCache.value;
+      } catch {
+        return opencodeEffortCache?.value ?? null;
+      } finally {
+        opencodeEffortInFlight = null;
+      }
+    })();
+    return opencodeEffortInFlight;
   }
 
   /** 通道清单：runner --list-providers 真实输出为骨架，叠加权益缓存/展示名/personal 通道，
@@ -2242,6 +2639,11 @@ export function createDispatcher(options = {}) {
       reason: null,
       endpoint: null,
       models: [id],
+      /* ZB-52：思考强度档位（`--variant`）—— **逐模型**（实测 `big-pickle` 等 4 个模型没有
+       * variants 键）⇒ 没有就不带该字段，**绝不给它造档位**。 */
+      ...(oc.perModelLevels && Array.isArray(oc.perModelLevels[id]) && oc.perModelLevels[id].length
+        ? { thinkingLevels: [...oc.perModelLevels[id]] }
+        : {}),
     }));
 
     /* ZB-51（T4）：Qoder 通道 = **探测结果**（`qoder-run --list-models`，不写死枚举）。
@@ -2256,6 +2658,10 @@ export function createDispatcher(options = {}) {
       reason: null,
       endpoint: null,
       models: [`qoder/${name}`],
+      /* ZB-52：思考强度档位（面板「思考强度」下拉据此渲染；没有就不带该字段）。
+       * ⚠️ 这是**引擎级**集合（逐模型子集 CLI 拿不到，见 qoder-run 的 probeEfforts 注释）——
+       * 不谎称逐模型精确；档位与模型不匹配时由 CLI 自己报错。 */
+      ...(Array.isArray(qd.levels) && qd.levels.length ? { thinkingLevels: [...qd.levels] } : {}),
     }));
 
     /* ZB-51：**免费额度（Start Plan）实际可用的模型**必须在这里收窄 —— 这里是**单一权威**
@@ -2722,8 +3128,13 @@ export function createDispatcher(options = {}) {
     }
     nj.attempts = [
       ...prevAttempts,
-      { jobId: job.id, provider: origProvider, model: job.spec.model ?? null, reason, at },
-      { jobId: nj.id, provider: spec.provider, model: targetModel ?? null, reason: 'handoff-retry', at },
+      /* ⚠️ 两条记录都要带 `hopReason`：源条目 + 目标条目**各一条**，缺任何一条都会让
+       * `countFallbackHops` 数不准（它按"配对"计一次降级跳）。 */
+      { jobId: job.id, provider: origProvider, model: job.spec.model ?? null, reason, hopReason: opts.hopReason ?? null, at },
+      /* ⚠️ `hopReason` 用于**区分交接来源**：`seq-model` = 顺序派发换模型；
+       * `auto-fallback` = 跨通道降级链。两者都走这条 retry 通道，但**各有独立的跳数预算** ——
+       * 不区分的话降级链的封顶会被顺序跳数吃掉（真 bug，见 maybeAutoFallback 注释）。 */
+      { jobId: nj.id, provider: spec.provider, model: targetModel ?? null, reason: 'handoff-retry', hopReason: opts.hopReason ?? null, at },
     ];
     job.handedOffTo = nj.id;
     persist();
@@ -2837,6 +3248,7 @@ export function createDispatcher(options = {}) {
   loadChannelState();
   loadEngineMap(); // ZB-44：通道→引擎快照（fail-open：读不到 ⇒ 全部按默认引擎 zcode）
   loadFallbackState();
+  loadSequentialState(); // ZB-52：顺序派发配置（fail-open：读不到 ⇒ 默认关）
 
   return {
     workRoot,
@@ -2862,6 +3274,9 @@ export function createDispatcher(options = {}) {
     setFallbackChain,
     setFallbackTarget, // ZB-30：面板入口（单目标：通道+模型+思考强度；null=关闭）
     getFallbackChain,
+    /* ZB-52：顺序派发（面板入口 = 开关 + 每引擎一份模型顺序；顺序即派发次序） */
+    getSequential,
+    setSequential,
     /* ZB-44：引擎自检/展示用（只读；不参与调度决策）。面板与 CLI 想知道「OpenCode 执行器配到哪了」
      * 时不必再各自推断路径 —— 与 startJob 实际 spawn 的是**同一个值**。 */
     engines: [...ENGINES],

@@ -84,7 +84,10 @@ console.log('\n③ remote 方法表（host 面 / client.js 内联表 / wire.clie
   const clientMethods = namesIn(clientSrc, /const REMOTE_METHOD_TABLE = \[([\s\S]*?)\n\s*\];/);
   const descMethods = namesIn(wcSrc, /descriptors: \[([\s\S]*?)\n\s*\]\.map\(/);
   const sorted = (a) => [...new Set(a)].sort().join(',');
-  ok(hostMethods.length === 15, `host REMOTE_METHODS 15 个（实际 ${hostMethods.length}）`);
+  /* ⚠️ 这里**不要**写死数量（曾是 `=== 15`：每加一个 wire 方法都得改测试，是会过期的魔法数字）。
+   * 真正要钉的是"三表**方法集相等**"（下面两行）+ "表非空且无重复"。 */
+  ok(hostMethods.length > 0 && new Set(hostMethods).size === hostMethods.length,
+    `host REMOTE_METHODS 非空且无重复（${hostMethods.length} 个）`);
   ok(sorted(descMethods) === sorted(hostMethods), `wire.client.mjs 描述符表与 host 方法集相等（${descMethods.length} vs ${hostMethods.length}）`);
   ok(clientMethods.length > 0 && sorted(clientMethods) === sorted(hostMethods),
     `client.js 内联方法表与 host 方法集相等（${clientMethods.length} vs ${hostMethods.length}）`);

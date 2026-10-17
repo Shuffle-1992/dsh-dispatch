@@ -45,7 +45,9 @@ console.log('\n② 选中后必须回写**该路由自己的 provider**（不能
 console.log('\n③ 两个上拉（主通道 + 降级目标）都必须走同一条映射');
 {
   const switchAt = src.indexOf('const switchModel = (m) => {');
-  const switchBody = switchAt >= 0 ? src.slice(switchAt, switchAt + 400) : '';
+  /* ⚠️ 窗口要够大：`switchModel` 开头现在还有「选中顺序派发 ⇒ 自动开开关」的联动
+   * （注释 + 代码约 300 字符）。固定 400 会把 ZCode 分支挤出窗口 —— 这条曾假红过一次。 */
+  const switchBody = switchAt >= 0 ? src.slice(switchAt, switchAt + 900) : '';
   ok(/if \(sel && sel\.engine === 'zcode'\) \{ const p = routeForPick\(sel, m\); onSwitch\(\{ provider: p\.provider, model: p\.model \}\); return; \}/.test(switchBody),
     '★ 主「模型」下拉：ZCode ⇒ provider+model 一起写回');
   const fbAt = src.indexOf('const fbSwitchModel = (m) => {');
