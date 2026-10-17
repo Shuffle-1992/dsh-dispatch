@@ -51,6 +51,7 @@
     "thinkXhigh": "极高强度",
     "thinkAuto": "自动",
     "thinkUltracode": "极限强度",
+    "thinkLoading": "档位载入中…",
     "thinkingFollow": "跟随通道",
     "dispatchThinkingHint": "跟随通道=按通道设置的思考强度派发（在「通道」分区设置）；具体档位=本条派发严格生效（仅新建会话）",
     "chanThinkingHint": "通道默认思考强度：Agent决定=由派发方 Agent 按任务自行改传具体档位；具体档位=给派发 Agent 的硬性规定（未显式指定的派发一律按它执行，仅新建会话生效）",

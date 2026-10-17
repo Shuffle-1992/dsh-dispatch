@@ -51,6 +51,7 @@
     "thinkXhigh": "Extra high",
     "thinkAuto": "Auto",
     "thinkUltracode": "Ultracode",
+    "thinkLoading": "Loading effort levels…",
     "thinkingFollow": "Follow channel",
     "dispatchThinkingHint": "Follow channel = dispatch with the channel's thinking setting (set in the Channels section); a concrete level is enforced for this dispatch (new sessions only)",
     "chanThinkingHint": "Channel default thinking: Agent decides = the dispatching agent picks a concrete level per task; a concrete level is a hard rule for dispatched agents (dispatches without an explicit level follow it; new sessions only)",

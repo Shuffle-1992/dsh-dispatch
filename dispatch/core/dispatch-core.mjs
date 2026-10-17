@@ -2331,6 +2331,24 @@ export function createDispatcher(options = {}) {
    * 探测失败只让 Qoder 通道为空 + 一条可读 warning（ZCode/OpenCode 照常）。
    * 模型清单来自 `qoder-run --list-models` 的真实输出（**不写死枚举**）。返回 {models, version, warning}。
    */
+  /* ⚠️ `effortCacheFresh` 必须定义在**任何使用点之前**（本文件是模块顶层作用域，
+   * `const` 在声明前使用会抛 TDZ ReferenceError —— 而 `node --check` 查不出来）。
+   * 本项目已因此踩过多次（见 pitfalls「声明前使用」），故把它紧贴 `detectQoderChannels` 之前。 */
+  const QODER_EFFORT_TTL_MS = 30 * 60 * 1000;
+  /* ⚠️ ZB-56（用户真机反馈「思考强度选项有时候会加载不出来」）：**失败必须用短 TTL**。
+   * 原实现失败时也写 `{ at: now }`，而 staleness 判断用 30 分钟 ⇒ **一次失败就锁死半小时不再重试**
+   * （真机上表现就是"有时候档位一直不出来"，且越急越不出来）。
+   * 现在：成功（拿到档位）才用 30 分钟；失败/空结果 ⇒ 1 分钟后自动重试。 */
+  const EFFORT_TTL_RETRY_MS = 60 * 1000;
+  /** 缓存是否还"新鲜"（不该重探）。**成功与失败用不同 TTL** —— 见上面注释。 */
+  const effortCacheFresh = (cache) => {
+    if (cache == null) return false;
+    return nowMs() - cache.at < (cache.ok ? QODER_EFFORT_TTL_MS : EFFORT_TTL_RETRY_MS);
+  };
+  /* 缓存本体也在这里声明（不能只靠"async 函数调用得晚"侥幸躲过 TDZ —— 那是 latent 陷阱）。 */
+  let qoderEffortCache = null;
+  let qoderEffortInFlight = null;
+
   async function detectQoderChannels() {
     if (!qoderRunnerPath) return { models: [], version: null, warning: null };
     if (!existsSync(qoderRunnerPath)) {
@@ -2358,7 +2376,7 @@ export function createDispatcher(options = {}) {
      * （15 模型 × 9 次 CLI 调用），若同步等它，面板每次拉通道都要卡两分钟。
      * 故：本次用缓存值（可能为空），同时**后台预热**下次就有值。 */
     const levels = qoderEffortCache?.value ?? null;
-    if (qoderEffortCache == null || nowMs() - qoderEffortCache.at >= QODER_EFFORT_TTL_MS) {
+    if (!effortCacheFresh(qoderEffortCache)) {
       void refreshQoderEfforts();
     }
     return {
@@ -2371,17 +2389,16 @@ export function createDispatcher(options = {}) {
 
   /* ── ZB-52：Qoder **档位表**探测（`--with-efforts`）的缓存 ──
    * 与 `engineDiscovery` 同一套范式（TTL + 后台刷新 + in-flight 去重）：
-   * 贵（约 2 分钟）⇒ 绝不能挡在通道清单的同步路径上。TTL 取 30 分钟（档位随上游模型目录变化，
-   * 但变化很慢；执行器侧还有自己的探测缓存）。 */
-  const QODER_EFFORT_TTL_MS = 30 * 60 * 1000;
-  let qoderEffortCache = null;
-  let qoderEffortInFlight = null;
+   * 贵（约 2 分钟）⇒ 绝不能挡在通道清单的同步路径上。
+   * ⚠️ TTL 常量、`effortCacheFresh` 与缓存本体都已提到 `detectQoderChannels` **之前**定义
+   * （避免 TDZ，因为那个函数会用到它们）—— 这里不要再定义一份。 */
 
   function refreshQoderEfforts() {
     if (qoderEffortInFlight) return qoderEffortInFlight;
     qoderEffortInFlight = (async () => {
       try {
         const r = await runQoderProbe(['--list-models', '--with-efforts'], 240000);
+        let value = null;
         if (r.ok) {
           /* 解析 `[qoder-run] reasoning-efforts <模型>=<a,b,c>` →
            * levels=各模型档位集的**并集**（引擎级；逐模型子集 CLI 拿不到，见执行器注释）。 */
@@ -2391,14 +2408,19 @@ export function createDispatcher(options = {}) {
             if (!m) continue;
             for (const lv of m[2].split(',').map((s) => s.trim()).filter(Boolean)) set.add(lv);
           }
-          qoderEffortCache = { at: nowMs(), value: set.size ? [...set] : null };
-        } else if (qoderEffortCache == null) {
-          /* 探测失败且没有旧值 ⇒ 留 null（**不编造档位**；面板会显示"无档位"）。 */
-          qoderEffortCache = { at: nowMs(), value: null };
+          if (set.size) value = [...set];
+        }
+        if (value) {
+          qoderEffortCache = { at: nowMs(), value, ok: true };
+        } else {
+          /* 失败 / 解析不出任何档位 ⇒ 保留旧值（若有），时间戳只用来决定"多久后再试"。
+           * ⚠️ 不能编造档位；也**不能**因为失败就把重试推迟到 30 分钟后。 */
+          qoderEffortCache = { at: nowMs(), value: qoderEffortCache?.value ?? null, ok: false };
         }
         return qoderEffortCache.value;
       } catch {
-        return qoderEffortCache?.value ?? null;
+        qoderEffortCache = { at: nowMs(), value: qoderEffortCache?.value ?? null, ok: false };
+        return qoderEffortCache.value;
       } finally {
         qoderEffortInFlight = null;
       }
@@ -2458,7 +2480,7 @@ export function createDispatcher(options = {}) {
      * 同时后台预热。OpenCode 的档位是**逐模型**的（实测 `big-pickle` 等 4 个模型根本没有
      * variants 键），故这里按 **modelId → levels** 记录，而不是给一个引擎级并集。 */
     const ocLevels = opencodeEffortCache?.value ?? null;
-    if (opencodeEffortCache == null || nowMs() - opencodeEffortCache.at >= QODER_EFFORT_TTL_MS) {
+    if (!effortCacheFresh(opencodeEffortCache)) {
       void refreshOpenCodeEfforts();
     }
     return {
@@ -2482,6 +2504,7 @@ export function createDispatcher(options = {}) {
     opencodeEffortInFlight = (async () => {
       try {
         const r = await runOpenCodeProbe(['--list-models', '--with-variants'], 180000);
+        let value = null;
         if (r.ok) {
           /* 解析 `[opencode-run] variants <modelId>=<a,b,c>` → {modelId: [levels]}。
            * **只为真的报了档位的模型建条目**：没有档位维度的模型（真机 4 个）如实缺席。 */
@@ -2492,13 +2515,18 @@ export function createDispatcher(options = {}) {
             const lv = m[2].split(',').map((s) => s.trim()).filter(Boolean);
             if (lv.length) map[m[1]] = lv;
           }
-          opencodeEffortCache = { at: nowMs(), value: Object.keys(map).length ? map : null };
-        } else if (opencodeEffortCache == null) {
-          opencodeEffortCache = { at: nowMs(), value: null }; // 探测失败且无旧值 ⇒ 留空（不编造）
+          if (Object.keys(map).length) value = map;
+        }
+        /* ZB-56：成功才用长 TTL；失败/空结果用**短 TTL**（见 Qoder 侧的注释）—— */
+        if (value) {
+          opencodeEffortCache = { at: nowMs(), value, ok: true };
+        } else {
+          opencodeEffortCache = { at: nowMs(), value: opencodeEffortCache?.value ?? null, ok: false };
         }
         return opencodeEffortCache.value;
       } catch {
-        return opencodeEffortCache?.value ?? null;
+        opencodeEffortCache = { at: nowMs(), value: opencodeEffortCache?.value ?? null, ok: false };
+        return opencodeEffortCache.value;
       } finally {
         opencodeEffortInFlight = null;
       }
@@ -2692,6 +2720,20 @@ export function createDispatcher(options = {}) {
     });
 
     const all = [...zcodeChannelsFinal, ...opencodeChannels, ...qoderChannels];
+    /* ZB-56（用户真机反馈「思考强度选项有时候会加载不出来」）：
+     * 把**档位探测的状态**如实告诉面板 —— `pending` = 还没探到（探测在后台跑，Qoder 约 2 分钟），
+     * `ready` = 已探到。面板据此显示「档位载入中…」而不是**只列一个「默认」**让人以为这模型没档位。
+     * ⚠️ 只报状态，**不编造档位**；`none` 表示该引擎的模型确实都没有档位维度。 */
+    const levelsStatusOf = (cache) => {
+      if (cache?.ok) return 'ready';
+      if (cache?.value) return 'ready'; // 有旧值也算 ready（失败时保留旧值）
+      return 'pending';
+    };
+    const levelsStatus = {
+      zcode: zcodeChannelsFinal.some((c) => Array.isArray(c.thinkingLevels) && c.thinkingLevels.length) ? 'ready' : 'none',
+      opencode: levelsStatusOf(opencodeEffortCache),
+      qoder: levelsStatusOf(qoderEffortCache),
+    };
     /* 通道→引擎快照落盘（dispatch/startJob 同步读它把通道 id 映射到引擎）。
      * 写盘失败只记一条 warning，绝不影响本次清单返回；内容无变化时 setEngineMap 内部不重写。 */
     try {
@@ -2728,6 +2770,7 @@ export function createDispatcher(options = {}) {
       channels: all,
       engines: [...ENGINES],
       engineDetail,
+      levelsStatus, // ZB-56：逐引擎档位探测状态（ready | pending | none），面板据此显示「载入中」
       opencodeVersion: oc.version,
       warnings,
     };

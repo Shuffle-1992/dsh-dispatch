@@ -441,6 +441,8 @@ window.__ModuleLoader__.load({
         /* ZB-55：三引擎实测 11 档 —— 下方 6 个补齐（原先掉回英文原文 none/minimal/medium/xhigh …） */
         thinkNone: '无思考', thinkMinimal: '最小强度', thinkMedium: '中等强度', thinkXhigh: '极高强度',
         thinkAuto: '自动', thinkUltracode: '极限强度',
+        /* ZB-56：档位探测还没出结果时的占位（只报状态、不编造档位） */
+        thinkLoading: '档位载入中…',
         thinkingFollow: '跟随通道', dispatchThinkingHint: '跟随通道=按通道设置的思考强度派发（在「通道」分区设置）；具体档位=本条派发严格生效（仅新建会话）',
         chanThinkingHint: '通道默认思考强度：Agent决定=由派发方 Agent 按任务自行改传具体档位；具体档位=给派发 Agent 的硬性规定（未显式指定的派发一律按它执行，仅新建会话生效）',
         thinkingHint: 'Agent决定=由派发方按任务判断并改传具体档位；具体档位严格生效（仅新建会话；--resume 沿用原会话档位）',
@@ -553,6 +555,8 @@ window.__ModuleLoader__.load({
         /* ZB-55: three engines actually report 11 levels — these 6 used to fall back to the raw id. */
         thinkNone: 'None', thinkMinimal: 'Minimal', thinkMedium: 'Medium', thinkXhigh: 'Extra high',
         thinkAuto: 'Auto', thinkUltracode: 'Ultracode',
+        /* ZB-56: placeholder while the effort-level probe is still pending (report state, never invent levels). */
+        thinkLoading: 'Loading effort levels…',
         thinkingFollow: 'Follow channel', dispatchThinkingHint: "Follow channel = dispatch with the channel's thinking setting (set in the Channels section); a concrete level is enforced for this dispatch (new sessions only)",
         chanThinkingHint: 'Channel default thinking: Agent decides = the dispatching agent picks a concrete level per task; a concrete level is a hard rule for dispatched agents (dispatches without an explicit level follow it; new sessions only)',
         thinkingHint: 'Agent decides = the dispatching agent picks a concrete level per task; a concrete level is enforced (new sessions only; --resume keeps the session level)',
@@ -1225,7 +1229,14 @@ window.__ModuleLoader__.load({
         async channels() {
           try {
             const r = await face.channels();
-            return { ok: true, channels: r?.channels ?? [], warnings: r?.warnings ?? [] };
+            /* ZB-56：`levelsStatus`（逐引擎档位探测状态 ready/pending/none）由 core 挂在**顶层** ——
+             * 这里必须原样透传，面板/配置卡才能如实显示「档位载入中…」而不是"只有默认"。 */
+            return {
+              ok: true,
+              channels: r?.channels ?? [],
+              warnings: r?.warnings ?? [],
+              levelsStatus: r?.levelsStatus ?? null,
+            };
           } catch (e) {
             return errOf(e);
           }
@@ -1404,7 +1415,7 @@ window.__ModuleLoader__.load({
         dismiss: denied,
         retry: denied,
         tail: async (id) => ({ ok: true, id, lines: [] }),
-        channels: async () => ({ ok: true, channels: [], warnings: [] }),
+        channels: async () => ({ ok: true, channels: [], warnings: [], levelsStatus: null }),
         channelGet: denied,
         channelSet: denied,
         fallbackGet: denied,
@@ -1735,7 +1746,14 @@ window.__ModuleLoader__.load({
         },
         /* ---- Z6 demo 增量：通道 / 续跑 / 降级链（与真实 dispatcher 语义同形） ---- */
         async channels() {
-          return { ok: true, channels: demoChannels.map((c) => ({ ...c, models: [...c.models] })), warnings: [] };
+          /* ZB-56：与真实面同形 —— `levelsStatus` 也带上（demo 的档位是静态声明 ⇒ null = 未知，
+           * 走"正常列档位"分支；不是 pending，不会显示"载入中"）。 */
+          return {
+            ok: true,
+            channels: demoChannels.map((c) => ({ ...c, models: [...c.models] })),
+            warnings: [],
+            levelsStatus: null,
+          };
         },
         async channelGet() {
           return { ok: true, channel: { ...demoChannel } };
@@ -2421,7 +2439,7 @@ window.__ModuleLoader__.load({
      *  浮窗与配置卡共用；写入时**只发本块引擎**那一份 order（core 按引擎合并 ⇒ 互不干扰）。
      *  `engineName`：调用方**已经知道引擎**时直接给（配置卡按引擎编辑，agg 可能为空）；
      *  不给则从折叠条目推断（浮窗两块：主通道 / 降级目标）。 */
-    const makeSeqBlock = ({ owner, agg, candidates, channels, sequential, onSet, engineName }) => {
+    const makeSeqBlock = ({ owner, agg, candidates, channels, sequential, onSet, engineName, levelsStatus }) => {
       const engine = engineName ? engineOf(engineName) : (agg ? engineOf(agg.engine) : null);
       const stored = engine && Array.isArray(sequential?.order?.[engine]) ? sequential.order[engine] : [];
       /* 显示顺序 = 三段拼接（**从上到下 = 尝试次序**）：
@@ -2475,6 +2493,8 @@ window.__ModuleLoader__.load({
       };
       return {
         owner, engine, list, stale, labelOf, levelsOf, levelOf, move,
+        /* ZB-56：该引擎的档位探测状态（ready/pending/none/null=未知）—— 行渲染据此显示「档位载入中…」 */
+        levelsStatus: levelsStatus ?? null,
         setLevel: (m, lv) => write(list, { route: m, level: lv }),
       };
     };
@@ -2486,7 +2506,7 @@ window.__ModuleLoader__.load({
     /** 顺序派发的"两块列表"（**浮窗**用）：
      *  · 主通道模型为空 ⇒ 主块；
      *  · 降级目标模型为空 ⇒ 降级块（与主块**同一引擎**时去重 —— 列表按引擎存，重复显示会误导成两份）。 */
-    const buildSeqBlocks = ({ channels, channel, fallback, sequential, onSet }) => {
+    const buildSeqBlocks = ({ channels, channel, fallback, sequential, onSet, levelsStatusByEngine }) => {
       const list = Array.isArray(channels) ? channels : [];
       const provider = channel?.provider;
       const sel = foldedEntryFor(list, provider) ?? list.find((c) => c.id === provider) ?? null;
@@ -2496,17 +2516,19 @@ window.__ModuleLoader__.load({
       const fbModel = fbModelValue(fbSel, fbProvider, fbTarget);
       const seqEnabled = channel?.model == null || channel?.model === '';
       const seqFbOn = !!fallback?.enabled && fbTarget != null && fbSel != null && fbModel === '';
+      /* ZB-56：逐引擎档位探测状态（core 的 `channels().levelsStatus`）—— 缺省 null = 未知（正常列档位） */
+      const lvStatusOf = (agg) => (agg ? (levelsStatusByEngine?.[engineOf(agg.engine)] ?? null) : null);
       const blocks = [];
       if (seqEnabled) {
         blocks.push(makeSeqBlock({
           owner: 'main', agg: sel, candidates: seqCandidatesOf(sel, provider, channel?.model),
-          channels: list, sequential, onSet,
+          channels: list, sequential, onSet, levelsStatus: lvStatusOf(sel),
         }));
       }
       if (seqFbOn && (!seqEnabled || !sel || engineOf(fbSel.engine) !== engineOf(sel.engine))) {
         blocks.push(makeSeqBlock({
           owner: 'fallback', agg: fbSel, candidates: seqCandidatesOf(fbSel, fbProvider, fbTarget?.model),
-          channels: list, sequential, onSet,
+          channels: list, sequential, onSet, levelsStatus: lvStatusOf(fbSel),
         }));
       }
       return blocks;
@@ -2516,13 +2538,13 @@ window.__ModuleLoader__.load({
       .find((c) => engineOf(c.engine) === engineOf(engine)) ?? null;
     /** **按引擎**构造顺序块（插件详情页配置卡用）——与"主通道/降级是否顺序派发"**解耦**：
      *  只要选中该引擎就渲染它的列表。用户打开插件配置就是**去设置**，不能要求"先开了才有东西配"（鸡生蛋）。 */
-    const makeEngineSeqBlock = ({ channels, engine, sequential, onSet }) => {
+    const makeEngineSeqBlock = ({ channels, engine, sequential, onSet, levelsStatus }) => {
       const list = Array.isArray(channels) ? channels : [];
       const agg = foldEngineAgg(list, engine);
       return makeSeqBlock({
         owner: engineOf(engine), engineName: engine, agg,
         candidates: agg && Array.isArray(agg.models) ? agg.models : [],
-        channels: list, sequential, onSet,
+        channels: list, sequential, onSet, levelsStatus,
       });
     };
     /** 主通道当前引擎（按折叠条目解析 provider；解析不到 ⇒ null）。 */
@@ -2567,11 +2589,25 @@ window.__ModuleLoader__.load({
     function SeqBlocksView({ blocks, offline, busy, saving, hint, hintTitle }) {
       if (!blocks || !blocks.length) return null;
       const row = { display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0' };
-      const idxW = { flex: '0 0 22px', textAlign: 'right' };
-      const nameW = { flex: '1 1 auto', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
-      const lvW = { flex: '0 0 104px', padding: '1px 6px' };
-      const sortW = { flex: '0 0 56px', display: 'flex', justifyContent: 'center', gap: '4px' };
-      const btnW = { flex: '0 0 24px', padding: '1px 0', textAlign: 'center', lineHeight: '16px' };
+      /* ZB-57（用户反馈「下拉偏高偏胖、与 ↑↓ 不齐」）：把行内元素统一成 **24px 高 + 垂直居中**。
+       * 下拉显式定死 height/box-sizing/font-size/padding，压住 `.dsp-select` 的 `font:inherit` + 默认 padding
+       * ⇒ 与 24px 方形 ↑↓ 按钮同高、视觉重量相当；序号/模型名也用 lineHeight 24px 对齐基线。
+       * 列宽与列头**严格一致**：序号 22px / 档位 104px / 排序 56px（模型列 flex 自适应 + 省略号）。 */
+      const idxW = { flex: '0 0 22px', textAlign: 'right', lineHeight: '24px' };
+      const nameW = {
+        flex: '1 1 auto', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        lineHeight: '24px',
+      };
+      const lvW = {
+        flex: '0 0 104px', height: '24px', boxSizing: 'border-box',
+        padding: '0 6px', fontSize: '11px', lineHeight: '16px', borderRadius: '4px',
+      };
+      const sortW = { flex: '0 0 56px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' };
+      const btnW = {
+        flex: '0 0 24px', width: '24px', height: '24px', minWidth: '24px', padding: 0,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '11px', lineHeight: '1', borderRadius: '4px',
+      };
       return h('div', { className: 'dsp-stack', 'data-dsp-sequential': 'list' },
         h('div', { className: 'dsp-note', role: 'status', title: hintTitle ?? (offline ? t('seqOfflineHint') : undefined) },
           hint ?? t('seqHint')),
@@ -2603,6 +2639,10 @@ window.__ModuleLoader__.load({
                 /* ZB-52b：该行模型的档位下拉选项（取不到档位声明 ⇒ 只有「默认」，不瞎列）。 */
                 const lvList = b.levelsOf(m);
                 const curLv = b.levelOf(m);
+                /* ZB-56：该引擎档位探测**还没出结果**且这行还没探到档位 ⇒ 显示「档位载入中…」
+                 * （disabled、值保持默认），而不是只给一个「默认」让人误以为该模型没有档位维度。
+                 * 已探到的档位（缓存旧值）照常列 —— 那是真数据，不藏。 */
+                const lvPending = b.levelsStatus === 'pending' && lvList.length === 0;
                 /* 存值不在当前档位集里（探测表变化 / 该模型档位暂时没探测到）⇒ 显式列出并标注，
                  * 否则 <select value> 命不中 option 会显示首项「默认」，与真实存值不符（ZB-31 同类坑）。 */
                 const lvStale = curLv != null && !lvList.includes(curLv);
@@ -2617,18 +2657,24 @@ window.__ModuleLoader__.load({
                     style: { ...nameW, fontFamily: T.mono },  // 等宽字体利于读模型 id
                     title: b.stale.includes(m) ? `${m}${t('seqUnavailable')}` : b.labelOf(m),
                   }, b.stale.includes(m) ? `${b.labelOf(m)}${t('seqUnavailable')}` : b.labelOf(m)),
-                  /* 逐模型档位下拉：value = 原始档位字符串（'' = 引擎默认）；label = 中文标签。 */
+                  /* 逐模型档位下拉：value = 原始档位字符串（'' = 引擎默认）；label = 中文标签。
+                   * ZB-56：该引擎 `levelsStatus === 'pending'` 且**还没探到**任何档位 ⇒ 首项显示
+                   * 「档位载入中…」（disabled，值仍为空=保持默认），而不是只列一个「默认」让人
+                   * 以为这模型没档位；探测完成后数据自然重渲、自动恢复可选项（不轮询）。 */
                   h('select', {
                     className: 'dsp-select', 'data-dsp-seq-level': m,
+                    ...(lvPending ? { 'data-dsp-seq-level-pending': '1' } : {}),
                     value: curLv ?? '',
-                    disabled: busy,
-                    title: lvAria, 'aria-label': lvAria,
+                    disabled: busy || lvPending,
+                    title: lvPending ? t('thinkLoading') : lvAria, 'aria-label': lvPending ? t('thinkLoading') : lvAria,
                     style: lvW,
                     onChange: (e) => b.setLevel(m, e.target.value),
                   },
-                    h('option', { key: '__default', value: '' }, t('seqLevelDefault')),
-                    lvStale ? h('option', { key: '__stale', value: curLv }, `${thinkingLabel(curLv)}（${t('thinkingStale')}）`) : null,
-                    lvList.map((lv) => h('option', { key: lv, value: lv }, thinkingLabel(lv)))),
+                    lvPending
+                      ? h('option', { key: '__default', value: '', disabled: true }, t('thinkLoading'))
+                      : h('option', { key: '__default', value: '' }, t('seqLevelDefault')),
+                    lvPending ? null : (lvStale ? h('option', { key: '__stale', value: curLv }, `${thinkingLabel(curLv)}（${t('thinkingStale')}）`) : null),
+                    lvPending ? null : lvList.map((lv) => h('option', { key: lv, value: lv }, thinkingLabel(lv)))),
                   /* ↑↓ 两个方形小按钮（不用拖拽库）。首/末项各自禁用对应方向；保存中整块禁用。 */
                   h('span', { style: sortW },
                     h('button', {
@@ -3014,6 +3060,8 @@ window.__ModuleLoader__.load({
       const seqEnabled = channel.model == null || channel.model === '';
       const seqBlocks = buildSeqBlocks({
         channels, channel, fallback, sequential, onSet: onSequentialSet,
+        /* ZB-56：逐引擎档位探测状态（`channelsInfo.levelsStatus`）⇒ 浮窗的档位下拉同样能显示「载入中」 */
+        levelsStatusByEngine: channelsInfo?.levelsStatus ?? null,
       });
 
       return h('div', { className: 'dsp-stack' },
@@ -3916,7 +3964,9 @@ window.__ModuleLoader__.load({
         return () => { try { release(); } catch { /* ignore */ } };
       }, []);
       // Z6：通道清单 / 默认通道 / 降级链（挂载时拉一次；切换即时回显，wire 返回后用权威值校正）
-      const [channelsInfo, setChannelsInfo] = useState({ channels: [], warnings: [] });
+      /* ZB-56：`levelsStatus`（逐引擎档位探测状态）**跟着通道清单一起来**（core 挂在顶层）——
+       * 面板与详情页配置卡据此显示「档位载入中…」而不是"只有默认"。 */
+      const [channelsInfo, setChannelsInfo] = useState({ channels: [], warnings: [], levelsStatus: null });
       const [channel, setChannelState] = useState({ provider: 'plan', model: 'GLM-5.3-Flash' });
       const [fallback, setFallbackState] = useState({ enabled: false, chain: [], targets: [], target: null });
       /* ZB-52：顺序派发（每引擎一份模型顺序）。初值 = 三引擎空表 ——
@@ -3943,8 +3993,10 @@ window.__ModuleLoader__.load({
         let alive = true;
         Promise.resolve(channels()).then((r) => {
           if (!alive) return;
-          if (r && r.ok) { setChannelsInfo({ channels: r.channels ?? [], warnings: r.warnings ?? [] }); setChanError(null); }
-          else setChanError(String((r && r.error) || 'channels() 未返回 ok'));
+          if (r && r.ok) {
+            setChannelsInfo({ channels: r.channels ?? [], warnings: r.warnings ?? [], levelsStatus: r.levelsStatus ?? null });
+            setChanError(null);
+          } else setChanError(String((r && r.error) || 'channels() 未返回 ok'));
         }).catch((e) => { if (alive) setChanError(String(e?.message ?? e)); });
         Promise.resolve(channelGet()).then((r) => {
           if (alive && r && r.ok && r.channel && r.channel.provider) setChannelState(r.channel);
@@ -3969,7 +4021,9 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         const snapChans = Array.isArray(snapshot?.channels) ? snapshot.channels : null;
         if (!snapChans || snapChans.length === 0) return;
-        setChannelsInfo((prev) => (prev.channels.length === 0 ? { channels: snapChans, warnings: prev.warnings ?? [] } : prev));
+        /* ⚠️ `prev.channels.length === 0 ? { channels: snapChans` 这段**字面形状**被 engine-ui.test.mjs 钉住
+         * （ZB-56 曾把它折行 ⇒ 测试红）；新增的 `levelsStatus` 只能加在同一行里。 */
+        setChannelsInfo((prev) => (prev.channels.length === 0 ? { channels: snapChans, warnings: prev.warnings ?? [], levelsStatus: snapshot?.levelsStatus ?? prev.levelsStatus ?? null } : prev));
         setChanError(null);
       }, [snapshot]);
 
@@ -4097,7 +4151,7 @@ window.__ModuleLoader__.load({
      * 样式沿用既有 `dsp-*` 类名 + 主题令牌（`DSP_CSS_VARS` 挂在卡片根上，否则 `var(--dsp-*)` 不解析）。 */
     function DispatchConfigCard() {
       const { conn, channels, channelGet, fallbackGet, sequentialGet, sequentialSet } = useWire();
-      const [channelsInfo, setChannelsInfo] = useState({ channels: [], warnings: [] });
+      const [channelsInfo, setChannelsInfo] = useState({ channels: [], warnings: [], levelsStatus: null });
       /* ZB-55：**区分"还在加载"与"真的没有模型"** —— 首帧通道清单还没到时，
        * 旧实现会显示「该引擎当前没有可选模型」= **谎报**。现在用三态：
        *   'loading'（还没拿到）→ 卡片显示加载指示、不渲染引擎按钮/列表；
@@ -4119,8 +4173,12 @@ window.__ModuleLoader__.load({
         let alive = true;
         Promise.resolve(channels()).then((r) => {
           if (!alive) return;
-          if (r && r.ok) { setChannelsInfo({ channels: r.channels ?? [], warnings: r.warnings ?? [] }); setChansState('ready'); }
-          else { setErr(String((r && r.error) || 'channels() 未返回 ok')); setChansState('error'); }
+          if (r && r.ok) {
+            /* ZB-56：`levelsStatus` 也收下（core 挂在 channels() 顶层）—— 逐引擎 pending 时
+             * 该引擎的档位下拉显示「档位载入中…」，而不是让人以为这模型没档位。 */
+            setChannelsInfo({ channels: r.channels ?? [], warnings: r.warnings ?? [], levelsStatus: r.levelsStatus ?? null });
+            setChansState('ready');
+          } else { setErr(String((r && r.error) || 'channels() 未返回 ok')); setChansState('error'); }
         }).catch((e) => { if (alive) { setErr(String(e?.message ?? e)); setChansState('error'); } });
         Promise.resolve(channelGet()).then((r) => {
           if (alive && r && r.ok && r.channel && r.channel.provider) setChannelState(r.channel);
@@ -4159,7 +4217,10 @@ window.__ModuleLoader__.load({
       const activeEng = pickedEng ?? defaultSeqEngine(chans, channel, sequential);
       const usage = seqEngineUsage(chans, channel, fallback, activeEng);
       /* 选中的引擎**始终**渲染它的顺序列表（哪怕当前没被任何链使用 —— 否则就是"先开了才有东西配"的鸡生蛋）。 */
-      const block = makeEngineSeqBlock({ channels: chans, engine: activeEng, sequential, onSet });
+      const block = makeEngineSeqBlock({
+        channels: chans, engine: activeEng, sequential, onSet,
+        levelsStatus: channelsInfo.levelsStatus?.[activeEng] ?? null,  // ZB-56：pending ⇒ 行内显示「档位载入中…」
+      });
       const offline = conn === 'offline';
       /* 该引擎"没有模型"的**诚实原因**（探针未返回 / 执行器未配置等，来自 core 的 warnings）——
        * 有原因就显示原因，而不是干巴巴一句"没有可选模型"（也不能谎称"还在加载"）。 */
