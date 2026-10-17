@@ -142,9 +142,15 @@ node bin/dispatch.mjs dispatch --kind prompt --prompt "只回答 OK" \
 # 执行器路径覆盖：--opencode-runner / --qoder-runner <abs path>，或 DSP_OPENCODE_RUNNER / DSP_QODER_RUNNER
 ```
 
-> ⚠️ **改 Host 半边（`index.js` / `wire.host.mjs` / `core/*`）后需完全重启 DSH**；
-> 执行器（`collab-kit/*.mjs`）**下次派发即生效**（见文末「生效语义」）；客户端（`client.js` / `locale/*`）
-> **无构建步骤，刷新页面即可**。
+> ⚠️ **生效语义（2026-10-17 于 DSH 0.2.1 复测，权威版见 `pitfalls.md` 顶部条目）**：
+> - **Host 半边**（`index.js` / `wire.host.mjs` / `core/*`）：0.2.1 的重组合会替换**磁盘上已变化的 link 包目标**
+>   ⇒ 改动在**下一次重组合**时生效，**不必重启**（实测今天两次：信标重写 + 活体工具 schema 出现新参数）。
+>   ⚠️ **落盘本身不触发重组合**（touch 复现失败）⇒ 判据用信标 `at` / 活体 schema，要确定性生效就重启 DSH。
+>   ⚠️ **改宿主文件前先确认没有 running/queued job**：替换会跑卸载清理，它会 **kill 掉所有 running/queued job**，
+>   而"下一次重组合"何时来不由你决定。
+> - 执行器（`collab-kit/*.mjs`）：**下次派发即生效**（每次 spawn 新进程）。
+> - 客户端（`client.js` / `locale/*`）：**无构建步骤，刷新页面即可**。
+> - **不要**把插件目录写进 `hmr.config.root`（"存盘即重载"对本插件等于"存盘即杀任务"）。
 
 ## ⚠️ 凭据从哪来 + 报「身份验证失败 / 401」怎么办
 
@@ -382,11 +388,11 @@ wait(id, timeoutSec)     → { ok:true, job:{…终态…}, waitedSec, timedOut:
 （`done`/exit 0/14.1s）——**派发它的会话当时已结束本轮且未做任何等待**，落地瞬间被自动拉起并收到通知，只收到一次。
 同刻信标 `wakeActive:true / agentsVisible:true / systemPromptHintActive:true`。
 
-> ⚠️ **改 host 代码（`index.js` / `notify.mjs` / `wire.host.mjs`）后必须重启 DSH 才生效**：
-> HMR 的模块监听根是 profile 目录且默认忽略 `**/node_modules`，本插件在仓库路径 + 经
-> `profiles/<p>/node_modules/@local/...` 软链装配 —— 两头都不在监听面内；只改 profile patch
-> 会「重新 apply 已缓存的模块」。判据：信标里没出现你这次新增的字段 = 跑的还是旧模块。
-> （也别把插件目录塞进 `hmr.root`：卸载清理会 kill 所有 running job。）
+> ⚠️ **生效语义（2026-10-17 更新，权威版见 `pitfalls.md` 顶部条目）**：0.2.1 起，**重组合会替换磁盘上已变化的
+> link 包目标** ⇒ 改 `index.js`/`notify.mjs`/`wire.host.mjs` 在**下一次重组合**时生效、**不必重启**
+> （证据：信标重写 + 活体工具 schema 出现新参数）；但**落盘不触发重组合**，判据用信标/活体 schema。
+> ⚠️ **替换会跑卸载清理，kill 掉所有 running/queued job** ⇒ 改宿主文件前先确认没有正在跑的任务。
+> （也**别**把插件目录塞进 `hmr.root`：那等于"存盘即杀 job"。）
 
 ## 其他会话如何发现并调用（Z13）
 
@@ -673,7 +679,7 @@ API：`getSequential()` → `{order, levels, sequentialCount}`；`setSequential(
 - **config**：`switchPath`（string，默认空 = 未接入宿主项目；由 profile patch 指定；测试可指向临时文件密封）。字段清单见上文「config 说明」表（代码里 DEFAULTS / fallbackConfig / schema 三处同源）。
 - **面板（UI）**：标题栏徽标「派发：开 / 关」——`conn='live'` 时可点击切换（成功后 1s 轮询带回新快照；真实点击效果需刷新页面后确认）；远端不可用（ext/demo/offline/连接中）时显示为**只读**，tooltip 提示「未连接宿主：请在终端执行 dispatch-switch.mjs 切换」，状态未知时如实显示「派发：未知」（浏览器读不到宿主文件，不谎报）。关闭态下派发按钮禁用并显示原因（`switchOffBlocked`）。
 - **agent 工具**：`dispatch` 描述首行动态携带当前状态（注册时生成）；`action=status` 查实时状态、`action=switch`（`enabled` 必填，`by`/`note` 可选）切换、`action=dispatch` 派发（关闭时被拒）。其他会话开工先 `status` 一次即知。
-- **重载提示**：本节属宿主半边（`wire.host.mjs`/`index.js`）改动——完全退出 DSH 再启动才生效（pitfalls：cordis `_reload` 不重新 import）；客户端半边（`client.js`）刷新页面即可。
+- **重载提示**：本节属宿主半边（`wire.host.mjs`/`index.js`）改动 —— 0.2.1 下**可能无需重启**（重组合会替换已变化的 link 包），但触发时机不确定，判据见 `pitfalls.md` 顶部条目；客户端半边（`client.js`）刷新页面即可。
 
 ## 验证步骤（creator 会话，安装后）
 

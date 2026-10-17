@@ -2,6 +2,30 @@
 
 > 按全局规则维护：遇到踩坑问题登记于此，避免重复踩坑。新条目置顶。
 
+## 2026-10-17 DSH 0.2.1：重组合会替换 link 插件的新代码（不必重启），但**替换会 kill 掉 running job**
+
+**实测事实（不是推测）**：DSH 主进程自 17:48:09 起**从未重启**，但 `dispatch/.data/state/activation.json` 在
+18:08:36 与 18:12:03 **被重写两次**（= 插件 `apply()` 重跑 = 插件被就地替换）；同一时段两条硬证据：
+真机 `dispatch action=list` 返回了新代码才有的 `shape:"brief"`/`counts`/`note`，活体 `cordis_inspect_query`
+host/Tool 里 `dispatch` 工具的 parameters 出现了新代码才有的 `limit`/`full`。
+
+1. **机制（0.2.1 新增能力）**：重组合（recomposition）时会替换**磁盘上已变化的 link 包目标** ——
+   0.2.0 时代重组合只会**重新 apply 已缓存的模块**（所以那时"改 host 必须重启"是对的）。
+   ⇒ 正确表述：**host 代码改动会在"下一次重组合"时生效（不必重启）**；重组合由 profile patch/manifest
+   变更与插件管理器操作触发。
+2. ⚠️ **但落盘本身不触发重组合**：18:18 只 `touch` 了 `index.js`（mtime 变、内容不变），等满 2 分钟信标毫无变化。
+   （18:11 那次 touch 后 30s 出现了替换，事后看是"恰好赶上一轮重组合"。）⇒ **别把"改完就自动生效"当保证**，
+   判据永远用信标/活体 schema，要确定性生效就重启：
+   - `Get-Item dispatch\.data\state\activation.json | Select LastWriteTime`（时间变新 = 插件重跑过）；
+   - `cordis_inspect_query {platform:'host',provider:'Tool',method:'listTools'}`（看新参数/新描述在不在）。
+3. ⚠️ **最要命的一条：替换 = 卸载 + 重新 apply，而卸载清理会 kill 所有 running/queued job** ——
+   `dispatch/index.js` 的 `disposeAll()` 里 `dispatcher.kill(j.id, 'plugin unloading: dispatcher disposed')`。
+   ⇒ 纪律：**改宿主半边文件之前先确认没有 running/queued job**（`action=list` 一眼可见）。
+   注意触发权不在你手里：改完代码后，**别人/别处任何一次重组合**（比如在设置里拨一下插件开关）
+   就会执行替换并杀掉当时正在跑的任务。
+4. **因此不要**把本插件目录写进 `hmr.config.root`（"存盘即重载"在这里 = "存盘即杀 job"）：这是**负向**优化。
+   2026-09-30 第 3 条已给过同样的告诫，0.2.1 下更要守住。客户端半边（`client.js`/locale）仍以**刷新页面**为准。
+
 ## 2026-10-05 ZB-27（会话标题行入口改弹窗；以及「批量改大文件的锚点自伤」）
 
 用户反馈：入口与同排不一致、弹窗要像子智能体那样悬浮在旁边、取消右下角最小化药丸。
