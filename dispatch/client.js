@@ -66,6 +66,18 @@ window.__ModuleLoader__.load({
     const BUNDLE_CONFIG_SLOT = 'plugins.bundle.config';
     const BUNDLE_CONFIG_KEY = 'dsh-dispatch';
 
+    /* ── D1：`dispatch` 工具调用的**会话内专属卡片**（DSH 0.2.1 新增的 keyed 槽位）──
+     * 契约（已对 DSH 0.2.1-rc.2 的 ui-tool 源码逐行核实，别凭记忆改）：
+     *   ui-tool 的 `ToolCall` 把 owner = `{callId, toolName, phase, block, openFile, cwd, home,
+     *   loadImage, useDisclosure, inspect}` 交给
+     *   `renderSlot('tool.call.toolview', owner, { entryKey: toolName, fallback: 通用卡片 })`
+     *   —— **命中 key ⇒ 替换通用卡片**；键写错就永不命中（回落 fallback 通用卡片，不会白屏）。
+     * 本插件在 index.js 里用 `defineTool({ name: 'dispatch' })` 注册工具 ⇒ key 取工具名 `dispatch`。
+     * 活体目录原文：「Any name is allowed, including tools registered by your package.
+     * Register with key: '<tool name>'; a typo never renders.」 */
+    const TOOLVIEW_SLOT = 'tool.call.toolview';
+    const TOOLVIEW_KEY = 'dispatch';
+
     /* ZB-27：入口改为「点开即弹窗」后，ZB-24 那份**模块级共享状态 store 已不需要** ——
      * 弹窗内容（PanelBody）自己持 wire 并渲染实时数据，入口只是个开合开关（局部 useState）。
      * 原 store 的用途是"让另一个渲染器零网络成本显示计数徽标"，现在没有第二个渲染器了。 */
@@ -420,6 +432,45 @@ window.__ModuleLoader__.load({
       '.dsp-filelock{display:flex;align-items:center;gap:6px;font-size:11px;line-height:16px;min-width:0;}',
       '.dsp-filelock-f{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:' + T.text2 + ';}',
       '.dsp-filelock-who{flex:none;font-weight:600;color:' + T.text + ';}',
+      /* ── D1：`dispatch` 工具卡片（会话内，`tool.call.toolview`）──
+       * ⚠️ 这张卡渲染在**会话流**里，不在 `.dsp-menu` 子树内 ⇒ 拿不到
+       * `border-box` 作用域与 12px 基准字号，必须自带：见下面的 `.dsp-tv-card` / `.dsp-tv-card *`。
+       * 颜色一律走主题令牌（明暗双主题自适应），零字面色值。 */
+      '.dsp-tv-card{box-sizing:border-box;display:flex;flex-direction:column;min-width:0;font-size:13px;line-height:18px;color:' + T.text2 + ';}',
+      '.dsp-tv-card *{box-sizing:border-box;}',
+      '.dsp-tv-row{display:flex;align-items:center;gap:6px;min-width:0;min-height:22px;padding:0 2px;border-radius:4px;transition:background-color .15s ease;}',
+      '.dsp-tv-row[role="button"]{cursor:pointer;}',
+      '.dsp-tv-row:hover{background:' + T.hover + ';}',
+      '.dsp-tv-row:focus-visible{outline:1px solid ' + T.text3 + ';outline-offset:2px;}',
+      '.dsp-tv-caret{flex:none;display:inline-flex;justify-content:center;width:10px;font-size:10px;line-height:18px;color:' + T.text3 + ';}',
+      '.dsp-tv-title{flex:none;font-weight:600;color:' + T.text + ';}',
+      '.dsp-tv-sep{flex:none;width:2px;height:2px;border-radius:1px;background:' + T.text3 + ';}',
+      '.dsp-tv-action{flex:none;color:' + T.text2 + ';}',
+      /* 摘要列：flex:1 + min-width:0 + 省略号 —— 长目标/长错误不会把这一行撑破。 */
+      '.dsp-tv-sum{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:' + T.text3 + ';}',
+      '.dsp-tv-tag{flex:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:' + T.text3 + ';}',
+      '.dsp-tv-meta{flex:none;font-size:11px;color:' + T.text3 + ';white-space:nowrap;}',
+      '.dsp-tv-pill{flex:none;font-size:11px;line-height:16px;padding:0 6px;border:1px solid ' + T.border + ';border-radius:8px;color:' + T.text2 + ';white-space:nowrap;}',
+      /* 状态色（按 job 状态族映射到既有令牌；文字本身也是状态文本 ⇒ 不只靠颜色表达）。 */
+      '.dsp-tv-pill.s-queued{color:' + T.stQueued + ';}',
+      '.dsp-tv-pill.s-running{color:' + T.stRunning + ';}',
+      '.dsp-tv-pill.s-done{color:' + T.stDone + ';}',
+      '.dsp-tv-pill.s-failed{color:' + T.stFailed + ';}',
+      '.dsp-tv-pill.s-killed{color:' + T.stKilled + ';}',
+      '.dsp-tv-pill.s-paused{color:' + T.stPaused + ';}',
+      '.dsp-tv-pill.s-interrupted{color:' + T.stInterrupted + ';}',
+      '.dsp-tv-pill.s-prep{color:' + T.stRunning + ';}',
+      '.dsp-tv-body{display:flex;flex-direction:column;gap:4px;min-width:0;margin:2px 0 6px 16px;padding:6px 8px;border-left:2px solid ' + T.border + ';}',
+      '.dsp-tv-kv{display:flex;gap:8px;min-width:0;font-size:12px;line-height:17px;}',
+      '.dsp-tv-kv-k{flex:none;min-width:56px;color:' + T.text3 + ';}',
+      '.dsp-tv-kv-v{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;color:' + T.text2 + ';}',
+      '.dsp-tv-err{font-size:12px;line-height:17px;overflow-wrap:anywhere;color:' + T.danger + ';}',
+      '.dsp-tv-note{font-size:11px;line-height:16px;overflow-wrap:anywhere;color:' + T.text3 + ';}',
+      /* 原文区：默认折叠 + 展开后**限高滚动**（`action=list` 的载荷可达数十 KB，绝不整段铺开）。 */
+      '.dsp-tv-rawbtn{display:inline-flex;align-items:center;align-self:flex-start;gap:4px;margin-top:2px;padding:1px 6px;border:1px solid ' + T.border + ';border-radius:6px;background:transparent;font:inherit;font-size:11px;line-height:16px;color:' + T.text3 + ';cursor:pointer;transition:background-color .15s ease,color .15s ease;}',
+      '.dsp-tv-rawbtn:hover{background:' + T.hover + ';color:' + T.text + ';}',
+      '.dsp-tv-raw{max-height:220px;overflow:auto;margin:2px 0 0;padding:6px;border-radius:4px;background:' + T.sunken + ';font-family:' + T.mono + ';font-size:11px;line-height:16px;white-space:pre-wrap;word-break:break-all;}',
+      '.dsp-tv-empty{font-size:11px;line-height:16px;color:' + T.text3 + ';}',
     ].join('\n');
 
     /* ZB-21（用户报告「面板发生重影，变成透明在左上角」）：
@@ -589,6 +640,25 @@ window.__ModuleLoader__.load({
         seqEmpty: '（该引擎当前没有可选模型；列表为空时顺序派发不生效）',
         seqUnavailable: '（当前不可用）',
         seqOfflineHint: '未连接宿主：顺序设置存在宿主工作目录，连接后才可读写',
+        /* D1：`dispatch` 工具调用的会话内专属卡片（tool.call.toolview）。
+         * ⚠️ 必须与 locale/zh.json、locale/en.json **逐键逐值一致**（single-source.test.mjs ⑤ 守门）。 */
+        tvTitle: '派发',
+        tvPreparing: '正在派发…',
+        tvDetail: '详情',
+        tvAction: '动作',
+        tvState: '状态',
+        tvJobId: '任务 id',
+        tvEngineCh: '引擎/通道',
+        tvTailHint: '用 action=tail 读输出',
+        tvJobs: '任务数',
+        tvLines: '行',
+        tvArgs: '原始入参',
+        tvResult: '原始结果',
+        tvRawOpen: '展开原文',
+        tvRawClose: '收起原文',
+        tvTruncatedA: '（已截断，原文共 ',
+        tvTruncatedB: ' 字符）',
+        tvEmpty: '（无）',
         seqLevelLabel: '档位', seqLevelDefault: '默认',
         /* ZB-54（插件详情页配置卡"按引擎编辑"）：一行短说明 + 该引擎是否正在被顺序派发。
          * ⚠️ 与 locale/zh.json、locale/en.json **逐键逐值一致**（single-source ⑤ 守门）。 */
@@ -702,6 +772,25 @@ window.__ModuleLoader__.load({
         seqEmpty: '(No selectable models for this engine; an empty list means sequential dispatch has no effect)',
         seqUnavailable: ' (currently unavailable)',
         seqOfflineHint: 'Host not connected: the sequential order lives in the host work dir and unlocks once connected',
+        /* D1: the dedicated in-conversation card for the `dispatch` tool call (tool.call.toolview).
+         * These keys must match locale/en.json and locale/zh.json word for word (single-source.test.mjs ⑤). */
+        tvTitle: 'Dispatch',
+        tvPreparing: 'Dispatching…',
+        tvDetail: 'Details',
+        tvAction: 'Action',
+        tvState: 'State',
+        tvJobId: 'Job id',
+        tvEngineCh: 'Engine / channel',
+        tvTailHint: 'Use action=tail to read the output',
+        tvJobs: 'Jobs',
+        tvLines: 'lines',
+        tvArgs: 'Raw input',
+        tvResult: 'Raw result',
+        tvRawOpen: 'Show raw text',
+        tvRawClose: 'Hide raw text',
+        tvTruncatedA: ' (truncated; full text is ',
+        tvTruncatedB: ' characters)',
+        tvEmpty: '(none)',
         seqLevelLabel: 'Effort', seqLevelDefault: 'Default',
         /* ZB-54（bundle config card: edit BY ENGINE）：one-line hint + whether this engine is in use.
          * Must match locale/en.json and locale/zh.json word for word (single-source.test.mjs ⑤). */
@@ -4601,6 +4690,402 @@ window.__ModuleLoader__.load({
           : null);
     }
 
+    /* ─────────────── D1：`dispatch` 工具的会话内卡片（`tool.call.toolview`）───────────────
+     * 目的：`dispatch` 现在走通用卡片 —— 结果是大段 JSON（`action=list` 历史上可达 70KB+），
+     * 又长又难定位。这里注册一张**紧凑可展开**的状态卡：
+     *   · 折叠行：动作 / tag / 状态胶囊 / 模型 / 耗时 / exit（一行看清"这次调用干了什么、成没成"）；
+     *   · 展开区：结构化字段（job id / 状态 / 引擎通道 / 模型 / cwd / 超时 / 锁 / 错误 / 后续动作提示）
+     *     + **按需展开**的原始入参与原始结果（限高滚动 + 截断提示，绝不把大 JSON 整段铺开）。
+     *
+     * 硬纪律（与面板同一套）：
+     *   · **绝不抛错**：下面所有解析都是纯函数 + 全 try/catch；`DispatchToolRow` 最外层再兜一层，
+     *     异常时退化成一行纯文本（工具名 + id）—— 会话其它部分不受影响。
+     *   · 除 `react` 外零 require（宿主私有包第三方拿不到）；**不用**宿主的 `args` 懒读器，
+     *     一律用 `argsRaw` 字符串自己 `JSON.parse`（契约只保证 argsRaw）。
+     *   · 颜色只走主题令牌 `T.*`（明暗双主题自适应），零字面色值。
+     *   · 文案走 `t('键')`，与 `locale/zh.json`、`locale/en.json` 三方同步（single-source 测试守门）。
+     *
+     * 阶段模型（对 ui-tool 的 `toolCallPhase()` 逐字核实）：
+     *   · `preparing` → `{phase:'preparing', callId, name}`：还没有入参 ⇒ 占位行「正在派发…」；
+     *   · `start`     → `{phase:'start', callId, name, argsRaw}`：解析入参，显示动作/目标；
+     *   · `result`    → `{kind, callId, call:{name, argsRaw}, content:[{type:'text',text}], error?, isError}`：
+     *     结果正文是**工具返回值的 JSON 字符串**（index.js `execute` 末行 `JSON.stringify(result)`），
+     *     故这里 `JSON.parse` 后按信封分派 → `{ok,job}` / `{ok,jobs}` / `{ok,…}` / `{ok:false,error}`。 */
+
+    /** 单行化：折叠行摘要只留第一行（长文本不许撑破行）。纯函数，永不抛。 */
+    const tvFirstLine = (text) => {
+      const s = typeof text === 'string' ? text : (text == null ? '' : String(text));
+      const i = s.indexOf('\n');
+      return i === -1 ? s : s.slice(0, i);
+    };
+    /** 截断（长原文不铺开）：返回 `{text, truncated, total}`。纯函数，永不抛。 */
+    const tvClip = (text, max) => {
+      const s = typeof text === 'string' ? text : (text == null ? '' : String(text));
+      const cap = Number.isFinite(max) && max > 0 ? max : 6000;
+      return s.length <= cap
+        ? { text: s, truncated: false, total: s.length }
+        : { text: s.slice(0, cap), truncated: true, total: s.length };
+    };
+    /** 宽松 JSON 解析：拿不到 **JSON 对象/数组**就返回 null（`null` 字面量、标量、坏 JSON、空串一律 null；
+     *  不抛、不猜）。数组也算"拿到了" —— 上层按字段访问，缺字段自然退化，不会抛。 */
+    const tvJson = (raw) => {
+      try {
+        if (typeof raw !== 'string' || raw === '') return null;
+        const v = JSON.parse(raw);
+        return v && typeof v === 'object' ? v : null;
+      } catch { return null; }
+    };
+    /** result 阶段的内容块 → 文本（对齐宿主的 `resultText` 契约：text 块取 text，其它块字符串化）。 */
+    const tvContentText = (block) => {
+      try {
+        const parts = [];
+        const content = Array.isArray(block && block.content) ? block.content : [];
+        for (const item of content) {
+          if (item && item.type === 'text' && typeof item.text === 'string') parts.push(item.text);
+          else if (item != null) parts.push(JSON.stringify(item, null, 2));
+        }
+        if (parts.length === 0 && block && block.error) {
+          parts.push(`${block.error.name ?? 'error'}${block.error.code ? `: ${block.error.code}` : ''}`);
+        }
+        const text = parts.join('\n');
+        return text === '' ? null : text;
+      } catch { return null; }
+    };
+    /** 计数字典 → `running×1 · done×3`（最多 6 项，多出的折成 `+N`）。纯函数，永不抛。 */
+    const tvCountsText = (counts) => {
+      try {
+        if (!counts || typeof counts !== 'object') return '';
+        const pairs = Object.keys(counts)
+          .map((k) => [k, Number(counts[k])])
+          .filter(([, n]) => Number.isFinite(n) && n > 0);
+        if (pairs.length === 0) return '';
+        const head = pairs.slice(0, 6).map(([k, n]) => `${k}×${n}`).join(' · ');
+        return pairs.length > 6 ? `${head} +${pairs.length - 6}` : head;
+      } catch { return ''; }
+    };
+    /** 耗时的**紧凑**写法（面板的 `fmtSec` 是「0时00分42秒」，卡片里太长）：`12.3s` / `1m02s` / `1h05m`。 */
+    const tvElapsed = (sec) => {
+      try {
+        if (!Number.isFinite(sec)) return '';
+        const total = Math.max(0, Number(sec));
+        if (total < 60) return `${total < 10 ? total.toFixed(1) : Math.round(total)}s`;
+        const m = Math.floor(total / 60);
+        if (m < 60) return `${m}m${String(Math.floor(total % 60)).padStart(2, '0')}s`;
+        return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m`;
+      } catch { return ''; }
+    };
+    /** `action=list` 的单条 job → 一行紧凑文本（**brief 与 full 两种形状都吃**：
+     *  brief 没有 `spec`，full 才有 —— 所以 `spec.*` 一律当可选，缺失就跳过，不假设存在）。
+     *  纯函数，永不抛。 */
+    const tvBriefLine = (job) => {
+      try {
+        if (!job || typeof job !== 'object') return '?';
+        const spec = job.spec && typeof job.spec === 'object' ? job.spec : {};
+        const bits = [String(job.id ?? '?')];
+        if (job.state) bits.push(String(job.state));
+        const tag = job.tag ?? spec.tag;
+        if (tag) bits.push(`#${tag}`);
+        const model = job.model ?? spec.model;
+        if (model) bits.push(String(model));
+        if (Number.isFinite(job.elapsedSec)) bits.push(tvElapsed(job.elapsedSec));
+        if (Number.isFinite(job.exitCode)) bits.push(`exit=${job.exitCode}`);
+        if (job.stalled === true) bits.push('stalled');
+        if (job.pauseReason) bits.push(String(job.pauseReason));
+        return bits.filter((x) => x !== '' && x != null).join(' ');
+      } catch { return '?'; }
+    };
+    /** 单个 job → 卡片要用的字段（**只用已核实的字段名**；缺失留 null，不猜、不编）。 */
+    const tvJobFacts = (job) => {
+      try {
+        if (!job || typeof job !== 'object') return null;
+        const spec = job.spec && typeof job.spec === 'object' ? job.spec : {};
+        return {
+          id: job.id ?? null,
+          state: typeof job.state === 'string' && job.state ? job.state : null,
+          tag: job.tag ?? spec.tag ?? null,
+          kind: spec.kind ?? null,
+          engine: job.engine ?? spec.engine ?? null,
+          provider: job.provider ?? spec.provider ?? null,
+          model: job.model ?? spec.model ?? null,
+          cwd: spec.cwd ?? null,
+          timeoutMin: spec.timeoutMin ?? null,
+          lock: spec.lock ?? null,
+          write: Array.isArray(spec.write) ? spec.write.filter((x) => typeof x === 'string' && x.trim()) : [],
+          writeCount: Array.isArray(spec.write) ? spec.write.length : 0,
+          body: tvFirstLine(spec.body ?? ''),
+          elapsedSec: Number.isFinite(job.elapsedSec) ? job.elapsedSec : null,
+          exitCode: Number.isFinite(job.exitCode) ? job.exitCode : null,
+          pauseReason: job.pauseReason ?? null,
+        };
+      } catch { return null; }
+    };
+    /** 展开区的结构化字段（顺序即阅读顺序；空值**不产生行** ⇒ 不显示无意义的空行）。 */
+    const tvFactsFrom = (args, job) => {
+      try {
+        const a = args && typeof args === 'object' ? args : {};
+        const rows = [];
+        const id = (job && job.id) ?? a.id ?? a.jobId ?? null;
+        if (id != null) rows.push({ k: t('tvJobId'), v: String(id) });
+        if (job && job.state) rows.push({ k: t('tvState'), v: String(job.state) });
+        const act = typeof a.action === 'string' && a.action ? a.action : (typeof a.kind === 'string' ? a.kind : '');
+        if (act) rows.push({ k: t('tvAction'), v: String(act) });
+        if (job) {
+          /* 引擎与通道常常是同一个词（OpenCode/Qoder 的 provider 就是裸引擎名）⇒ 去重后再拼，
+           * 免得显示成「opencode / opencode」。 */
+          const eng = [...new Set([job.engine, job.provider].filter(Boolean))].join(' / ');
+          if (eng || job.model) rows.push({ k: t('tvEngineCh'), v: [eng, job.model].filter(Boolean).join(' · ') });
+          if (job.cwd) rows.push({ k: t('cwd'), v: String(job.cwd) });
+          if (job.timeoutMin != null) rows.push({ k: t('timeout'), v: String(job.timeoutMin) });
+          if (job.lock) rows.push({ k: t('repoLock'), v: String(job.lock) });
+        } else {
+          if (a.provider != null && a.provider !== '') rows.push({ k: t('provider'), v: String(a.provider) });
+          if (a.model != null && a.model !== '') rows.push({ k: t('model'), v: String(a.model) });
+          if (a.cwd) rows.push({ k: t('cwd'), v: String(a.cwd) });
+          if (a.timeoutMin != null) rows.push({ k: t('timeout'), v: String(a.timeoutMin) });
+          if (a.lock) rows.push({ k: t('repoLock'), v: String(a.lock) });
+        }
+        /* 声明写入集：**优先 job.spec.write**（落库的权威值），没有才退回入参里的 write。 */
+        const wSrc = job && Array.isArray(job.write) && job.write.length ? job.write : a.write;
+        const w = Array.isArray(wSrc) ? wSrc.filter((x) => typeof x === 'string' && x.trim()) : [];
+        if (w.length) rows.push({ k: t('writeFiles'), v: w.slice(0, 8).join(' · ') + (w.length > 8 ? ` +${w.length - 8}` : '') });
+        return rows;
+      } catch { return []; }
+    };
+    /** 非 job 信封（status / channel / channels / tail / quota / switch / dismiss / fallback…）→ 一行摘要。 */
+    const tvEnvelopeSummary = (data) => {
+      try {
+        if (!data || typeof data !== 'object') return '';
+        if (data.switch && typeof data.switch === 'object') {
+          return data.switch.enabled === true ? t('switchOn') : data.switch.enabled === false ? t('switchOff') : t('switchUnknown');
+        }
+        if (data.channel && typeof data.channel === 'object') {
+          return `${data.channel.provider ?? '?'}${data.channel.model ? `/${data.channel.model}` : ''}`;
+        }
+        if (Array.isArray(data.channels)) {
+          const warn = Array.isArray(data.warnings) ? data.warnings.length : 0;
+          return `${data.channels.length} · ${t('provider')}${warn ? ` · ${warn} !` : ''}`;
+        }
+        if (Array.isArray(data.lines)) return `${data.lines.length} ${t('tvLines')}`;
+        if (data.id != null && data.state != null) return `${data.id} → ${data.state}`;
+        if (data.quota || data.planQuota) return t('secQuota');
+        if (data.enabled !== undefined && Array.isArray(data.chain)) {
+          return `${t('fallbackTitle')}：${data.enabled ? t('fallbackStateOn') : t('fallbackStateOff')}`;
+        }
+        return '';
+      } catch { return ''; }
+    };
+    /** 三阶段 block → **渲染模型**（纯函数 + 全 try/catch ⇒ 永不抛；未知形状一律退化，不猜语义）。 */
+    const tvModel = (props) => {
+      const p = props && typeof props === 'object' ? props : {};
+      const block = p.block && typeof p.block === 'object' ? p.block : null;
+      const settled = !!(block && 'kind' in block);
+      const phase = settled ? 'result' : p.phase === 'start' ? 'start' : 'preparing';
+      const argsRaw = String((settled ? (block.call && block.call.argsRaw) : (block && block.argsRaw)) ?? '');
+      const args = tvJson(argsRaw) ?? {};
+      const out = {
+        phase,
+        state: phase === 'preparing' ? 'preparing' : 'running',
+        action: typeof args.action === 'string' && args.action
+          ? args.action
+          : (typeof args.kind === 'string' && args.kind ? args.kind : null),
+        tag: typeof args.tag === 'string' && args.tag ? args.tag : null,
+        model: typeof args.model === 'string' && args.model ? args.model : null,
+        elapsed: '',
+        exit: null,
+        summary: '',
+        jobs: null,
+        note: null,
+        errorText: null,
+        tailHint: null,
+        facts: [],
+        argsRaw,
+        rawText: null,
+      };
+      if (phase === 'preparing') return out; // 占位行：只显示「正在派发…」（此时还没有入参）
+      if (phase === 'start') {
+        const target = tvFirstLine(args.prompt ?? args.task ?? args.target ?? '');
+        out.summary = target ? tvClip(target, 160).text : '';
+        out.facts = tvFactsFrom(args, null);
+        return out;
+      }
+      /* ── result ── */
+      const text = tvContentText(block);
+      out.rawText = text;
+      const data = tvJson(text);
+      const isError = !!block.isError;
+      const errHead = block.error
+        ? `${block.error.name ?? 'error'}${block.error.code ? `（${block.error.code}）` : ''}`
+        : '';
+      if (!data) {
+        /* 非 JSON 正文（或被 interrupted 截断）：如实按文本显示，不假装解析成功。 */
+        out.state = block.error && block.error.code === 'interrupted' ? 'interrupted' : isError ? 'failed' : 'done';
+        out.summary = tvClip(tvFirstLine(text ?? errHead), 160).text;
+        out.errorText = isError ? (text ?? errHead) : null;
+        out.facts = tvFactsFrom(args, null);
+        return out;
+      }
+      if (data.ok === false) {
+        const msg = typeof data.error === 'string' && data.error
+          ? data.error
+          : (typeof data.message === 'string' && data.message ? data.message : (text ?? errHead));
+        out.state = 'failed';
+        out.errorText = msg;
+        out.summary = tvClip(tvFirstLine(msg), 160).text;
+        out.note = typeof data.note === 'string' && data.note ? data.note : null;
+        out.facts = tvFactsFrom(args, null);
+        return out;
+      }
+      const f = tvJobFacts(data.job);
+      if (f) {
+        out.state = f.state ?? 'done';
+        out.tag = out.tag ?? (f.tag == null ? null : String(f.tag));
+        out.model = out.model ?? (f.model == null ? null : String(f.model));
+        out.elapsed = tvElapsed(f.elapsedSec);
+        out.exit = f.exitCode;
+        out.summary = tvClip(f.body, 160).text;
+        out.facts = tvFactsFrom(args, f);
+        out.tailHint = f.id ? `${t('tvTailHint')} · id=${f.id}` : null;
+        out.note = typeof data.warning === 'string' && data.warning
+          ? data.warning
+          : typeof data.note === 'string' && data.note
+            ? data.note
+            : f.pauseReason ? `${t('paused')}：${f.pauseReason}` : null;
+        return out;
+      }
+      if (Array.isArray(data.jobs)) {
+        const total = Number.isFinite(data.total) ? data.total : data.jobs.length;
+        const counts = tvCountsText(data.counts);
+        out.state = 'done';
+        out.jobs = data.jobs;
+        out.summary = `${total} ${t('tvJobs')}${counts ? ` · ${counts}` : ''}`;
+        out.note = typeof data.note === 'string' && data.note ? data.note : null;
+        out.facts = tvFactsFrom(args, null);
+        return out;
+      }
+      /* 其它 ok 信封：摘要退化成一行，明细与原文仍可展开（不丢信息）。 */
+      out.state = 'done';
+      out.summary = tvEnvelopeSummary(data) || tvClip(tvFirstLine(text ?? ''), 160).text;
+      out.note = typeof data.note === 'string' && data.note ? data.note : null;
+      out.facts = tvFactsFrom(args, null);
+      if (data.id != null && Array.isArray(data.lines)) out.tailHint = `${t('tvTailHint')} · id=${data.id}`;
+      return out;
+    };
+    /** 键盘展开（Enter / Space）—— a11y：`role="button"` 的行必须能纯键盘操作。 */
+    const tvOnKeyDown = (toggle) => (event) => {
+      try {
+        if (!event || (event.key !== 'Enter' && event.key !== ' ')) return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        toggle();
+      } catch { /* 键盘交互异常不影响渲染 */ }
+    };
+    /** 状态胶囊的**类名白名单**（未知状态不拼进 class，避免脏类名/样式注入）。 */
+    const TV_PILL = ['queued', 'running', 'done', 'failed', 'killed', 'paused', 'interrupted', 'preparing'];
+    const tvPillClass = (s) => (TV_PILL.includes(String(s)) ? String(s) : 'queued');
+    /** 胶囊的悬停说明：有本地化词条的（paused）给中文，其余用协议里的原始状态词。 */
+    const tvPillTitle = (s) => (String(s) === 'paused' ? t('paused') : String(s));
+    /** 兜底渲染：一行纯文本（工具名 + 能拿到的 id）。**自身也不许抛**，故再包一层 try。 */
+    const tvFallbackRow = (props) => {
+      try {
+        const p = props && typeof props === 'object' ? props : {};
+        const name = typeof p.toolName === 'string' && p.toolName ? p.toolName : TOOLVIEW_KEY;
+        const id = p.callId == null ? '' : String(p.callId);
+        return h('div', { className: 'dsp-tv-card', 'data-tool': TOOLVIEW_KEY, 'data-state': 'fallback' },
+          h('div', { className: 'dsp-tv-row' },
+            h('span', { className: 'dsp-tv-title' }, t('tvTitle')),
+            h('span', { className: 'dsp-tv-sep', 'aria-hidden': 'true' }),
+            h('span', { className: 'dsp-tv-sum' }, id ? `${name} ${id}` : name)));
+      } catch { return null; }
+    };
+
+    /**
+     * `dispatch` 工具调用的行组件（注册进 `tool.call.toolview` + key=`dispatch`）。
+     *
+     * ⚠️ hooks **无条件**调用（顺序必须稳定）：展开态用组件自己的 `useState` ——
+     * 宿主确实会传 `useDisclosure`，但它在第三方行组件契约里是**可选**的；
+     * 「有就用、没有就退回 useState」会在它某次缺席时打断 hook 顺序 ⇒ React 自己抛错，
+     * 与"绝不抛错"直接冲突。DSH 自带样例（ui-skill 的 SkillRow）用的也是自己的 useState。
+     */
+    function DispatchToolRow(props) {
+      const [open, setOpen] = React.useState(false);
+      const [argsOpen, setArgsOpen] = React.useState(false);
+      const [outOpen, setOutOpen] = React.useState(false);
+      const toggle = () => { setOpen((v) => !v); };
+      try {
+        const m = tvModel(props);
+        /** 原文块：默认折叠；展开后限高滚动 + 截断提示（大 JSON 绝不整段铺开）。 */
+        const rawBlock = (label, text, isOpen, setIt) => {
+          if (!text) return null;
+          const clip = tvClip(text, 6000);
+          return h('div', null,
+            h('button', {
+              className: 'dsp-tv-rawbtn', type: 'button', 'aria-expanded': isOpen,
+              onClick: () => setIt((v) => !v),
+            }, `${isOpen ? t('tvRawClose') : t('tvRawOpen')} · ${label}`),
+            isOpen
+              ? h('pre', { className: 'dsp-tv-raw' },
+                clip.text + (clip.truncated ? `\n${t('tvTruncatedA')}${clip.total}${t('tvTruncatedB')}` : ''))
+              : null);
+        };
+        const rowKids = [
+          h('span', { className: 'dsp-tv-caret', 'aria-hidden': 'true' }, open ? '▾' : '▸'),
+          h('span', { className: 'dsp-tv-title' }, t('tvTitle')),
+        ];
+        if (m.phase === 'preparing') {
+          rowKids.push(h('span', { className: 'dsp-tv-sum' }, t('tvPreparing')));
+        } else {
+          if (m.action) rowKids.push(h('span', { className: 'dsp-tv-sep', 'aria-hidden': 'true' }));
+          if (m.action) rowKids.push(h('span', { className: 'dsp-tv-action' }, String(m.action)));
+          if (m.tag) rowKids.push(h('span', { className: 'dsp-tv-tag', title: String(m.tag) }, `#${String(m.tag)}`));
+          rowKids.push(h('span', { className: 'dsp-tv-sum', title: m.summary || undefined }, m.summary || ''));
+          if (m.model) rowKids.push(h('span', { className: 'dsp-tv-meta', title: String(m.model) }, String(m.model)));
+          if (m.elapsed) rowKids.push(h('span', { className: 'dsp-tv-meta' }, String(m.elapsed)));
+          if (m.exit != null) rowKids.push(h('span', { className: 'dsp-tv-meta' }, `exit=${m.exit}`));
+          rowKids.push(h('span', {
+            className: `dsp-tv-pill s-${tvPillClass(m.state)}`,
+            title: tvPillTitle(m.state),
+          }, String(m.state)));
+        }
+        const jobs = Array.isArray(m.jobs) ? m.jobs : [];
+        /* 展开区**只在真有内容时才渲染**（preparing 阶段没有可展开的东西 ⇒ 点了也不出一个空框）。 */
+        const hasBody = !!(m.facts.length || jobs.length || m.errorText || m.note || m.tailHint || m.argsRaw || m.rawText);
+        const body = open && hasBody
+          ? h('div', { className: 'dsp-tv-body' },
+            m.facts.map((f, i) => h('div', { className: 'dsp-tv-kv', key: `${f.k}-${i}` },
+              h('span', { className: 'dsp-tv-kv-k' }, f.k),
+              h('span', { className: 'dsp-tv-kv-v', title: f.v }, f.v))),
+            jobs.length
+              ? h('div', { className: 'dsp-tv-kv' },
+                h('span', { className: 'dsp-tv-kv-k' }, t('secJobs')),
+                h('span', { className: 'dsp-tv-kv-v' },
+                  jobs.slice(0, 8).map((j) => tvBriefLine(j)).join(' · ')
+                  + (jobs.length > 8 ? ` +${jobs.length - 8}` : '')))
+              : null,
+            m.errorText ? h('div', { className: 'dsp-tv-err' }, String(m.errorText)) : null,
+            m.note ? h('div', { className: 'dsp-tv-note' }, String(m.note)) : null,
+            m.tailHint ? h('div', { className: 'dsp-tv-note' }, String(m.tailHint)) : null,
+            rawBlock(t('tvArgs'), m.argsRaw, argsOpen, setArgsOpen),
+            rawBlock(t('tvResult'), m.rawText, outOpen, setOutOpen),
+            !m.argsRaw && !m.rawText ? h('div', { className: 'dsp-tv-empty' }, t('tvEmpty')) : null)
+          : null;
+        return h('div', {
+          className: 'dsp-tv-card', 'data-tool': TOOLVIEW_KEY, 'data-state': String(m.state),
+        },
+          h('div', {
+            className: 'dsp-tv-row',
+            role: 'button',
+            tabIndex: 0,
+            'aria-expanded': open,
+            'aria-label': `${t('tvTitle')}${m.action ? ` ${m.action}` : ''} ${m.state} · ${t('tvDetail')}`,
+            onClick: toggle,
+            onKeyDown: tvOnKeyDown(toggle),
+          }, ...rowKids),
+          body);
+      } catch (e) {
+        /* 任何解析/渲染异常都不许影响会话 ⇒ 退化成一行纯文本。 */
+        return tvFallbackRow(props);
+      }
+    }
+
     return {
       // 只依赖宿主必定提供的**基础**服务。
       // ⚠️ 绝不能把自家的 `remote.dispatch` 写进 inject：该命名空间正是 apply() 里
@@ -4795,6 +5280,19 @@ window.__ModuleLoader__.load({
             }, DispatchConfigCard));
           } catch (e) {
             try { console.warn('[dispatch] 插件详情页配置卡注册失败（仅影响详情页，不影响派发台）：', e && e.message); } catch { /* ignore */ }
+          }
+          /* ── D1：`dispatch` 工具调用的**会话内专属卡片**（DSH 0.2.1 的 keyed 槽位 `tool.call.toolview`）──
+           * 为什么：通用卡片把工具结果 JSON 原样铺开（`action=list` 历史上 70KB+），读起来又长又难定位；
+           * 命中 key=`dispatch` ⇒ **整条替换**通用卡片（未命中回落 fallback，故键写错只是"没生效"，不会白屏）。
+           * ⚠️ 注册失败**只留痕**：卡片是体验增量，绝不能让插件加载/面板/工具受影响（与配置卡同一纪律）。
+           * ⚠️ 位置固定：放在配置卡注册**之后**、`apply` 的 try 之内 —— header-entry.test 依赖会话头
+           *    注册那段的字面形状与先后次序，别把这行挪到它前面。 */
+          try {
+            ctx.slots.inject(TOOLVIEW_SLOT, () => ctx.slots.register({
+              name: TOOLVIEW_SLOT, key: TOOLVIEW_KEY,
+            }, DispatchToolRow));
+          } catch (e) {
+            try { console.warn('[dispatch] 工具卡片注册失败（仅影响会话内卡片，不影响派发台与工具）：', e && e.message); } catch { /* ignore */ }
           }
         } catch (e) {
           try { console.warn('[dispatch] apply 降级（不阻塞启动）:', e && e.message); } catch { /* 连 console 都不可用就彻底静默 */ }

@@ -225,6 +225,23 @@
     "seqSortCol": "排序",
     "modelSwitchCol": "可用",
     "modelDisabledTag": "已关闭",
-    "modelAvailCount": "可用 {n}/{total}"
+    "modelAvailCount": "可用 {n}/{total}",
+    "tvTitle": "派发",
+    "tvPreparing": "正在派发…",
+    "tvDetail": "详情",
+    "tvAction": "动作",
+    "tvState": "状态",
+    "tvJobId": "任务 id",
+    "tvEngineCh": "引擎/通道",
+    "tvTailHint": "用 action=tail 读输出",
+    "tvJobs": "任务数",
+    "tvLines": "行",
+    "tvArgs": "原始入参",
+    "tvResult": "原始结果",
+    "tvRawOpen": "展开原文",
+    "tvRawClose": "收起原文",
+    "tvTruncatedA": "（已截断，原文共 ",
+    "tvTruncatedB": " 字符）",
+    "tvEmpty": "（无）"
   }
 }

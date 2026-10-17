@@ -225,6 +225,23 @@
     "seqSortCol": "Order",
     "modelSwitchCol": "Available",
     "modelDisabledTag": "Off",
-    "modelAvailCount": "{n}/{total} available"
+    "modelAvailCount": "{n}/{total} available",
+    "tvTitle": "Dispatch",
+    "tvPreparing": "Dispatching…",
+    "tvDetail": "Details",
+    "tvAction": "Action",
+    "tvState": "State",
+    "tvJobId": "Job id",
+    "tvEngineCh": "Engine / channel",
+    "tvTailHint": "Use action=tail to read the output",
+    "tvJobs": "Jobs",
+    "tvLines": "lines",
+    "tvArgs": "Raw input",
+    "tvResult": "Raw result",
+    "tvRawOpen": "Show raw text",
+    "tvRawClose": "Hide raw text",
+    "tvTruncatedA": " (truncated; full text is ",
+    "tvTruncatedB": " characters)",
+    "tvEmpty": "(none)"
   }
 }
