@@ -489,11 +489,11 @@ window.__ModuleLoader__.load({
         chanOfflineHint: '未连接宿主：通道/模型来自宿主远端面，连接后这两个下拉才可选',
         chanDefaultModel: '（通道默认模型）', modelAgentDecide: 'Agent决定', modelAgentDecideHint: '未指定模型：由派发 Agent 按任务自行选择（它可换成任意可用模型）',
         /* ZB-52：顺序派发（同一引擎内按列表从上到下换模型）。
+         * ZB-52c：**没有开关** —— 「模型」选「顺序派发」即开启（主通道与降级目标各自一份列表）。
          * ⚠️ 这几把键必须与 locale/zh.json、locale/en.json **逐键逐值一致**（single-source.test.mjs ⑤ 守门）。 */
-        seqTitle: '顺序派发', seqNeedEnable: '需先开启', seqThinkingDefault: '设置默认', seqThinkingDefaultHint: "顺序派发模式：档位由顺序列表里**逐个模型**设置（模型不同、支持的档位也不同），此处不可改",
-        seqEnableTitle: '顺序派发：点击开启/关闭。开启后任务报错（额度耗尽、限流暂停等）就按下面列表从上到下换模型重跑；列表试完仍失败才报错（之后才轮到「自动降级」）',
-        seqHint: '按下面列表从上到下尝试：上一个报错就换下一个（额度耗尽 / 限流暂停同样换），全试完仍失败才报错 —— 之后才轮到「自动降级」。列表只作用于当前引擎（ZCode / OpenCode / Qoder 各自一份）。注意：换模型 = 新开会话，前面已完成的文件改动会保留、模型会被告知接着做。每一行右边的「档位」可单独设置该模型的思考强度（「默认」= 用引擎默认档位）—— 顺序派发模式下全局档位不可改：各模型支持的档位不同。',
-        seqHintShort: '顺序派发已开启：未指定模型 ⇒ 报错时按「顺序派发」列表从上到下换模型',
+        seqTitle: '顺序派发', seqThinkingDefault: '设置默认', seqThinkingDefaultHint: "顺序派发模式：档位由顺序列表里**逐个模型**设置（模型不同、支持的档位也不同），此处不可改",
+        seqHint: '「模型」选「顺序派发」即开启本模式（**没有开关**）：派发时按下面列表从上到下尝试，上一个报错就换下一个（额度耗尽 / 限流暂停同样换），全试完仍失败才报错 —— 之后才轮到「自动降级」。主通道与降级目标各自独立：主通道模型为空 ⇒ 用主通道引擎的列表；否则降级目标模型为空 ⇒ 用降级目标引擎的列表（列表按引擎分别保存）。列表只作用于**当前显示的那个引擎**（ZCode / OpenCode / Qoder 各自一份）。每一行右边的「档位」可单独设置该模型的思考强度（「默认」= 用引擎默认档位）—— 顺序派发模式下全局档位不可改：各模型支持的档位不同。注意：换模型 = 新开会话，前面已完成的文件改动会保留、模型会被告知接着做。',
+        seqHintShort: '顺序派发：不绑定具体模型 ⇒ 报错时按「顺序派发」列表从上到下换模型（主通道与降级目标各自一份列表）',
         seqOrderLabel: '尝试顺序',
         seqUp: '上移',
         seqDown: '下移',
@@ -583,11 +583,12 @@ window.__ModuleLoader__.load({
         chanOfflineHint: 'Host not connected: channel/model come from the host Remote face and unlock once connected',
         chanDefaultModel: '(channel default model)', modelAgentDecide: 'Agent decides', modelAgentDecideHint: 'No model pinned: the dispatching Agent picks one per task (and may switch to any available model)',
         /* ZB-52: sequential dispatch (switch models in list order inside one engine).
+         * ZB-52c: there is NO switch — selecting "Sequential dispatch" in "Model" is the switch
+         * (main channel and fallback target each keep their own per-engine list).
          * These keys must match locale/en.json and locale/zh.json word for word (single-source.test.mjs ⑤). */
-        seqTitle: 'Sequential dispatch', seqNeedEnable: 'enable first', seqThinkingDefault: 'Set default', seqThinkingDefaultHint: "Sequential mode: effort is set per model in the sequence list (models differ in supported levels), so it is not editable here",
-        seqEnableTitle: 'Sequential dispatch: click to enable/disable. When on, a failing task (quota exhausted, rate-limited pause, etc.) switches to the next model down the list and reruns; it only reports failure after the whole list is exhausted (auto fallback runs after that)',
-        seqHint: 'Tries the list below from top to bottom: an error moves on to the next entry (quota exhausted / rate-limited pauses count too), and it only reports failure after the whole list is exhausted — auto fallback runs after that. The list applies to the current engine only (ZCode / OpenCode / Qoder each have their own). Note: switching models starts a NEW session; file changes already made are kept and the model is told to continue. The "Effort" dropdown on each row sets that model\'s own thinking level ("Default" = the engine default) — the global effort setting is locked in sequential mode because models differ in supported levels.',
-        seqHintShort: 'Sequential dispatch is on: with no model pinned, an error switches to the next model down the Sequential dispatch list',
+        seqTitle: 'Sequential dispatch', seqThinkingDefault: 'Set default', seqThinkingDefaultHint: "Sequential mode: effort is set per model in the sequence list (models differ in supported levels), so it is not editable here",
+        seqHint: 'Selecting "Sequential dispatch" in "Model" IS the switch (there is no separate toggle): the list below is tried top to bottom, an error moves on to the next entry (quota exhausted / rate-limited pauses count too), and it only reports failure after the whole list is exhausted — auto fallback runs after that. The main channel and the fallback target are independent: an empty model on the main channel uses the main engine\'s list; otherwise an empty model on the fallback target uses the fallback engine\'s list (lists are stored per engine). The list applies to the engine currently shown (ZCode / OpenCode / Qoder each have their own). The "Effort" dropdown on each row sets that model\'s own thinking level ("Default" = the engine default) — the global effort setting is locked in sequential mode because models differ in supported levels. Note: switching models starts a NEW session; file changes already made are kept and the model is told to continue.',
+        seqHintShort: 'Sequential dispatch: no model pinned, so an error switches to the next model down the list (main channel and fallback target each keep their own list)',
         seqOrderLabel: 'Try order',
         seqUp: 'Move up',
         seqDown: 'Move down',
@@ -964,11 +965,15 @@ window.__ModuleLoader__.load({
     }
 
     /* ─────────────── ZB-52：顺序派发的**形状归一**（三引擎键恒在） ───────────────
-     * core 的 `getSequential()` 契约：`{enabled, order:{zcode:[],opencode:[],qoder:[]}, levels:{…}, sequentialCount}`；
+     * core 的 `getSequential()` 契约：`{order:{zcode:[],opencode:[],qoder:[]}, levels:{…}, sequentialCount}`；
      * 元素形态 = 「模型」下拉的模型项 key：
      *   · ZCode：`<路由id>::<模型名>`（如 `plan::GLM-5.3`）；
      *   · OpenCode / Qoder：`opencode/<model>` / `qoder/<model>`（core 就是这样建的通道 models）。
      * 远端 face / ext / demo 三条路径共用本函数 ⇒ 单一源，不会出现"某条路径少一个引擎键"。
+     *
+     * ⚠️ ZB-52c（用户要求去掉开关）：**没有 `enabled` 字段** —— "是否顺序派发"由
+     * 「模型」下拉的值表达（模型为空即顺序派发），`normSeqShape` 不再产出/保留它，
+     * 免得面板里又出现"开关状态"这第二个真相。
      *
      * ZB-52b（用户要求「顺序思考强度档位设置」）：`levels[engine]` 与 `order[engine]` **同序**，
      * 每项 = 该模型自己的思考强度档位（`null` = 用引擎默认档位）。旧数据源没有 levels ⇒ 全 null
@@ -1002,7 +1007,6 @@ window.__ModuleLoader__.load({
         levels[eng] = lvs;
       }
       return {
-        enabled: Boolean(src.enabled),
         order,
         levels,
         sequentialCount: Object.values(order).reduce((n, l) => n + l.length, 0),
@@ -1509,9 +1513,9 @@ window.__ModuleLoader__.load({
       let demoTargets = []; // ZB-30：demo 降级目标（[{provider, model, reasoningLevel}]）
       /* ZB-52：demo 顺序派发（纯内存，不写真值文件 —— demo 不该伪装成已落盘）。
        * 形状与 core 的 `getSequential()` 一致（三引擎键恒在，靠 `normSeqShape` 归一）；
-       * ZB-52b：`levels` 与 `order` 同序（逐模型档位），demo 也要能演示"设了档位再读回"。 */
+       * ZB-52b：`levels` 与 `order` 同序（逐模型档位），demo 也要能演示"设了档位再读回"。
+       * ZB-52c：无 `enabled`（与 core 同契约：模型为空即顺序派发，没有全局开关）。 */
       let demoSeq = {
-        enabled: false,
         order: { zcode: [], opencode: [], qoder: [] },
         levels: { zcode: [], opencode: [], qoder: [] },
       };
@@ -1771,8 +1775,8 @@ window.__ModuleLoader__.load({
           demoTargets = normTargets(target);
           return { ok: true, ...fallbackShape(demoTargets) };
         },
-        /* ZB-52：顺序派发（demo 语义与 core **逐条一致**：`enabled` / `order` 单传，只改传了的那一项；
-         * `order` **按引擎合并**（没传的引擎原样保留），同一引擎内整体替换，未知引擎键丢弃）。
+        /* ZB-52：顺序派发（demo 语义与 core **逐条一致**：patch **只有 `{order}`**（传 enabled 在 core 会抛
+         * TypeError，已废弃）；`order` **按引擎合并**（没传的引擎原样保留），同一引擎内整体替换，未知引擎键丢弃）。
          * ZB-52b：`levels` 与 `order` 同序 —— 该引擎的 order 被替换时 `levels` **一起换**，
          * 否则在 demo 里设的逐模型档位会错位对到别的模型上。 */
         async sequentialGet() {
@@ -1781,7 +1785,6 @@ window.__ModuleLoader__.load({
         async sequentialSet(patch) {
           const p = patch && typeof patch === 'object' ? patch : {};
           const next = {
-            enabled: 'enabled' in p ? p.enabled === true : demoSeq.enabled,
             order: { ...demoSeq.order },
             levels: { ...demoSeq.levels },
           };
@@ -1865,8 +1868,12 @@ window.__ModuleLoader__.load({
       channelSet: async () => ({ ok: false, error: 'wire 不可用' }),
       fallbackGet: async () => ({}),
       fallbackSet: async () => ({ ok: false, error: 'wire 不可用' }),
-      // ZB-52：顺序派发（读给出诚实空形状，写报错）
-      sequentialGet: async () => ({ enabled: false, order: { zcode: [], opencode: [], qoder: [] }, sequentialCount: 0 }),
+      // ZB-52：顺序派发（读给出诚实空形状，写报错）。ZB-52c：无 enabled（模型为空即顺序派发）
+      sequentialGet: async () => ({
+        order: { zcode: [], opencode: [], qoder: [] },
+        levels: { zcode: [], opencode: [], qoder: [] },
+        sequentialCount: 0,
+      }),
       sequentialSet: async () => ({ ok: false, error: 'wire 不可用' }),
       switchGet: async () => ({}),
       switchSet: async () => ({ ok: false, error: 'wire 不可用' }),
@@ -2435,10 +2442,9 @@ window.__ModuleLoader__.load({
         onSwitch(pick);
       };
       const switchModel = (m) => {
-        /* ⚠️ ZB-52：选中「顺序派发」（空值）⇒ **自动把顺序开关打开**（真机反馈的死锁修复）。
-         * 语义上「模型下拉选中顺序派发」本身就是"我要顺序派发"，此时开关必须跟着开 ——
-         * 否则用户选了它却什么都不发生（而开关又因为旧实现置灰点不到 ⇒ 功能完全不可达）。 */
-        if (m === '' && onSequentialSet) onSequentialSet({ enabled: true });
+        /* ⚠️ ZB-52c（用户要求去掉开关）：「模型」下拉选「顺序派发」（值 `''`）**本身就是开启** ——
+         * 写回 `model = null` 即可；这里**不再**调用 setSequential（core 已删除 `enabled`，传它会抛
+         * TypeError）。唯一的真相 = 该通道 model 是否为空，面板里不再有第二个"开关状态"。 */
         /* ZCode 的模型项 key 是 `<路由id>::<模型名>` ⇒ provider 与 model **必须一起写**
          * （否则会出现"provider=plan 但用户以为在用免费额度"的静默错配）。 */
         if (sel && sel.engine === 'zcode') { const p = routeForPick(sel, m); onSwitch({ provider: p.provider, model: p.model }); return; }
@@ -2635,20 +2641,26 @@ window.__ModuleLoader__.load({
        *     与上面「Agent决定」在未显式指定档位时走的是同一条规则（仅新建会话生效）。
        * 注：core/CLI 侧的 `null` 仍表示"沿用原任务"（旧调用方兼容），面板不再产生 null。 */
       const fbThinking = fbTarget?.reasoningLevel ?? 'agent';
+      /** ZB-52c：降级目标是否顺序派发 = 目标模型为空（与主通道同一判据）。
+       * 此时全局档位不可改 —— 与主通道一致：档位由顺序列表里**逐模型**设置。 */
+      const fbSeqMode = fbModel === '';
 
       /** 降级区模型下拉的**显示文案**（与上面「通道」分区同一纪律）。 */
       const fbModelLabel = (m) => modelLabelFor(fbSel?.engine, fbSel?._routeOf, fbSel?._modelOf, m);
 
       /** 写降级目标（对象 ⇒ 开启；null ⇒ 关闭）。乐观回显交给 PanelBody 的权威值校正。
        * ⚠️ 面板里**显示什么就写什么**（与上面「通道」分区同一纪律）：
-       *   · model: ''（通道默认模型）⇒ 写 `null` ⇒ 交接时不传 `--model`（= 该 provider 默认模型）
+       *   · model: ''（顺序派发）⇒ 写 `null` ⇒ core 按该目标引擎的顺序列表试（无列表则用 provider 默认模型）
        *   · reasoningLevel: 显示值（未设时 `'agent'`）⇒ 原样写。**不保留** CLI/工具设的
        *     `null`（沿用原任务）—— 否则用户只改模型也会把下拉显示的「Agent决定」与实际存值
-       *     弄成两回事（显示 Agent决定、实际沿用原任务）。一次面板编辑即归一成面板语义。 */
+       *     弄成两回事（显示 Agent决定、实际沿用原任务）。一次面板编辑即归一成面板语义。
+       * ZB-52c：base 的 `model` 取**存值里的真实模型名**（`fbTarget.model`），不是下拉的模型项 key
+       * （ZCode 的 key 形如 `<路由id>::<模型名>`，把它当模型名写回会毁掉该目标 —— 只改档位时就会踩到；
+       * 模型为空 = 顺序派发，所以这里也绝不能凭空写入 key 字符串）。 */
       const saveTarget = (patch) => {
         const next = {
           provider: fbProvider || channel.provider || 'plan',
-          model: fbModel || null,
+          model: fbTarget?.model ?? null,
           reasoningLevel: fbThinking || 'agent',
           ...patch,
         };
@@ -2696,84 +2708,92 @@ window.__ModuleLoader__.load({
       const fbSwitchThinking = (lv) => saveTarget({ reasoningLevel: lv || 'agent' });
       const fbUnknown = fbEnabled && fbProvider && !resolveFoldedChannel(fbFolded, fbProvider);
 
-      /* ── ZB-52：顺序派发（开关 + 可排序模型列表）──
-       * 用户需求原话：「免费模型有额度上限 / 用的人太多会临时报错，逐个试过去总能撞上一个可用的」。
-       * 作用域：**只作用于当前选中引擎**（用户明确要求「每通道各自一份顺序」）——
-       * 切换引擎时列表随之切换（候选集与 order 都按 `seqEngine` 取）。
+      /* ── ZB-52d：顺序派发（**没有开关**；主通道与降级目标**各自一块列表、同屏显示**）──
+       * 唯一真相 = 该通道的 model 是否为空：
+       *   · 主通道 `channel.model` 为空 ⇒ 派发时按**主通道引擎**的顺序列表从上到下试；
+       *   · 降级目标 `target.model` 为空 ⇒ 降到它时按**降级目标引擎**的列表试。
+       * 两份列表本来就**按引擎**存 ⇒ 主（如 OpenCode）与降级（如 Qoder）可同时成立、互不影响。
        *
+       * ⚠️ ZB-52d（用户要求"两个都能支持"）：**两块同时渲染**。此前只渲染"主优先，否则降级"的那一块
+       * ⇒ 用户把主通道设成顺序派发后，就再也看不到/编辑不了降级链那份列表（真缺口）。
+       * 注意：两条链是**同一个引擎**时只显示一块 —— 列表按引擎存，重复显示会让人以为有两份。
+       *
+       * 每块的派生量由**同一个工厂**产出（候选集 / 显示顺序 / 逐模型档位 / 写入），
+       * 两块逻辑不会各写一遍、不会漂移；写入时**只发本块引擎**那一份 order（按引擎合并 ⇒ 互不干扰）。
        * 列表元素形态与 core 的 `expandSequentialChain()` **逐字对应**（见那里的注释）：
-       *   · ZCode：`<路由id>::<模型名>`；· OpenCode / Qoder：`opencode/<model>` / `qoder/<model>`。
-       * 所以候选集**直接取 `modelOptions`**（= 折叠后该引擎的模型并集，与「模型」下拉同源）——
-       * 不再自己拼 key（拼错就会静默变成"core 认不出、跳过这一项"）。 */
-      const seqEnabled = !!sequential?.enabled;
-      const seqEngine = sel ? engineOf(sel.engine) : null;
-      const seqStored = seqEngine && Array.isArray(sequential?.order?.[seqEngine]) ? sequential.order[seqEngine] : [];
-      /* 显示顺序 = 三段拼接（**从上到下 = 尝试次序**）：
-       *   ① 存了顺序、且当前仍可选的 —— 保持存下来的次序；
-       *   ② 当前可选、但不在 order 里的（**新增模型**）—— 追加在后面（绝不消失，用户要求）；
-       *   ③ order 里有、但当前候选集没有的（模型临时下线/探测没回来）—— 附在最后并标注
-       *      「当前不可用」，**保留用户的排序成果**（直接丢弃等于静默改配置）。 */
-      const seqInOrder = seqStored.filter((m) => modelOptions.includes(m));
-      const seqNew = modelOptions.filter((m) => !seqStored.includes(m));
-      const seqStale = seqStored.filter((m) => !modelOptions.includes(m));
-      const seqList = [...seqInOrder, ...seqNew, ...seqStale];
-      /** 列表项显示文案：候选集内的走与「模型」下拉**同一套**标签（免费额度带「免费」等）。 */
-      const seqLabelOf = (m) => (modelOptions.includes(m) ? modelOptionLabel(m) : m);
-      /* ── ZB-52b：**逐模型**思考强度档位（用户要求「顺序思考强度档位设置」）──
-       * 档位是**逐模型**的（实测 OpenCode 10 个模型里只有 6 个有 variants、且集合各不相同），
-       * 而顺序派发会在多个模型间轮换 ⇒ 一个全局档位说不通，故列表每一行自带一个档位下拉。
-       *
-       * 选项来源（单一源）：`sel._routeOf` 把「模型项 key」映射回**具体通道 id**，
-       * 再取那条通道自己的 `thinkingLevels` —— ZCode 是「路由×模型」，OpenCode/Qoder 是「模型」。
-       * 取不到（路由定位不到 / 该通道没有档位声明）⇒ **只给「默认」**，绝不瞎列（不猜档位）。
-       * 首项「默认」（值 ''）= `reasoningLevel: null` = 用引擎默认档位。 */
-      const seqLevelsOf = (m) => {
-        const routeId = sel?._routeOf?.[m] ?? m;
-        const ch = routeId ? channels.find((c) => String(c.id) === String(routeId)) : null;
-        return Array.isArray(ch?.thinkingLevels) ? ch.thinkingLevels : [];
+       *   · ZCode：`<路由id>::<模型名>`；· OpenCode / Qoder：`opencode/<model>` / `qoder/<model>`。 */
+      /** 主通道是否顺序派发 = 模型为空（**唯一的真相**，不是开关）。 */
+      const seqEnabled = channel.model == null || channel.model === '';
+      /** 降级目标是否顺序派发 = 降级已开启 + 目标模型为空 + 目标通道可解析。 */
+      const seqFbOn = fbEnabled && fbTarget != null && fbSel != null && fbModel === '';
+      /** 构造"一块顺序列表"（主通道或降级目标）所需的全部派生量 + 动作。 */
+      const makeSeqBlock = (owner, agg) => {
+        const engine = agg ? engineOf(agg.engine) : null;
+        /** 候选集与对应「模型」下拉**同一套 key**：主通道用 modelOptions，降级用 fbModels。 */
+        const candidates = owner === 'main' ? modelOptions : fbModels;
+        const stored = engine && Array.isArray(sequential?.order?.[engine]) ? sequential.order[engine] : [];
+        /* 显示顺序 = 三段拼接（**从上到下 = 尝试次序**）：
+         *   ① 存了顺序、且当前仍可选的 —— 保持存下来的次序；
+         *   ② 当前可选、但不在 order 里的（**新增模型**）—— 追加在后面（绝不消失，用户要求）；
+         *   ③ order 里有、但当前候选集没有的（模型临时下线/探测没回来）—— 附在最后并标注
+         *      「当前不可用」，**保留用户的排序成果**（直接丢弃等于静默改配置）。 */
+        const inOrder = stored.filter((m) => candidates.includes(m));
+        const fresh = candidates.filter((m) => !stored.includes(m));
+        const stale = stored.filter((m) => !candidates.includes(m));
+        const list = [...inOrder, ...fresh, ...stale];
+        /** 列表项显示文案：与对应「模型」下拉**同一套**标签（免费额度带「免费」等）。 */
+        const labelOf = (m) => (candidates.includes(m)
+          ? modelLabelFor(agg?.engine, agg?._routeOf, agg?._modelOf, m)
+          : m);
+        /** 逐模型档位：`_routeOf` 把「模型项 key」映射回**具体通道 id**，取它自己的 `thinkingLevels`
+         *  （ZCode 是「路由×模型」，OpenCode/Qoder 是「模型」）；取不到 ⇒ 只给「默认」，不瞎列。 */
+        const levelsOf = (m) => {
+          const routeId = agg?._routeOf?.[m] ?? m;
+          const ch = routeId ? channels.find((c) => String(c.id) === String(routeId)) : null;
+          return Array.isArray(ch?.thinkingLevels) ? ch.thinkingLevels : [];
+        };
+        /** 某一项**已存**的档位（`levels` 与 `order` 同序；越界/缺失 = null = 引擎默认）。 */
+        const levelOf = (m) => {
+          const idx = stored.indexOf(m);
+          const lvs = engine && Array.isArray(sequential?.levels?.[engine]) ? sequential.levels[engine] : [];
+          const lv = idx >= 0 ? lvs[idx] : null;
+          return typeof lv === 'string' && lv !== '' ? lv : null;
+        };
+        /** 写该块的**引擎完整数组**（每项 `{route, reasoningLevel}`）。
+         *  ⚠️ **只发本块引擎**：core 的 `setSequential({order})` 是按引擎**合并**（未传的引擎原样保留）
+         *  ⇒ 另一块（另一个引擎）的顺序与档位**不会被这次写入碰到**。 */
+        const write = (routes, override) => {
+          if (!engine) return;
+          onSequentialSet({
+            order: {
+              [engine]: routes.map((r) => ({
+                route: r,
+                reasoningLevel: override && override.route === r ? (override.level || null) : levelOf(r),
+              })),
+            },
+          });
+        };
+        /** 上移 / 下移一格（相邻交换）—— 不用拖拽库（用户要求 ↑↓ 即可）。
+         *  ⚠️ 重排时**档位必须跟着项走**（`write` 负责）：只发 route 字符串会清掉档位。 */
+        const move = (idx, delta) => {
+          const to = idx + delta;
+          if (!engine || to < 0 || to >= list.length) return;
+          const next = list.slice();
+          const [moved] = next.splice(idx, 1);
+          next.splice(to, 0, moved);
+          write(next);
+        };
+        return {
+          owner, engine, list, stale, labelOf, levelsOf, levelOf, move,
+          setLevel: (m, lv) => write(list, { route: m, level: lv }),
+        };
       };
-      /** 某一项**已存**的档位（`levels` 与 `order` 同序；越界/缺失 = null = 引擎默认）。 */
-      const seqLevelOf = (m) => {
-        const idx = seqStored.indexOf(m);
-        const lvs = seqEngine && Array.isArray(sequential?.levels?.[seqEngine]) ? sequential.levels[seqEngine] : [];
-        const lv = idx >= 0 ? lvs[idx] : null;
-        return typeof lv === 'string' && lv !== '' ? lv : null;
-      };
-      /** 把当前引擎的完整顺序序列化后发回 core（每项 = `{route, reasoningLevel}`）。
-       *
-       *  ⚠️ **只发当前引擎**：core 的 `setSequential({order})` 是按引擎**合并**（未传的引擎原样保留）。
-       *  反过来把别的引擎的字符串数组也一起发回会**清掉它们已设的档位**（字符串项 = 档位 null）——
-       *  这正是"每通道各自一份档位"的反面。
-       *  `override` = 改某一项的档位（该项取新值，其余沿用已存值）。 */
-      const seqOrderPatch = (routes, override) => ({
-        order: {
-          [seqEngine]: routes.map((r) => ({
-            route: r,
-            reasoningLevel: override && override.route === r ? (override.level || null) : seqLevelOf(r),
-          })),
-        },
-      });
-      /** 上移 / 下移一格（相邻交换）—— 不用拖拽库（用户要求 ↑↓ 即可）。
-       *  ⚠️ 重排时**档位必须跟着项走**（`seqOrderPatch` 负责）：只发 route 字符串会清掉档位。 */
-      const moveSeq = (idx, delta) => {
-        const to = idx + delta;
-        if (!seqEngine || to < 0 || to >= seqList.length) return;
-        const next = seqList.slice();
-        const [moved] = next.splice(idx, 1);
-        next.splice(to, 0, moved);
-        onSequentialSet(seqOrderPatch(next));
-      };
-      /** 改某一项的档位 ⇒ 发**该引擎的完整数组**（同引擎内整体替换；只发一项会丢掉别的项）。 */
-      const setSeqLevel = (m, lv) => {
-        if (!seqEngine) return;
-        onSequentialSet(seqOrderPatch(seqList, { route: m, level: lv }));
-      };
-      const toggleSequential = () => {
-        /* 判据与降级开关一致：只看 busy 与「有没有通道清单」（离线不额外禁用：
-         * ext/demo 数据源同样提供本方法；真无源时 channels 为空，这里自然禁用）。 */
-        if (busy || channels.length === 0) return;
-        onSequentialSet({ enabled: !seqEnabled });
-      };
+      /** 面板要渲染的块：主通道（顺序派发时）+ 降级目标（顺序派发、且与主通道**不同引擎**时）。 */
+      const seqBlocks = [];
+      if (seqEnabled) seqBlocks.push(makeSeqBlock('main', sel));
+      if (seqFbOn && (!seqEnabled || !sel || engineOf(fbSel.engine) !== engineOf(sel.engine))) {
+        seqBlocks.push(makeSeqBlock('fallback', fbSel));
+      }
 
       return h('div', { className: 'dsp-stack' },
         /* ZB-42（用户现场报告）：总开关关闭时**必须在通道分区里明说**。
@@ -2887,8 +2907,10 @@ window.__ModuleLoader__.load({
            * 理由：顺序派发会在**多个模型**间轮换，而档位是**逐模型**的（实测 OpenCode 6/10 个模型
            * 有档位、且集合各不相同）—— 一个全局档位对轮换列表根本说不通。
            * 故顺序派发模式的档位由**顺序面板里逐模型设置**（另一个入口），这里只如实告知"去那里设"。
-           * 注意：**不是**禁用整个分区，只是这一项不可改；切回具体模型立即恢复可选。 */
-          const seqMode = modelValue === '';
+           * 注意：**不是**禁用整个分区，只是这一项不可改；切回具体模型立即恢复可选。
+           * ZB-52c：判据直接用派生量 `seqEnabled`（= 该通道 model 为空 ⇒ 模型下拉选的是「顺序派发」），
+           * 不再依赖被删掉的开关变量。 */
+          const seqMode = seqEnabled;
           /* ⚠️ `title` 必须**内联**这个三元（既有契约的字面形状，测试钉住）：
            * 失效档位要说明原因（派发会被 runner 拒绝）。
            * 顺序派发模式下的额外说明走 `seqThinkingDefault` 的 option 文案 + hint 行，不挤进这里。 */
@@ -2944,9 +2966,10 @@ window.__ModuleLoader__.load({
             `${t('filtHiddenA')}${hidden}${t('filtHiddenB')}${folded.length}${t('filtHiddenC')}`);
         })(),
         h('div', { className: 'dsp-note', role: 'status' },
-          /* ZB-51：未指定模型时显示「Agent决定」（与模型下拉首项同一文案，用户要求）。
-           * ZB-52：顺序派发开启时该位置显示「顺序派发」（与首项同一判据，两处不打架）。 */
-          `${t('chanNewTask')}${channel.provider}/${channel.model || (seqEnabled ? t('seqTitle') : t('modelAgentDecide'))} · ${t('thinking')}: ${channel.reasoningLevel === 'agent' || !channel.reasoningLevel ? t('thinkingAgentShort') : thinkingLabel(channel.reasoningLevel)}`),
+          /* ZB-51：未指定模型时显示「Agent决定」（与模型下拉首项同一文案）。
+           * ZB-52c：模型为空 = 顺序派发（**唯一真相**）⇒ 该位置固定显示「顺序派发」，不再有第三种状态
+           * （开关已删除："模型值"与"开关"不会再互相矛盾）。 */
+          `${t('chanNewTask')}${channel.provider}/${channel.model || t('seqTitle')} · ${t('thinking')}: ${channel.reasoningLevel === 'agent' || !channel.reasoningLevel ? t('thinkingAgentShort') : thinkingLabel(channel.reasoningLevel)}`),
         /* 引擎专属提示（跟随选中通道动态显示）——OpenCode 通道不支持 mode/memoryBench 等硬边界。 */
         chanEngineNote,
         /* ── ZB-33：免费额度通道的额度条（仅选中该通道时显示） ── */
@@ -2968,77 +2991,69 @@ window.__ModuleLoader__.load({
                   })),
               h('span', { className: 'dsp-note', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' } }, giftText)))
           : null,
-        /* ── ZB-52：顺序派发（开关 + 开启后的**可排序模型列表**） ──
+        /* ── ZB-52d：顺序派发列表（**没有开关**；主通道与降级目标**各自一块、同屏显示**） ──
          * 位置刻意放在「自动降级」之前：顺序派发是**同一引擎内**换模型，自动降级是**跨通道**续命，
-         * core 的执行次序也是"先顺序、后降级"（`advanceSequential()` 用尽 ⇒ 交回降级链）。
-         * 与降级开关同一套视觉语言：`dsp-switch dsp-toggle` + `dsp-dot` 指示灯 + `aria-pressed`。 */
-        h('div', { className: 'dsp-field', 'data-dsp-sequential': 'switch' },
-          h('button', {
-            className: 'dsp-switch dsp-toggle', type: 'button',
-            title: offline ? t('seqOfflineHint') : t('seqEnableTitle'),
-            disabled: busy || channels.length === 0,
-            onClick: toggleSequential, 'aria-pressed': seqEnabled,
-          },
-            h('span', { className: 'dsp-dot', style: { background: seqEnabled ? T.stDone : T.danger } }),
-            `${t('seqTitle')}：${seqEnabled ? t('fallbackStateOn') : t('fallbackStateOff')}`),
-          h('span', { className: 'dsp-spring' }),
-          /* 徽标显示「当前作用引擎 + 列表条数」——列表只作用于当前引擎，这点必须在界面上看得见。 */
-          seqEnabled && seqEngine
-            ? h('span', { className: 'dsp-badge', title: t('seqOrderLabel') }, `${engLabel(seqEngine)} · ${seqList.length}`)
-            : null),
-        /* 关闭时不显示列表（与降级开关"关闭不显示下面的选择项"同一纪律）。 */
-        seqEnabled
+         * core 的执行次序也是"先顺序、后降级"（顺序列表用尽 ⇒ 交回降级链）。
+         * 每块带归属徽标（`OpenCode · 3` / `自动降级 → Qoder · 2`），各自排各自的引擎列表、各自写入。
+         * 两条链是同一引擎时只有一块（`seqBlocks` 已去重）—— 列表按引擎存，重复显示会误导成两份。 */
+        seqBlocks.length
           ? h('div', { className: 'dsp-stack', 'data-dsp-sequential': 'list' },
-            h('div', { className: 'dsp-note', role: 'status' }, t('seqHint')),
-            !seqEngine || !seqList.length
-              ? h('div', { className: 'dsp-note', role: 'status' }, t('seqEmpty'))
-              : h('div', { className: 'dsp-field' },
-                h('span', { className: 'dsp-field-k' }, t('seqOrderLabel')),
-                h('span', { className: 'dsp-field-v', style: { display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '0' } },
-                  seqList.map((m, i) => {
-                    /* ZB-52b：该行模型的档位下拉选项（取不到档位声明 ⇒ 只有「默认」，不瞎列）。 */
-                    const lvList = seqLevelsOf(m);
-                    const curLv = seqLevelOf(m);
-                    /* 存值不在当前档位集里（探测表变化 / 该模型档位暂时没探测到）⇒ 显式列出并标注，
-                     * 否则 <select value> 命不中 option 会显示首项「默认」，与真实存值不符（ZB-31 同类坑）。 */
-                    const lvStale = curLv != null && !lvList.includes(curLv);
-                    const lvAria = `${t('seqLevelLabel')}：${seqLabelOf(m)}`;
-                    return h('div', {
-                      key: m, 'data-dsp-seq-item': m,
-                      style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0' },
-                    },
-                      h('span', { className: 'dsp-note', style: { flex: '0 0 18px' } }, `${i + 1}.`),
-                      h('span', {
-                        className: 'dsp-note',
-                        style: { flex: '1', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-                        title: seqStale.includes(m) ? `${m}${t('seqUnavailable')}` : seqLabelOf(m),
-                      }, seqStale.includes(m) ? `${seqLabelOf(m)}${t('seqUnavailable')}` : seqLabelOf(m)),
-                      /* 逐模型档位下拉：value = 原始档位字符串（'' = 引擎默认）；label = 中文标签。 */
-                      h('select', {
-                        className: 'dsp-select', 'data-dsp-seq-level': m,
-                        value: curLv ?? '',
-                        disabled: busy,
-                        title: lvAria, 'aria-label': lvAria,
-                        style: { flex: '0 0 auto', maxWidth: '108px', padding: '1px 6px' },
-                        onChange: (e) => setSeqLevel(m, e.target.value),
+            h('div', { className: 'dsp-note', role: 'status', title: offline ? t('seqOfflineHint') : undefined }, t('seqHint')),
+            seqBlocks.map((b) => h('div', {
+              className: 'dsp-stack', key: b.owner, 'data-dsp-seq-block': b.owner,
+            },
+              h('div', { className: 'dsp-note', role: 'status', title: t('seqOrderLabel') },
+                h('span', { className: 'dsp-badge' },
+                  `${b.owner === 'fallback' ? `${t('fallbackTitle')} → ` : ''}${b.engine ? engLabel(b.engine) : '-'} · ${b.list.length}`)),
+              !b.engine || !b.list.length
+                ? h('div', { className: 'dsp-note', role: 'status' }, t('seqEmpty'))
+                : h('div', { className: 'dsp-field' },
+                  h('span', { className: 'dsp-field-k' }, t('seqOrderLabel')),
+                  h('span', { className: 'dsp-field-v', style: { display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '0' } },
+                    b.list.map((m, i) => {
+                      /* ZB-52b：该行模型的档位下拉选项（取不到档位声明 ⇒ 只有「默认」，不瞎列）。 */
+                      const lvList = b.levelsOf(m);
+                      const curLv = b.levelOf(m);
+                      /* 存值不在当前档位集里（探测表变化 / 该模型档位暂时没探测到）⇒ 显式列出并标注，
+                       * 否则 <select value> 命不中 option 会显示首项「默认」，与真实存值不符（ZB-31 同类坑）。 */
+                      const lvStale = curLv != null && !lvList.includes(curLv);
+                      const lvAria = `${t('seqLevelLabel')}：${b.labelOf(m)}`;
+                      return h('div', {
+                        key: m, 'data-dsp-seq-item': m, 'data-dsp-seq-owner': b.owner,
+                        style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0' },
                       },
-                        h('option', { key: '__default', value: '' }, t('seqLevelDefault')),
-                        lvStale ? h('option', { key: '__stale', value: curLv }, `${thinkingLabel(curLv)}（${t('thinkingStale')}）`) : null,
-                        lvList.map((lv) => h('option', { key: lv, value: lv }, thinkingLabel(lv)))),
-                      /* ↑↓ 按钮（用户要求：上移/下移即可，不引拖拽库）。首/末项各自禁用对应方向。 */
-                      h('button', {
-                        className: 'dsp-btn2', type: 'button', style: { padding: '2px 8px' },
-                        disabled: i === 0, title: t('seqUp'),
-                        'aria-label': `${t('seqUp')}：${seqLabelOf(m)}`,
-                        onClick: () => moveSeq(i, -1),
-                      }, '↑'),
-                      h('button', {
-                        className: 'dsp-btn2', type: 'button', style: { padding: '2px 8px' },
-                        disabled: i === seqList.length - 1, title: t('seqDown'),
-                        'aria-label': `${t('seqDown')}：${seqLabelOf(m)}`,
-                        onClick: () => moveSeq(i, 1),
-                      }, '↓'));
-                  }))))
+                        h('span', { className: 'dsp-note', style: { flex: '0 0 18px' } }, `${i + 1}.`),
+                        h('span', {
+                          className: 'dsp-note',
+                          style: { flex: '1', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+                          title: b.stale.includes(m) ? `${m}${t('seqUnavailable')}` : b.labelOf(m),
+                        }, b.stale.includes(m) ? `${b.labelOf(m)}${t('seqUnavailable')}` : b.labelOf(m)),
+                        /* 逐模型档位下拉：value = 原始档位字符串（'' = 引擎默认）；label = 中文标签。 */
+                        h('select', {
+                          className: 'dsp-select', 'data-dsp-seq-level': m,
+                          value: curLv ?? '',
+                          disabled: busy,
+                          title: lvAria, 'aria-label': lvAria,
+                          style: { flex: '0 0 auto', maxWidth: '108px', padding: '1px 6px' },
+                          onChange: (e) => b.setLevel(m, e.target.value),
+                        },
+                          h('option', { key: '__default', value: '' }, t('seqLevelDefault')),
+                          lvStale ? h('option', { key: '__stale', value: curLv }, `${thinkingLabel(curLv)}（${t('thinkingStale')}）`) : null,
+                          lvList.map((lv) => h('option', { key: lv, value: lv }, thinkingLabel(lv)))),
+                        /* ↑↓ 按钮（用户要求：上移/下移即可，不引拖拽库）。首/末项各自禁用对应方向。 */
+                        h('button', {
+                          className: 'dsp-btn2', type: 'button', style: { padding: '2px 8px' },
+                          disabled: i === 0, title: t('seqUp'),
+                          'aria-label': `${t('seqUp')}：${b.labelOf(m)}`,
+                          onClick: () => b.move(i, -1),
+                        }, '↑'),
+                        h('button', {
+                          className: 'dsp-btn2', type: 'button', style: { padding: '2px 8px' },
+                          disabled: i === b.list.length - 1, title: t('seqDown'),
+                          'aria-label': `${t('seqDown')}：${b.labelOf(m)}`,
+                          onClick: () => b.move(i, 1),
+                        }, '↓'));
+                    }))))))
           : null,
         /* ── ZB-30：自动降级（开关 + 开启后的目标三下拉） ── */
         h('div', { className: 'dsp-field' },
@@ -3053,11 +3068,15 @@ window.__ModuleLoader__.load({
           h('span', { className: 'dsp-spring' }),
           fbEnabled && fbTarget
             ? h('span', { className: 'dsp-badge', title: `${fbProvider}${fbModel ? `/${fbModel}` : ''}` },
-              `${fbProvider}${fbModel ? `/${fbModel}` : ''} · ${fbThinking === 'agent' || !fbThinking ? t('thinkingAgentShort') : thinkingLabel(fbThinking)}`)
+              fbModel
+                ? `${fbProvider}/${fbModel} · ${fbThinking === 'agent' || !fbThinking ? t('thinkingAgentShort') : thinkingLabel(fbThinking)}`
+                : `${fbProvider} · ${t('seqTitle')}`)
             : null),
         /* 关闭时不显示下面的选择项（用户要求：关闭不显示）。
          * ZB-30b：三个下拉与上面「通道」分区**完全一致的选项逻辑** —— 同样的首项
-         * （`（通道默认模型）` / `Agent决定（按任务判断）`）、同样的档位并集、同样的禁用判据。 */
+         * （`顺序派发` / `Agent决定（按任务判断）`）、同样的档位并集、同样的禁用判据。
+         * ZB-52c：降级目标的「模型」首项也改成「顺序派发」（值 `''`）—— 与主通道**同一个语义**：
+         * 模型为空 ⇒ 降到该目标时按**该目标引擎**的顺序列表从上到下试（用户要求"降级也能顺序"）。 */
         fbEnabled ? h('div', { className: 'dsp-stack' },
           h('div', { className: 'dsp-field' },
             h('span', { className: 'dsp-field-k' }, t('provider')),
@@ -3078,21 +3097,24 @@ window.__ModuleLoader__.load({
               onChange: (e) => fbSwitchModel(e.target.value), 'aria-label': `${t('fallbackTitle')}-${t('model')}`,
               disabled: busy || !fbSel || !fbSel.enabled,
             },
-              h('option', { value: '' }, t('chanDefaultModel')),
+              h('option', { value: '', title: t('seqHintShort') }, t('seqTitle')),
               fbModels.map((m) => h('option', { key: m, value: m }, fbModelLabel(m))))),
           h('div', { className: 'dsp-field' },
             h('span', { className: 'dsp-field-k' }, t('thinking')),
             h('select', {
-              className: 'dsp-select dsp-field-v', value: fbThinking,
+              className: 'dsp-select dsp-field-v', value: fbSeqMode ? 'agent' : fbThinking,
               onChange: (e) => fbSwitchThinking(e.target.value), 'aria-label': `${t('fallbackTitle')}-${t('thinking')}`,
-              disabled: busy || channels.length === 0 || !fbSel || !fbSel.enabled,
+              disabled: fbSeqMode || busy || channels.length === 0 || !fbSel || !fbSel.enabled,
             },
-              h('option', { value: 'agent' }, t('thinkingAgent')),
-              /* ZB-31：与「通道」分区同一条纪律 —— 失效档位显式列出（见上面注释）。 */
-              fbThinking !== 'agent' && !fbLevels.includes(fbThinking)
+              fbSeqMode
+                ? h('option', { value: 'agent' }, t('seqThinkingDefault'))
+                : h('option', { value: 'agent' }, t('thinkingAgent')),
+              /* ZB-31：与「通道」分区同一条纪律 —— 失效档位显式列出（见上面注释）。
+               * ZB-52c：降级目标为顺序派发时与主通道一致（显示「设置默认」、不可改）。 */
+              fbSeqMode ? null : (fbThinking !== 'agent' && !fbLevels.includes(fbThinking)
                 ? h('option', { value: fbThinking }, `${thinkingLabel(fbThinking)}（${t('thinkingStale')}）`)
-                : null,
-              fbLevels.map((lv) => h('option', { key: lv, value: lv }, thinkingLabel(lv))))),
+                : null),
+              fbSeqMode ? null : fbLevels.map((lv) => h('option', { key: lv, value: lv }, thinkingLabel(lv))))),
           h('div', { className: 'dsp-note', role: 'status' }, t('fallbackHint')),
         ) : null,
         fbFeedback ? h('div', { className: `dsp-feedback${fbFeedback.kind === 'err' ? ' dsp-err' : ''}`, role: 'status' }, fbFeedback.text) : null,
@@ -3734,11 +3756,12 @@ window.__ModuleLoader__.load({
       const [channelsInfo, setChannelsInfo] = useState({ channels: [], warnings: [] });
       const [channel, setChannelState] = useState({ provider: 'plan', model: 'GLM-5.3-Flash' });
       const [fallback, setFallbackState] = useState({ enabled: false, chain: [], targets: [], target: null });
-      /* ZB-52：顺序派发（开关 + 每引擎一份模型顺序）。初值 = 关 + 三引擎空表 ——
+      /* ZB-52：顺序派发（每引擎一份模型顺序）。初值 = 三引擎空表 ——
        * 与 core 的 `getSequential()` 同形，wire 返回权威值后覆盖。
+       * ZB-52c：**没有开关** —— "是否顺序派发"由「模型」值表达（模型为空即顺序派发），
+       * 故这里不再有 `enabled`；面板里也不存第二个真相。
        * ZB-52b：`levels` 与 `order` **同序**（每项 = 该模型自己的思考强度档位；null = 引擎默认）。 */
       const [sequential, setSequentialState] = useState({
-        enabled: false,
         order: { zcode: [], opencode: [], qoder: [] },
         levels: { zcode: [], opencode: [], qoder: [] },
         sequentialCount: 0,
@@ -3811,7 +3834,8 @@ window.__ModuleLoader__.load({
           if (r && r.ok) setFallbackState({ enabled: !!r.enabled, chain: r.chain ?? [], targets: r.targets ?? [], target: r.target ?? null });
         });
       }, [fallbackSet]);
-      /* ZB-52：顺序派发写入（`{enabled}` 或 `{order}` **单传** —— core 按缺键保持另一项不动）。
+      /* ZB-52：顺序派发写入（**只发 `{order}`** —— core 已废弃 `enabled`，传它会**抛 TypeError**；
+       * 顺序派发由「模型」值表达，不再有开关）。
        * 乐观回显：面板先按用户操作渲染，wire 返回权威值后校正（与 fallback 同款）。
        * ZB-52b：回显同样按 `normSeqShape` 归一 —— 逐模型档位必须跟着权威值一起回来，
        * 否则「刚设的档位」会在写入成功后从下拉里消失。 */

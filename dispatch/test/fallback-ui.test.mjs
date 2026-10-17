@@ -208,8 +208,11 @@ ok(labels.includes('GLM-5.3-Flash「免费」'), '★ 免费额度列 GLM-5.3-Fl
 ok(!labels.includes('GLM-5.3「免费」'), '★ 免费额度**不该**出现 GLM-5.3（Start Plan 只给 Flash）');
 ok(selects.some((s) => flattenOptions(s).some((c) => c.props.value === 'high')),
   '③ option value 仍是原始档位字符串（high）—— 中文只在 label');
-ok(labels.includes('（通道默认模型）') && labels.includes('Agent决定（按任务判断）'),
-  '★ 模型/档位首项与上面「通道」分区**逐字一致**（通道默认模型 / Agent决定）');
+/* ZB-52：主/降级「模型」首项现在**都是「顺序派发」**（用户要求「降级也要支持顺序派发」）——
+ * 存值同为 `''`（= 不绑定具体模型 ⇒ 走顺序列表）。「（通道默认模型）」这个 label 在本 fixture 里
+ * 已不出现于模型下拉（`chanDefaultModel` 键仍被 JobRow 的交接重跑下拉使用）。 */
+ok(labels.includes('顺序派发') && labels.includes('Agent决定（按任务判断）'),
+  '★ 模型/档位首项为「顺序派发」与「Agent决定」（主与降级一致）');
 /* ZB-30b（用户要求「不要沿用原任务，就跟上面完全一致的选项逻辑」）：作用域取后 3 个下拉。 */
 const fbSelects = selects.slice(3);
 const fbLabels = fbSelects.flatMap(optLabels);
@@ -225,7 +228,7 @@ ok(!fbLabels.some((l) => l.includes('沿用原任务')),
 const chanLabels = selects.slice(0, 3).flatMap(optLabels);
 /* ZB-51：**通道下拉必须逐字相同**；模型下拉允许**一处刻意差异**（用户要求）：
  *   上面「模型」首项 = `Agent决定`（值 ''，不绑定模型、派发 Agent 可自选并随时更换）；
- *   降级区「模型」首项 = `（通道默认模型）`（值 ''）—— 降级是自动触发的，那一刻没有 Agent 在决定。
+ *   降级区「模型」首项 = `顺序派发`（值 ''，ZB-52 第三轮起与主通道一致：降级目标也支持顺序派发）。
  * 除此之外模型项必须一致。 */
 const chanSel = selects.slice(0, 1).flatMap(optLabels);
 const fbChanSel = selects.slice(3, 4).flatMap(optLabels);
@@ -238,7 +241,7 @@ const fbModel = selects.slice(4, 5).flatMap(optLabels);
  * ⚠️ 开关未开时该选项**置灰**并追加「（需先开启）」（如实告知怎么生效，不静默误导）。 */
 ok(/^顺序派发/.test(chanModel[0] ?? ''),
   `★ 上面「模型」首项 = 顺序派发（实际 ${JSON.stringify(chanModel[0])}）`);
-ok(fbModel[0] === '（通道默认模型）', `★ 降级「模型」首项 = 通道默认模型（实际 ${JSON.stringify(fbModel[0])}）`);
+ok(fbModel[0] === '顺序派发', `★ 降级「模型」首项 = 顺序派发（实际 ${JSON.stringify(fbModel[0])}）`);
 ok(JSON.stringify(chanModel.slice(1)) === JSON.stringify(fbModel.slice(1)),
   `★ 除首项外，模型项两侧一致（上 ${JSON.stringify(chanModel.slice(1))} / 降 ${JSON.stringify(fbModel.slice(1))}）`);
 const thinkingOf = (list) => list.filter((l) => l.startsWith('关闭思考') || l.startsWith('开启思考') || l.startsWith('低强度') || l.startsWith('高强度') || l.startsWith('最高强度'));
@@ -270,7 +273,7 @@ ok(/let demoTargets = \[\];/.test(src) && !/let demoChain/.test(src), '⑤ 旧�
 {
   const modelSel = fbSelects[1];
   const n0 = fallbackCalls.length;
-  modelSel.props.onChange({ target: { value: '' } }); // 选「（通道默认模型）」
+  modelSel.props.onChange({ target: { value: '' } }); // 选「顺序派发」（空值 = 不绑定模型）
   await new Promise((r) => setTimeout(r, 20));
   ok(fallbackCalls.length === n0 + 1, '⑥ 改模型触发一次写入');
   const wrote = fallbackCalls[fallbackCalls.length - 1].chain;

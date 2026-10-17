@@ -6,19 +6,24 @@
  *
  * 覆盖三组：
  *   A. 状态与 API（getSequential / setSequential）：
- *      · 初始 {enabled:false, order:{zcode,opencode,qoder 三键恒在}, sequentialCount:0}
- *      · enabled / order 可只传其一（互不覆盖）
+ *      · 初始 {order:{zcode,opencode,qoder 三键恒在}, levels（与 order 同序的逐模型档位）, sequentialCount:0}
+ *      · ★ **没有 enabled 开关**（第三轮用户要求：模型为空即顺序派发）⇒ setSequential({enabled}) 明确抛 TypeError
  *      · ★ order **按引擎合并**（回归：原实现整体替换会静默清空其它引擎）
- *      · 显式清空（[] / null）只清目标引擎
- *      · ★ 未知引擎键被丢弃（不得因 normalizeEngine 回退写进 zcode）
- *      · 去重且保持顺序；落盘 <workRoot>/state/sequential.json 形状
- *      · 重启后读回一致；文件损坏/形状不对 ⇒ fail-open 默认关且不抛
+ *      · 显式清空（[] / null）只清目标引擎；未知引擎键被丢弃（不得因 normalizeEngine 回退写进 zcode）
+ *      · 去重且保持顺序、逐模型档位对齐/同 route 原位覆盖
+ *      · 落盘 <workRoot>/state/sequential.json = {version:2, order:[{route, reasoningLevel}], updatedAt}
+ *      · 重启后读回一致；v1 旧文件仍能读（mode 被忽略）；文件损坏/形状不对 ⇒ fail-open 且不抛
  *   B. 失败推进（advanceSequential，由 finalizeJob 触发）——用假执行器驱动，不跑真 CLI：
+ *      · ★ 接管判据：模型为空 + 该引擎有列表 ⇒ **首次派发就用列表第一项**（不是引擎默认模型）；
+ *        显式指定 model ⇒ 不被劫持；模型为空但没有列表 ⇒ 不接管（不注入模型）
  *      · failed（静默非 0 退出）⇒ 按面板顺序 a→b→c 交接重跑，逐个前进
+ *      · ★ 回归钉：3 项列表必须**真的 spawn 3 次**（seqRuns 未移交给新 job 时会在第 2 跳提前停）
  *      · 列表用尽 ⇒ 留「已试完 N 个模型」warning、不再无限重试（spawn 次数封顶）
  *      · paused 不限暂停原因（quota / entitlement / signing）都延续
  *      · config-error **不**延续（停在 paused、不换模型）
- *      · 列表用尽 ⇒ 交回既有的跨通道降级链
+ *      · 列表用尽 ⇒ 交回既有跨通道降级链（**单目标**也要生效：降级预算/起点回归钉）
+ *      · ★ **降级目标也支持顺序派发**：目标 model 为空 + 该引擎有列表 ⇒ 降到该目标时从列表第一项起跑，
+ *        列表跑完才继续**外层**降级链
  *   C. 思考强度探测补齐（用假执行器打印固定档位行，不跑 qoder/opencode 真 CLI）：
  *      · Qoder `reasoning-efforts` → 合进通道级 thinkingLevels
  *      · OpenCode `variants` → **逐模型** thinkingLevels（没报档位的模型不得被造出档位）
@@ -159,12 +164,23 @@ function makeDispatcher(workRoot = newTempDir()) {
   return createDispatcher({ runnerPath: process.execPath, workRoot });
 }
 
+/**
+ * B 组**新语义的起跑方式**（第三轮：没有全局开关）：
+ *   「模型」选「顺序派发」= 默认通道的 model 存**空值** ⇒ 派发时按该引擎的顺序列表从上到下试。
+ * 注意：**不能再**用 `dispatch({model:'opencode/a'})` 模拟第一跳 —— 显式指定模型不会被劫持。
+ */
+function armSequential(d, provider, order) {
+  d.setChannel({ provider, model: '' });
+  return d.setSequential({ order });
+}
+
 const EMPTY_ORDER = () => ({ zcode: [], opencode: [], qoder: [] });
 /* ZB-52（第二轮，用户要求「顺序思考强度档位设置」）：`getSequential()` 多了 `levels` ——
  * 与 `order` **同序**的逐模型档位数组（null = 该模型用引擎默认）；
  * 落盘 `sequential.json` 的 order 项也随之升级成 `{route, reasoningLevel}`（见对应断言）。 */
 const EMPTY_LEVELS = () => ({ zcode: [], opencode: [], qoder: [] });
-const DEFAULT_SEQ = () => ({ enabled: false, order: EMPTY_ORDER(), levels: EMPTY_LEVELS(), sequentialCount: 0 });
+/* 第三轮：`enabled` 已从 API 移除（顺序派发由「模型为空」表达）⇒ 默认形状不再有它。 */
+const DEFAULT_SEQ = () => ({ order: EMPTY_ORDER(), levels: EMPTY_LEVELS(), sequentialCount: 0 });
 
 /* ---------------- 假执行器源码生成 ---------------- */
 
@@ -189,7 +205,8 @@ function makeSilentFailRunner(dir, markerPath) {
 
 /**
  * 暂停签名假执行器：打印一行固定文案 + exit 1 ⇒ core classifyPause 命中对应 pauseReason。
- * config-error / quota-exhausted / plan-not-entitled / provider-signing 都可用它驱动。
+ * config-error / quota-exhausted / plan-not-entitled / provider-signing 都可用它驱动；
+ * 也作为「降级目标顺序派发」里 qoder 引擎的假执行器（不跑真 CLI）。
  */
 function makePauseRunner(dir, fileName, text) {
   const src = [
@@ -261,29 +278,24 @@ function makeOpenCodeProbeRunner(dir, markerPath) {
 /* ═══════════════════════════ A. 状态与 API ═══════════════════════════ */
 
 async function scenarioA() {
-  await scenario('A1 初始状态：三引擎键恒在 + 默认关 + sequentialCount=0', async () => {
+  await scenario('A1 初始状态：三引擎键恒在 + 没有 enabled 开关 + sequentialCount=0', async () => {
     const d = makeDispatcher();
     const s = d.getSequential();
-    eq(s.enabled, false, '初始 enabled=false');
     eq(s.order, EMPTY_ORDER(), '初始 order = 三个引擎的空数组（客户端据此渲染）');
+    eq(s.levels, EMPTY_LEVELS(), '初始 levels = 三个引擎的平行空数组');
     eq(Object.keys(s.order).sort(), ['opencode', 'qoder', 'zcode'], '*三个引擎键永远都在*');
     eq(s.sequentialCount, 0, '初始 sequentialCount=0');
+    ok(!('enabled' in s), '*★ 不再有 enabled 字段*（第三轮用户要求去掉全局开关：模型为空即顺序派发）');
+    eq(Object.keys(s).sort(), ['levels', 'order', 'sequentialCount'], 'API 对外形状 = {order, levels, sequentialCount}');
   });
 
-  await scenario('A2 patch 互不覆盖：enabled / order 可只传其一', async () => {
+  await scenario('A2 只传 order 可用；空 patch 不改状态', async () => {
     const d = makeDispatcher();
-    const s1 = d.setSequential({ enabled: true });
-    eq(s1.enabled, true, '只传 enabled ⇒ 开关打开');
-    eq(s1.order, EMPTY_ORDER(), '只传 enabled ⇒ order 不动（仍全空）');
-
-    const s2 = d.setSequential({ order: { zcode: ['plan::GLM-5.3'] } });
-    eq(s2.enabled, true, '只传 order ⇒ enabled 保持 true');
-    eq(s2.order.zcode, ['plan::GLM-5.3'], '只传 order ⇒ 顺序生效');
-    eq(s2.sequentialCount, 1, 'sequentialCount = 三个引擎条目总数');
-
-    const d2 = makeDispatcher();
-    const s3 = d2.setSequential({ order: { opencode: ['opencode/a'] } });
-    eq(s3.enabled, false, '全新 dispatcher 只传 order ⇒ enabled 仍是默认 false（不得被顺手打开）');
+    const s1 = d.setSequential({ order: { zcode: ['plan::GLM-5.3'] } });
+    eq(s1.order.zcode, ['plan::GLM-5.3'], '只传 order ⇒ 顺序生效');
+    eq(s1.levels.zcode, [null], '只传 order ⇒ 该模型档位 null（用引擎默认）');
+    const s2 = d.setSequential({});
+    eq(s2, s1, '空 patch 不改变状态（仍返回当前状态）');
   });
 
   await scenario('A3 ★ order 按引擎合并（回归：不得静默清空其它引擎）', async () => {
@@ -293,7 +305,6 @@ async function scenarioA() {
     eq(s1.order.zcode, ['plan::GLM-5.3'], '*★ 再设 opencode 时 zcode 的顺序必须还在*（原实现整体替换会静默清空）');
     eq(s1.order.opencode, ['opencode/a'], '本次 patch 的 opencode 生效');
     eq(s1.order.qoder, [], '未涉及的引擎保持空');
-
     const s2 = d.setSequential({ order: { qoder: ['qoder/Fast'] } });
     eq(s2.order.zcode, ['plan::GLM-5.3'], '第三次 patch 后 zcode 仍在');
     eq(s2.order.opencode, ['opencode/a'], '第三次 patch 后 opencode 仍在');
@@ -330,41 +341,93 @@ async function scenarioA() {
       order: { opencode: ['opencode/b', 'opencode/a', 'opencode/b', ' opencode/c ', '', 'opencode/a'] },
     });
     eq(s.order.opencode, ['opencode/b', 'opencode/a', 'opencode/c'], '去重、去空、trim，且**保持首次出现顺序**（顺序=派发次序）');
+    eq(s.levels.opencode, [null, null, null], '纯字符串项 ⇒ 档位都是 null（引擎默认）');
   });
 
-  await scenario('A7 落盘形状：<workRoot>/state/sequential.json = {version:1, mode, order, updatedAt}', async () => {
+  await scenario('A7 逐模型档位：levels 与 order 同序；同一 route 原位覆盖档位', async () => {
+    const d = makeDispatcher();
+    const s = d.setSequential({
+      order: {
+        opencode: [
+          { route: 'opencode/a', reasoningLevel: 'high' },
+          'opencode/b',
+          { route: 'opencode/c', thinking: 'low' },
+          { route: 'opencode/d', reasoningLevel: 'bad level!' },
+        ],
+      },
+    });
+    eq(s.order.opencode, ['opencode/a', 'opencode/b', 'opencode/c', 'opencode/d'], 'order 保持给定次序');
+    eq(
+      s.levels.opencode,
+      ['high', null, 'low', null],
+      '*逐模型档位与 order 同序*：reasoningLevel / thinking 别名接受；非法档位归 null（不猜）',
+    );
+    /* 同一 route 出现两次 ⇒ 去重到首次位置，档位取**后出现的**（后者覆盖前者）。 */
+    const s2 = d.setSequential({ order: { opencode: ['opencode/a', { route: 'opencode/a', reasoningLevel: 'max' }] } });
+    eq(s2.order.opencode, ['opencode/a'], '同 route 去重');
+    eq(s2.levels.opencode, ['max'], '同 route 的档位以后者为准（原位覆盖，不改变顺序）');
+  });
+
+  await scenario('A8 落盘形状：<workRoot>/state/sequential.json = {version:2, order:[{route,reasoningLevel}], updatedAt}', async () => {
     const workRoot = newTempDir();
     const d = makeDispatcher(workRoot);
-    d.setSequential({ enabled: true });
-    d.setSequential({ order: { zcode: ['plan::GLM-5.3'], opencode: ['opencode/a'] } });
+    d.setSequential({ order: { zcode: ['plan::GLM-5.3'], opencode: [{ route: 'opencode/a', reasoningLevel: 'high' }] } });
     const file = join(workRoot, 'state', 'sequential.json');
     ok(existsSync(file), '落盘文件 <workRoot>/state/sequential.json 存在');
     const raw = JSON.parse(readFileSync(file, 'utf8'));
-    eq(raw.version, 1, 'version=1');
-    eq(raw.mode, true, 'mode = 开关状态（true）');
-    /* ZB-52：落盘项现为 `{route, reasoningLevel}`（档位可空）—— 面板按此项渲染"逐模型档位"。 */
-    eq(raw.order, {
-      zcode: [{ route: 'plan::GLM-5.3', reasoningLevel: null }],
-      opencode: [{ route: 'opencode/a', reasoningLevel: null }],
-    }, 'order 落盘 = 设置值（只含非空引擎；项为 {route, reasoningLevel}）');
-    /* 旧格式（纯字符串数组）必须仍能读入 —— 向后兼容 */
-    writeFileSync(file, JSON.stringify({ version: 1, mode: true, order: { opencode: ['opencode/x', 'opencode/y'] } }), 'utf8');
-    const d2 = createDispatcher({ runnerPath: process.execPath, workRoot });
-    eq(d2.getSequential().order.opencode, ['opencode/x', 'opencode/y'], '★ 旧格式（字符串数组）仍能读入');
-    eq(d2.getSequential().levels.opencode, [null, null], '旧格式读入后档位为 null（= 引擎默认，不猜）');
+    eq(raw.version, 2, 'version=2（v2 去掉全局 mode）');
+    ok(!('mode' in raw), '*落盘不再有 mode 字段*（没有全局开关）');
+    eq(
+      raw.order,
+      {
+        zcode: [{ route: 'plan::GLM-5.3', reasoningLevel: null }],
+        opencode: [{ route: 'opencode/a', reasoningLevel: 'high' }],
+      },
+      '落盘 order 项 = {route, reasoningLevel}（档位逐模型）',
+    );
     ok(typeof raw.updatedAt === 'string' && !Number.isNaN(Date.parse(raw.updatedAt)), 'updatedAt 是合法时间戳');
+    /* 对外形状与落盘形状不同：`getSequential().order` 仍是**字符串数组**（客户端既有渲染契约不变）。 */
+    const s = d.getSequential();
+    eq(s.order.zcode, ['plan::GLM-5.3'], '对外 order 仍是字符串数组（客户端渲染契约不变）');
+    eq(s.levels.opencode, ['high'], '对外 levels 与 order 同序');
   });
 
-  await scenario('A8 重启后读回：同一 workRoot 新建 dispatcher 与落盘一致', async () => {
+  await scenario('A9 重启后读回：同一 workRoot 新建 dispatcher 与落盘一致（含 levels）', async () => {
     const workRoot = newTempDir();
     const d1 = makeDispatcher(workRoot);
-    d1.setSequential({ enabled: true, order: { zcode: ['plan::GLM-5.3'], opencode: ['opencode/a', 'opencode/b'] } });
+    d1.setSequential({
+      order: {
+        zcode: ['plan::GLM-5.3'],
+        opencode: ['opencode/a', { route: 'opencode/b', reasoningLevel: 'max' }],
+      },
+    });
     const d2 = makeDispatcher(workRoot);
     eq(d2.getSequential(), d1.getSequential(), '新 dispatcher 的 getSequential() 与重启前完全一致');
-    eq(d2.getSequential().order.zcode, ['plan::GLM-5.3'], '重启后顺序列表逐字保留（不重排/不改写）');
+    eq(d2.getSequential().order.opencode, ['opencode/a', 'opencode/b'], '重启后顺序列表逐字保留（不重排/不改写）');
+    eq(d2.getSequential().levels.opencode, [null, 'max'], '重启后逐模型档位也保留');
   });
 
-  await scenario('A9 fail-open：文件损坏 / 形状不对 ⇒ 默认关、不抛', async () => {
+  await scenario('A10 v1 旧文件仍能读（mode 被忽略，字符串项档位=null）', async () => {
+    const workRoot = newTempDir();
+    mkdirSync(join(workRoot, 'state'), { recursive: true });
+    writeFileSync(
+      join(workRoot, 'state', 'sequential.json'),
+      JSON.stringify({
+        version: 1,
+        mode: true, // v1 的全局开关：新实现**忽略**它，不报错
+        order: { zcode: ['plan::GLM-5.3'], opencode: ['opencode/a'] },
+        updatedAt: new Date().toISOString(),
+      }),
+      'utf8',
+    );
+    const d = createDispatcher({ runnerPath: process.execPath, workRoot });
+    const s = d.getSequential();
+    eq(s.order, { zcode: ['plan::GLM-5.3'], opencode: ['opencode/a'], qoder: [] }, 'v1 文件的 order 直接可用（向后兼容）');
+    eq(s.levels, { zcode: [null], opencode: [null], qoder: [] }, 'v1 字符串项 ⇒ 档位 null（引擎默认，不猜）');
+    ok(!('enabled' in s), 'v1 的 mode 不会复活成 enabled 字段');
+  });
+
+  await scenario('A11 fail-open：文件损坏 / 形状不对 ⇒ 默认空、不抛', async () => {
     const wr1 = newTempDir();
     mkdirSync(join(wr1, 'state'), { recursive: true });
     writeFileSync(join(wr1, 'state', 'sequential.json'), '{ 这不是 JSON ][', 'utf8');
@@ -376,20 +439,49 @@ async function scenarioA() {
       threw = e;
     }
     eq(threw, null, '损坏的 sequential.json 不得让 createDispatcher 抛错');
-    eq(dCorrupt?.getSequential(), DEFAULT_SEQ(), '损坏 ⇒ fail-open 默认关 + 三引擎空顺序');
+    eq(dCorrupt?.getSequential(), DEFAULT_SEQ(), '损坏 ⇒ fail-open 默认空 + 三引擎空顺序/空档位');
 
     const wr2 = newTempDir();
     mkdirSync(join(wr2, 'state'), { recursive: true });
     writeFileSync(
       join(wr2, 'state', 'sequential.json'),
-      JSON.stringify({ mode: 'yes', order: { zcode: 'not-an-array', bogus: ['x'] } }),
+      JSON.stringify({ version: 2, order: { zcode: 'not-an-array', bogus: ['x'] } }),
       'utf8',
     );
     const dBad = createDispatcher({ runnerPath: process.execPath, workRoot: wr2 });
-    eq(dBad.getSequential(), DEFAULT_SEQ(), '形状不对（mode 非布尔 / order 非数组）⇒ 归一成默认，不猜');
+    eq(dBad.getSequential(), DEFAULT_SEQ(), '形状不对（order 非数组）⇒ 归一成默认，不猜');
   });
 
-  await scenario('A10 入参校验：非对象 ⇒ TypeError', async () => {
+  await scenario('A12 ★ setSequential({enabled}) 明确抛 TypeError（开关已废弃，不静默忽略）', async () => {
+    const d = makeDispatcher();
+    const before = d.getSequential();
+    let e1 = null;
+    try {
+      d.setSequential({ enabled: true });
+    } catch (e) {
+      e1 = e;
+    }
+    ok(e1 instanceof TypeError, '*★ setSequential({enabled:true}) 抛 TypeError*（明确报错，不静默忽略）');
+    ok(e1 && /enabled/.test(e1.message), '错误信息点名 enabled');
+    ok(e1 && /废弃/.test(e1.message), '错误信息说明「已废弃」及替代方式（模型为空即顺序派发）');
+    let e2 = null;
+    try {
+      d.setSequential({ enabled: false });
+    } catch (e) {
+      e2 = e;
+    }
+    ok(e2 instanceof TypeError, 'enabled:false 同样抛（字段整体废弃，不是只拒 true）');
+    let e3 = null;
+    try {
+      d.setSequential({ enabled: true, order: { opencode: ['opencode/a'] } });
+    } catch (e) {
+      e3 = e;
+    }
+    ok(e3 instanceof TypeError, 'enabled + order 同一 patch 抛错');
+    eq(d.getSequential(), before, '被拒的 patch 不得应用 order（先杀开关，状态零改动）');
+  });
+
+  await scenario('A13 入参校验：非对象 ⇒ TypeError', async () => {
     const d = makeDispatcher();
     let e1 = null;
     try {
@@ -408,10 +500,81 @@ async function scenarioA() {
   });
 }
 
-/* ═══════════════════════════ B. 失败推进（finalizeJob → advanceSequential） ═══════════════════════════ */
+/* ═══════════════════════════ B. 派发/失败推进（finalizeJob → advanceSequential） ═══════════════════════════ */
+
+/* B0：**接管判据**（第三轮新语义的核心：模型为空即顺序派发；指定了模型就按指定跑）。 */
+async function scenarioB0() {
+  await scenario('B0a ★ 接管判据：模型为空 + 该引擎有列表 ⇒ 首次派发就用列表第一项', async () => {
+    const dir = newTempDir();
+    const workRoot = newTempDir();
+    const fake = makeSilentFailRunner(dir, join(dir, 'b0a.log'));
+    const cap = captureSpawn();
+    const d = createDispatcher({ runnerPath: fake, opencodeRunnerPath: fake, workRoot, spawnImpl: cap.impl });
+    armSequential(d, 'opencode', { opencode: ['opencode/a', 'opencode/b'] });
+
+    const j = d.dispatch({ kind: 'prompt', prompt: 'ZB-52 B0a（不传 model）' });
+    eq(j.spec.provider, 'opencode', '不传 provider ⇒ 用默认通道（opencode）');
+    eq(j.spec.model, 'opencode/a', '*★ 首次派发由 core 定位到顺序列表第一项*（不是引擎默认模型）');
+    eq(j.engine, 'opencode', '引擎落库 = opencode');
+    await waitFor(() => cap.calls.length >= 1, '首跳 spawn');
+    eq(argOf(cap.calls[0], '--model'), 'opencode/a', '首跳命令行 --model = 列表第一项');
+    /* 收尾：让它跑完整个 2 项列表，避免残留运行中任务 */
+    await waitFor(
+      () => d.list().length === 2 && d.list().every((x) => x.state === 'failed'),
+      'B0a 两项列表跑完',
+      20000,
+    );
+  });
+
+  await scenario('B0b ★ 接管判据：显式指定 model ⇒ 不被顺序列表劫持', async () => {
+    const dir = newTempDir();
+    const workRoot = newTempDir();
+    const fake = makeSilentFailRunner(dir, join(dir, 'b0b.log'));
+    const cap = captureSpawn();
+    const d = createDispatcher({ runnerPath: fake, opencodeRunnerPath: fake, workRoot, spawnImpl: cap.impl });
+    /* 有列表，但 dispatch 显式指定了 opencode/b ⇒ 必须按指定的跑，不得被列表改写/推进 */
+    d.setSequential({ order: { opencode: ['opencode/a', 'opencode/b', 'opencode/c'] } });
+    const j = d.dispatch({ kind: 'prompt', prompt: 'ZB-52 B0b', provider: 'opencode', model: 'opencode/b' });
+    eq(j.spec.model, 'opencode/b', '显式 model 原样保留');
+    await waitFor(
+      () => {
+        const x = d.get(j.id);
+        return x && x.state === 'failed';
+      },
+      'B0b 显式 model 任务落 failed',
+    );
+    await sleep(300);
+    eq(cap.calls.length, 1, '*★ 显式模型不触发顺序链*：只 spawn 1 次');
+    eq(argOf(cap.calls[0], '--model'), 'opencode/b', '命令行 --model = 显式指定的那个');
+    eq(d.list().length, 1, '没有交接出的第二个 job');
+    ok(!d.get(j.id).parseWarnings.some((w) => w.includes('顺序派发')), '没有任何「顺序派发」warning');
+  });
+
+  await scenario('B0c 接管判据：模型为空但该引擎没有列表 ⇒ 不接管（不注入任何模型）', async () => {
+    const dir = newTempDir();
+    const workRoot = newTempDir();
+    const fake = makeSilentFailRunner(dir, join(dir, 'b0c.log'));
+    const cap = captureSpawn();
+    const d = createDispatcher({ runnerPath: fake, opencodeRunnerPath: fake, workRoot, spawnImpl: cap.impl });
+    d.setChannel({ provider: 'opencode', model: '' }); // 模型留空，但顺序列表为空
+    const j = d.dispatch({ kind: 'prompt', prompt: 'ZB-52 B0c' });
+    ok(!j.spec.model, '没有顺序列表 ⇒ 不注入模型（spec.model 保持空；不是引擎默认模型）');
+    await waitFor(
+      () => {
+        const x = d.get(j.id);
+        return x && x.state === 'failed';
+      },
+      'B0c 落 failed',
+    );
+    await sleep(300);
+    eq(cap.calls.length, 1, '不接管 ⇒ 只有 1 次 spawn');
+    eq(cap.calls[0].includes('--model'), false, '命令行不带 --model');
+    eq(d.list().length, 1, '没有顺序推进产生的新 job');
+  });
+}
 
 async function scenarioB1() {
-  await scenario('B1 失败推进：失败 ⇒ 按顺序 a→b→c 交接，列表用尽后停止（不无限重试）', async () => {
+  await scenario('B1 失败推进：失败 ⇒ 按顺序 a→b→c 交接，3 项列表真的 spawn 3 次后停止', async () => {
     const dir = newTempDir();
     const workRoot = newTempDir();
     const marker = join(dir, 'spawn-models.log');
@@ -424,15 +587,10 @@ async function scenarioB1() {
       spawnImpl: cap.impl,
       maxConcurrent: 4,
     });
-    d.setSequential({ enabled: true, order: { opencode: ['opencode/a', 'opencode/b', 'opencode/c'] } });
+    armSequential(d, 'opencode', { opencode: ['opencode/a', 'opencode/b', 'opencode/c'] });
 
-    const a = d.dispatch({
-      kind: 'prompt',
-      prompt: 'ZB-52 顺序派发失败推进（假执行器立即静默失败）',
-      provider: 'opencode',
-      model: 'opencode/a',
-    });
-    eq(a.spec.model, 'opencode/a', '首轮 job 的 spec.model = 顺序列表第 1 个');
+    const a = d.dispatch({ kind: 'prompt', prompt: 'ZB-52 顺序派发失败推进（假执行器立即静默失败）' });
+    eq(a.spec.model, 'opencode/a', '首轮 job 的 spec.model = 顺序列表第 1 个（新语义：dispatch 自动定位）');
 
     /* 等 b 出现（a 失败后由 advanceSequential → retry 交接出来） */
     const bRef = await waitFor(() => d.list().find((j) => j.spec?.model === 'opencode/b') ?? null, 'a 失败后交接出 b（opencode/b）');
@@ -444,6 +602,7 @@ async function scenarioB1() {
     eq(bNow.hopCount, 1, 'b.hopCount = 1');
     eq(bNow.attempts.length, 2, 'b.attempts 两条（原 job + 本次交接）');
     eq(bNow.attempts[1]?.reason, 'handoff-retry', 'b.attempts[1].reason = handoff-retry');
+    eq(bNow.attempts[1]?.hopReason, 'seq-model', '顺序交接的 hopReason = seq-model（与降级链 auto-fallback 区分：独立跳数预算）');
 
     await waitFor(
       () => {
@@ -460,7 +619,7 @@ async function scenarioB1() {
     eq(aNow.handedOffTo, bRef.id, 'a.handedOffTo 指向 b');
     ok(
       aNow.parseWarnings.some((w) => w.includes('顺序派发: 第 2/3 个模型') && w.includes('opencode/opencode/b')),
-      'a 的 parseWarnings 记录「顺序派发: 第 2/3 个模型 opencode/opencode/b」',
+      'a 的 parseWarnings 记录「顺序派发: 第 2/3 个模型 opencode/opencode/b」（warning 写在失败的前一个 job 上）',
     );
     ok(aNow.parseWarnings.some((w) => w.includes('退出码 1')), 'a 的顺序派发 warning 带失败原因「退出码 1」');
 
@@ -472,6 +631,7 @@ async function scenarioB1() {
     eq(cNow0.hopCount, 2, 'c.hopCount = 2（a→b→c）');
     eq(cNow0.attempts.length, 4, 'c.attempts 4 条（继承 b 的 2 条 + 本次 2 条）');
     eq(cNow0.attempts[3]?.reason, 'handoff-retry', 'c.attempts[3].reason = handoff-retry');
+    eq(cNow0.attempts[3]?.hopReason, 'seq-model', 'c 的交接 hopReason 同样是 seq-model');
 
     await waitFor(
       () => {
@@ -498,7 +658,10 @@ async function scenarioB1() {
       'c 的 parseWarnings 记录「列表用尽」（交回降级链 / 停在此处）',
     );
 
-    /* 实际 spawn 顺序 = 面板顺序（规则：数组顺序就是派发次序，不得重排） */
+    /* ── ★ 回归钉：3 项顺序列表必须真的 spawn 3 次 ──
+     * 修前 bug：advanceSequential 里 retry 建**新 job** 后没把 seqRuns 里的"当前项"移交给新 job
+     * ⇒ 新 job 失败时查不到自己的 run ⇒ 提前交回降级链（主通道只试了 2/3 个就跳走）。
+     * 断言同时覆盖：spawn 次数、命令行 --model、假执行器内部 marker、job 总数。 */
     eq(
       cap.calls.map((args) => argOf(args, '--model')),
       ['opencode/a', 'opencode/b', 'opencode/c'],
@@ -509,12 +672,14 @@ async function scenarioB1() {
       ['opencode/a', 'opencode/b', 'opencode/c'],
       '假执行器内部看到的调用顺序同样一致（排除"命令行对但没真跑"）',
     );
+    eq(cap.calls.length, 3, '*★ 回归钉：3 项列表必须真的 spawn 3 次*（修前会在第 2 跳提前停）');
+    eq(d.list().length, 3, '总 job 数 = 3（a/b/c）');
 
     /* 列表用尽后必须停：给一点宽限再复核（spawn 次数与 job 数都不许再涨） */
     const spawns = cap.calls.length;
     await sleep(250);
     eq(cap.calls.length, spawns, '列表用尽后不再 spawn（不无限重试）');
-    eq(d.list().length, 3, '总 job 数 = 3（a/b/c，不再产生新 job）');
+    eq(d.list().length, 3, '总 job 数仍 = 3（不再产生新 job）');
     eq(
       d.list().filter((j) => j.state === 'running' || j.state === 'queued').length,
       0,
@@ -535,8 +700,9 @@ async function scenarioB2() {
       workRoot,
       spawnImpl: cap.impl,
     });
-    d.setSequential({ enabled: true, order: { opencode: ['opencode/a', 'opencode/b'] } });
-    const j = d.dispatch({ kind: 'prompt', prompt: 'ZB-52 config-error 不延续', provider: 'opencode', model: 'opencode/a' });
+    armSequential(d, 'opencode', { opencode: ['opencode/a', 'opencode/b'] });
+    const j = d.dispatch({ kind: 'prompt', prompt: 'ZB-52 config-error 不延续' });
+    eq(j.spec.model, 'opencode/a', '首跳 = 顺序列表第一项');
 
     await waitFor(
       () => {
@@ -579,13 +745,9 @@ async function scenarioB3() {
         workRoot,
         spawnImpl: cap.impl,
       });
-      d.setSequential({ enabled: true, order: { opencode: ['opencode/a', 'opencode/b'] } });
-      const a = d.dispatch({
-        kind: 'prompt',
-        prompt: `ZB-52 paused 延续（${c.reason}）`,
-        provider: 'opencode',
-        model: 'opencode/a',
-      });
+      armSequential(d, 'opencode', { opencode: ['opencode/a', 'opencode/b'] });
+      const a = d.dispatch({ kind: 'prompt', prompt: `ZB-52 paused 延续（${c.reason}）` });
+      eq(a.spec.model, 'opencode/a', `${c.reason}: 首跳 = 顺序列表第一项（模型为空即顺序派发）`);
       await waitFor(
         () => {
           const x = d.get(a.id);
@@ -624,7 +786,7 @@ async function scenarioB3() {
 }
 
 async function scenarioB4() {
-  await scenario('B4 顺序列表用尽 ⇒ 交回既有跨通道降级链（先顺序、后降级）', async () => {
+  await scenario('B4 顺序列表用尽 ⇒ 交回既有跨通道降级链（单目标也要生效）', async () => {
     const dir = newTempDir();
     const workRoot = newTempDir();
     const fake = makePauseRunner(dir, 'fake-oc-quota-fallback.mjs', 'quota_exceeded: plan quota used up (429)');
@@ -635,25 +797,22 @@ async function scenarioB4() {
       workRoot,
       spawnImpl: cap.impl,
       maxConcurrent: 4,
-      /* 降级链可用性替身：只有 plan 可用（ch-b/ch-c 不可用）—— 不猜，走 core 的 listChannels 契约。 */
+      /* 降级链可用性替身：只有 plan 可用 —— 不猜，走 core 的 listChannels 契约。 */
       channelsImpl: async () => ({
-        channels: [
-          { id: 'plan', enabled: true },
-          { id: 'ch-b', enabled: false, reason: 'down' },
-          { id: 'ch-c', enabled: false, reason: 'down' },
-        ],
+        channels: [{ id: 'plan', enabled: true }],
         warnings: [],
       }),
     });
     d.setFallbackChain(['plan']);
-    /* ⚠️ 本用例**刻意只给 1 个降级目标**（`['plan']`）：
-     * 这是**回归钉**——原先 core 的 maybeAutoFallback 用**共享的 hopCount** 与
-     * `fallbackTargets.length` 比较来封顶，而顺序交接也会让 hopCount +1，
-     * 于是「降级目标数（1）≤ 顺序跳数（1）」时降级会在「已达目标数上限」门上被拦住 ⇒ 本用例会红。
-     * 修法：降级链只数**自己的**跳数（attempts[].hopReason === 'auto-fallback'，见 countFallbackHops）。 */
-    d.setSequential({ enabled: true, order: { opencode: ['opencode/a', 'opencode/b'] } });
+    /* ⚠️ 本用例**刻意只给 1 个降级目标**（`['plan']`），是**回归钉**：
+     * ① 原先 core 的 maybeAutoFallback 用**共享的 hopCount** 与 `fallbackTargets.length` 比较封顶，
+     *    而顺序交接也会让 hopCount +1 ⇒ 「降级目标数（1）≤ 顺序跳数（1）」时降级被"已达目标数上限"拦住；
+     * ② 原先起点算错（`findIndex` 返回 -1 时 `startIdx+1=0` 却从 1 起找）⇒ **唯一的降级目标被静默跳过**。
+     * 现实现：降级只数自己的跳数（hopReason='auto-fallback'），且当前通道不在目标列表时从**头**找。 */
+    armSequential(d, 'opencode', { opencode: ['opencode/a', 'opencode/b'] });
 
-    const a = d.dispatch({ kind: 'prompt', prompt: 'ZB-52 顺序用尽→降级链', provider: 'opencode', model: 'opencode/a' });
+    const a = d.dispatch({ kind: 'prompt', prompt: 'ZB-52 顺序用尽→降级链' });
+    eq(a.spec.model, 'opencode/a', '首跳 = 顺序列表第一项');
     await waitFor(
       () => {
         const x = d.get(a.id);
@@ -678,7 +837,7 @@ async function scenarioB4() {
     /* 列表用尽 ⇒ advanceSequential 返回 false ⇒ finalize 里交回降级链（provider=plan 的新 job） */
     const fbRef = await waitFor(
       () => d.list().find((j) => j.spec?.provider === 'plan') ?? null,
-      '顺序列表用尽后，降级链接手（新 job provider=plan）',
+      '顺序列表用尽后，降级链接手（新 job provider=plan；单目标也真的降了）',
       20000,
     );
     const fb0 = d.get(fbRef.id);
@@ -690,7 +849,7 @@ async function scenarioB4() {
       'b 上留「fallback-chain: 自动跳到 plan」warning（先顺序、后降级，不静默）',
     );
 
-    /* 降级链目标也暂停 ⇒ 链里没有下一个可用通道 ⇒ 停在 paused、不再跳 */
+    /* 降级链目标也暂停 ⇒ 1 个目标已用尽 ⇒ 停在 paused、不再跳 */
     await waitFor(
       () => {
         const x = d.get(fbRef.id);
@@ -700,22 +859,120 @@ async function scenarioB4() {
     );
     const fb = d.get(fbRef.id);
     eq(fb.state, 'paused', '降级链目标同样 quota 暂停 ⇒ 停在 paused（不再无限跳）');
-    /* ⚠️ 本用例只给 **1 个**降级目标（刻意收紧，见上面的回归钉）⇒ 降级**跑掉这一跳就用尽**。
-     * 故这里钉两件事：
-     *   ① 降级**确实发生了**（`fbRef` 存在，上面已断言）—— 修前它会被"已达目标数上限"拦住而根本不出现；
-     *   ② 降级用尽后才出现「已达目标数上限」warning（**是真实用尽**，不是被顺序跳数挤掉的误判）。
-     * 判别依据：attempts 里**确实有** auto-fallback 的降级交接记录 ⇒ 门是"用尽"而非"误拦"。 */
+    /* 判别「真实用尽」而非「被顺序跳数挤掉」：降级 job 的 attempts 里确有 auto-fallback 交接记录。 */
     const fbAttempts = Array.isArray(fb.attempts) ? fb.attempts : [];
-    const fallbackHops = fbAttempts.filter((a) => a.hopReason === 'auto-fallback').length;
-    ok(fallbackHops >= 1, `降级 job 上确有 auto-fallback 交接记录（实际 ${fallbackHops}）⇒ 降级真的发生过`);
+    const fallbackHops = fbAttempts.filter((x) => x.hopReason === 'auto-fallback').length;
+    ok(fallbackHops >= 1, `降级 job 上确有 auto-fallback 交接记录（实际 ${fallbackHops} 条）⇒ 降级真的发生过`);
     ok(
       fb.parseWarnings.some((w) => w.includes('已达目标数上限')),
-      `★ 降级预算是「真实用尽」而非「被顺序跳数挤掉」（1 个目标 + 已用 ${fallbackHops} 跳）`,
+      `★ 降级预算是「真实用尽」而非「被顺序跳数挤掉」（1 个目标 + 已用 ${fallbackHops} 条降级记录）`,
     );
     const jobsBefore = d.list().length;
     await sleep(250);
     eq(d.list().length, jobsBefore, '降级用尽后不再产生新 job');
-    ok(jobsBefore >= 3, `至少 a/b + 降级链 job 三个 job（实际 ${jobsBefore}）`);
+    eq(jobsBefore, 3, '至少 a/b + 降级链 job 三个 job（实际恰好 3 个：a、b、plan）');
+  });
+}
+
+async function scenarioB5() {
+  await scenario('B5 ★ 降级目标也顺序派发：降到 qoder 时从列表第一项起跑，列表跑完才继续外层降级链', async () => {
+    const dir = newTempDir();
+    const workRoot = newTempDir();
+    /* 三个引擎共用一个「quota 暂停」假执行器：本用例只关心调度次序，不跑任何真 CLI。 */
+    const pause = makePauseRunner(dir, 'fake-pause-all.mjs', 'quota_exceeded: plan quota used up (429)');
+    const cap = captureSpawn();
+    const d = createDispatcher({
+      runnerPath: pause,
+      opencodeRunnerPath: pause,
+      qoderRunnerPath: pause, // 必须显式给：否则 qoder 会落到默认真执行器
+      workRoot,
+      spawnImpl: cap.impl,
+      maxConcurrent: 4,
+      /* 外层降级链：qoder（目标 model 为空 ⇒ 该目标走 qoder 顺序列表）→ plan → ch-c（**不可用**）。
+       * ch-c 设为不可用是为了让用例只钉「qoder 列表跑完 ⇒ 继续外层链的 plan」这一点：
+       * 无论降级链封顶怎么算，plan 之后都必然停下（不依赖多跳预算细节，也不与其它回归钉耦合）。 */
+      channelsImpl: async () => ({
+        channels: [
+          { id: 'qoder', enabled: true },
+          { id: 'plan', enabled: true },
+          { id: 'ch-c', enabled: false, reason: 'down' },
+        ],
+        warnings: [],
+      }),
+    });
+    d.setFallbackChain([{ provider: 'qoder', model: '' }, { provider: 'plan' }, { provider: 'ch-c' }]);
+    armSequential(d, 'opencode', { opencode: ['opencode/a'], qoder: ['qoder/Fast', 'qoder/Auto'] });
+
+    const a = d.dispatch({ kind: 'prompt', prompt: 'ZB-52 降级目标也顺序' });
+    eq(a.spec.model, 'opencode/a', '主通道首跳 = opencode 列表第一项');
+
+    /* 主通道列表只有 1 项 ⇒ 马上用尽 ⇒ 降到 qoder 这个「顺序派发目标」的第一项 */
+    const fastRef = await waitFor(
+      () => d.list().find((j) => j.spec?.provider === 'qoder' && j.spec?.model === 'Fast') ?? null,
+      '主通道列表用尽后降到 qoder 顺序列表第一项（Fast）',
+      20000,
+    );
+    const fast0 = d.get(fastRef.id);
+    eq(fast0.engine, 'qoder', 'qoder 目标引擎 = qoder');
+    eq(fast0.spec.provider, 'qoder', 'qoder 目标 provider = 裸引擎名 qoder');
+    eq(fast0.spec.model, 'Fast', 'qoder 顺序第一项经前缀规整后 = 裸模型名 Fast（CLI 契约）');
+    eq(fast0.parentJobId, a.id, 'qoder 首项由主通道用尽后降级而来');
+    ok(
+      d.get(a.id).parseWarnings.some((w) => w.includes('该目标为顺序派发') && w.includes('共 2 个模型')),
+      '主通道用尽时留 warning：该降级目标为顺序派发（共 2 个模型）',
+    );
+    await waitFor(() => cap.calls.length >= 2, 'qoder 首项 spawn');
+    eq(argOf(cap.calls[1], '--model'), 'Fast', 'qoder 首项实际以 --model Fast 传给执行器');
+
+    /* qoder 列表内部推进：Fast → Auto */
+    const autoRef = await waitFor(
+      () => d.list().find((j) => j.parentJobId === fastRef.id) ?? null,
+      'qoder Fast 暂停后推进到列表第 2 项（Auto）',
+      20000,
+    );
+    eq(autoRef.spec.model, 'Auto', 'qoder 列表第 2 项 = Auto');
+    eq(autoRef.spec.provider, 'qoder', '仍在 qoder 引擎/通道内');
+    ok(
+      d.get(fastRef.id).parseWarnings.some((w) => w.includes('顺序派发: 第 2/2 个模型')),
+      'qoder 列表内部推进有「第 2/2 个模型」warning',
+    );
+
+    /* qoder 列表用尽 ⇒ 才继续**外层**降级链（下一个可用目标 plan） */
+    const planRef = await waitFor(
+      () => d.list().find((j) => j.spec?.provider === 'plan') ?? null,
+      'qoder 顺序列表跑完后继续外层降级链（plan）',
+      25000,
+    );
+    eq(planRef.engine, 'zcode', '外层降级目标 plan 的引擎 = zcode');
+    eq(planRef.parentJobId, autoRef.id, 'plan 是在 qoder 列表**最后一项**之后才出现的（列表跑完才继续外层链）');
+    ok(
+      d.get(autoRef.id).parseWarnings.some((w) => w.includes('顺序派发: 已试完 2 个模型')),
+      'qoder 列表用尽 warning 在最后一跳上',
+    );
+    ok(
+      d.get(autoRef.id).parseWarnings.some((w) => w.includes('fallback-chain')),
+      'qoder 列表用尽后才留 fallback-chain 交接 warning（继续外层链）',
+    );
+
+    /* 全部落定后核对「实际执行次序」= opencode 列表 → qoder 列表（Fast/Auto 裸名）→ 外层目标（无模型） */
+    await waitFor(
+      () => d.list().length >= 4 && d.list().every((j) => j.state !== 'running' && j.state !== 'queued'),
+      'B5 全部任务落定（a / qoder Fast / qoder Auto / plan）',
+      25000,
+    );
+    await sleep(300);
+    eq(
+      cap.calls.map((args) => argOf(args, '--model') ?? null),
+      ['opencode/a', 'Fast', 'Auto', null],
+      '*★ 实际执行序列：opencode 列表 → qoder 列表（Fast/Auto 裸模型名）→ 外层降级目标（无模型）*',
+    );
+    eq(d.list().filter((j) => j.spec?.provider === 'ch-c').length, 0, '外层目标里的不可用通道（ch-c）被跳过，没有产生 job');
+    eq(d.get(planRef.id).state, 'paused', '外层链目标也暂停 ⇒ 停住（不无限跳）');
+    const jobsN = d.list().length;
+    const spawnN = cap.calls.length;
+    await sleep(250);
+    eq(d.list().length, jobsN, '外层链停住后不再产生新 job');
+    eq(cap.calls.length, spawnN, '外层链停住后不再 spawn');
   });
 }
 
@@ -873,10 +1130,12 @@ async function scenarioC() {
 
 async function main() {
   await scenarioA();
+  await scenarioB0();
   await scenarioB1();
   await scenarioB2();
   await scenarioB3();
   await scenarioB4();
+  await scenarioB5();
   await scenarioC();
 }
 

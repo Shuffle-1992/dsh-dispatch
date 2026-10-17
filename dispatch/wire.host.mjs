@@ -867,7 +867,8 @@ export function createRemoteFace(dispatcher, config = {}) {
     switchSet: (next) => viaAction('switch', next && typeof next === 'object' ? next : {}),
 
     /* ── ZB-52：顺序派发（面板入口）──
-     * 读：{enabled, order:{zcode:[],opencode:[],qoder:[]}, sequentialCount}
+     * 读：{order:{zcode:[],opencode:[],qoder:[]}, levels:{…}, sequentialCount}
+   * ⚠️ **没有 `enabled`**：顺序派发由「模型」值表达（模型为空 = 顺序派发），不再有独立开关
      * 写：只传 `enabled` 或只传 `order`（**互不覆盖** —— 面板两个控件各自保存）。
      * 与 `setFallbackChain` 同范式：直调 core，不经 action 信封（少一层拆包歧义）。 */
     async sequentialGet() {
@@ -881,7 +882,7 @@ export function createRemoteFace(dispatcher, config = {}) {
     async sequentialSet(patch) {
       if (!dispatcher) return { ok: false, error: NOT_READY };
       if (!patch || typeof patch !== 'object') {
-        return { ok: false, error: 'sequentialSet 需要对象 {enabled?} 或 {order?}' };
+        return { ok: false, error: 'sequentialSet 需要对象 {order}' };
       }
       try {
         return { ok: true, ...dispatcher.setSequential(patch) };
@@ -934,9 +935,9 @@ export function createRemoteFace(dispatcher, config = {}) {
      * 客户端 `resolveRemote().call('sequentialGet')` 找的是**实例/原型上的方法**，
      * 缺了会抛「远端面缺少方法 sequentialGet()」⇒ 面板静默降级成"关闭"（live 下读写都不生效）。
      * 这一处是队友用运行时反射抓出来的（静态看方法表是齐的，容易漏）。 */
-    /** → { enabled, order:{zcode,opencode,qoder}, sequentialCount }。 */
+    /** → { order:{zcode,opencode,qoder}, levels:{…}, sequentialCount }（无 enabled）。 */
     sequentialGet() { return impl.sequentialGet(); }
-    /** sequentialSet(patch) → 同上 | { ok:false, error }；patch={enabled?} 或 {order?}。 */
+    /** sequentialSet({order}) → 同上 | { ok:false, error }（传 enabled 会抛 TypeError：已废弃）。 */
     sequentialSet(patch) { return impl.sequentialSet(patch); }
   }
 
@@ -975,9 +976,9 @@ const FACE_METHOD_TABLE = [
   ['channels', [], 'channels(): Promise<{channels, warnings}>', '{channels, warnings}（5s 缓存）', []],
   ['channel', [], 'channel(): Promise<channel>', '当前通道数据对象', []],
   ['fallbackChain', [], 'fallbackChain(): Promise<{enabled, chain}>', '{enabled, chain}', []],
-  /* ZB-52：顺序派发（面板入口）。`sequentialSet` 接受 {enabled?} 或 {order?}（互不覆盖）。 */
-  ['sequentialGet', [], 'sequentialGet(): Promise<{enabled, order, sequentialCount}>', '{enabled, order:{zcode:[],opencode:[],qoder:[]}, sequentialCount}', []],
-  ['sequentialSet', ['patch'], 'sequentialSet(patch): Promise<{enabled, order, sequentialCount}|{ok:false, error}>', '{enabled, order, sequentialCount}（patch={enabled?}|{order?}）', ['patch']],
+  /* ZB-52：顺序派发（面板入口）。`sequentialSet({order})` 按引擎合并；**没有 enabled**。 */
+  ['sequentialGet', [], 'sequentialGet(): Promise<{order, levels, sequentialCount}>', '{order:{zcode:[],opencode:[],qoder:[]}, levels:{…}, sequentialCount}（无 enabled：模型为空即顺序派发）', []],
+  ['sequentialSet', ['patch'], 'sequentialSet(patch): Promise<{order, levels, sequentialCount}|{ok:false, error}>', '{order, levels, sequentialCount}（patch={order}；传 enabled 抛 TypeError）', ['patch']],
 ];
 
 /**

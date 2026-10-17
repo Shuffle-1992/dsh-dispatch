@@ -729,10 +729,16 @@ export function createDispatcher(options = {}) {
    *   ⚠️ 换模型 = 换进程（甚至换引擎）⇒ **会话无法继承**，只能是"新会话 + 交接提示词接着做"；
    *   磁盘上已完成的改动仍然留着。 */
   const sequentialFile = join(dirState, 'sequential.json');
-  /** mode=是否开启顺序派发；order[engine]=该引擎的有序路由 id 列表（`opencode/<model>` 形态）。 */
-  let seqMode = false;
+  /** order[engine] = 该引擎的有序项（`{route, reasoningLevel}`）；`route` 形如
+   *  `<通道id>::<模型名>`（ZCode）或 `<model>`（opencode/qoder）。
+   *
+   *  ⚠️ ZB-52 第三轮（用户要求）：**没有全局开关** —— "是否顺序派发"由**模型是否为空**表达：
+   *  面板「模型」下拉选「顺序派发」⇒ 该通道的 model 存空值 ⇒ 派发时走顺序列表。
+   *  故 `enabled` 不再是独立布尔（`getSequential()` 也不再返回它）：
+   *  它一旦与"模型为空"两个真相并存，就会出现"开关开着但模型是具体值"这类**自相矛盾**的状态。
+   *  降级目标同理：目标 model 为空 + 该引擎有顺序 ⇒ 降级到该目标时也按顺序列表试。 */
   let seqOrder = {};
-  /** 顺序派发在当前任务上的交接状态：jobId → { engine, chain:[{provider,model}], idx }。 */
+  /** 顺序派发在当前任务上的交接状态：jobId → { engine, chain:[{provider,model,reasoningLevel}], idx }。 */
   const seqRuns = new Map();
 
   const isTerminal = (job) => TERMINAL_STATES.has(job.state);
@@ -1717,14 +1723,26 @@ export function createDispatcher(options = {}) {
           const target = fallbackTargets[i];
           const ch = channels.find((c) => c.id === target.provider);
           if (ch && ch.enabled) {
-            live.parseWarnings.push(`fallback-chain: 自动跳到 ${target.provider}${target.model ? `/${target.model}` : ''}（交接重跑）`);
-            retry(live.id, {
+            /* ZB-52 第三轮（用户要求）：**降级目标也支持顺序派发**。
+             * 目标 model 为空 + 该引擎有顺序列表 ⇒ 降到它时按列表**第一项**起跑，
+             * 并播种 seqRuns ⇒ 它失败时继续在列表里往后试；列表用尽才继续**外层**降级链。
+             * 这样"主通道 OpenCode 顺序 + 降级 Qoder 顺序"能同时成立（两份列表各自独立）。 */
+            const seq = sequentialChainForSpec({ provider: target.provider, model: target.model ?? null });
+            const first = seq?.chain?.[0] ?? null;
+            const effModel = first ? first.model : target.model;
+            const effRl = first?.reasoningLevel ?? target.reasoningLevel;
+            live.parseWarnings.push(
+              `fallback-chain: 自动跳到 ${target.provider}${effModel ? `/${effModel}` : ''}（交接重跑）`
+              + (first ? `；该目标为顺序派发（共 ${seq.chain.length} 个模型）` : ''),
+            );
+            const nj = retry(live.id, {
               provider: target.provider,
-              model: target.model,
-              reasoningLevel: target.reasoningLevel,
+              model: effModel,
+              reasoningLevel: effRl,
               autoFallback: true,
               hopReason: 'auto-fallback', // 与顺序派发换模型区分开（各自独立跳数预算）
             });
+            if (seq && nj) seedSequentialRun(nj.id, seq);
             return;
           }
         }
@@ -1780,10 +1798,14 @@ export function createDispatcher(options = {}) {
     return chain;
   }
 
-  /** 该任务当前是否处于「顺序派发」管辖（开关开 + 该引擎有顺序 + 任务指定了该引擎）。 */
-  function sequentialChainFor(job) {
-    if (!seqMode) return null;
-    const eng = normalizeEngine(job?.spec?.engine ?? job?.engine ?? DEFAULT_ENGINE);
+  /** 顺序派发的**接管判据**（ZB-52 第三轮：没有全局开关）：
+   *  · 该引擎配了顺序列表（否则不接管）；且
+   *  · 任务**没有指定具体模型**（`spec.model` 为空 —— 指定了就按指定的跑，不被列表劫持）。
+   *  首次派发由 `dispatch()` 用它决定"用列表第一项"；降级目标由 `maybeAutoFallback` 用它决定
+   *  "降到该目标时也按列表试"。 */
+  function sequentialChainForSpec(spec) {
+    if (spec?.model != null && spec.model !== '') return null; // 指定了模型 ⇒ 不接管
+    const eng = normalizeEngine(spec?.engine ?? resolveEngineOf(spec ?? {}));
     const chain = expandSequentialChain(eng);
     return chain.length ? { engine: eng, chain } : null;
   }
@@ -1800,14 +1822,11 @@ export function createDispatcher(options = {}) {
    *   `config-error` 不延续 —— 那是**参数/配置错**，换任何模型都一样（延续只是白烧额度）。
    */
   function advanceSequential(job, reason) {
-    const seq = sequentialChainFor(job);
-    if (!seq) return false;
-    /* 定位"当前正在跑哪一项"：从 attempts 里最后一条属于本引擎的记录取，取不到则按链首算。 */
-    let run = seqRuns.get(job.id);
-    if (!run) {
-      run = { engine: seq.engine, chain: seq.chain, idx: indexOfCurrent(job, seq) };
-      seqRuns.set(job.id, run);
-    }
+    /* ⚠️ **只认"在派发时被登记过"的任务**（`seqRuns` 由 dispatch / maybeAutoFallback 播种）：
+     * 不这样做的话，任何"恰好没指定模型 + 该引擎有顺序列表"的历史任务失败时都会被劫持进顺序链 ——
+     * 那是**替用户改了意图**（他没选顺序派发，只是没写模型）。登记过 = 确实按顺序派发起的。 */
+    const run = seqRuns.get(job.id);
+    if (!run) return false;
     const nextIdx = run.idx + 1;
     if (nextIdx >= run.chain.length) {
       job.parseWarnings.push(`顺序派发: 已试完 ${run.chain.length} 个模型（${reason}），列表用尽`);
@@ -1821,7 +1840,10 @@ export function createDispatcher(options = {}) {
     job.parseWarnings.push(
       `顺序派发: 第 ${run.idx + 1}/${run.chain.length} 个模型 ${target.provider}/${target.model}（上一个失败：${reason}）`,
     );
-    retry(job.id, {
+    /* ⚠️ `retry()` 会创建**新 job**（交接重跑）⇒ 必须把"当前在这一项"**移交给新 job**，
+     * 否则新 job 失败时 `seqRuns` 里查不到它 ⇒ 提前交回降级链（真机实测：主通道只试了 2/3 个
+     * 就跳去降级目标了）。同一个 run 对象继续用（idx 已推进），条目换到新 job 名下。 */
+    const nj = retry(job.id, {
       provider: target.provider,
       model: target.model,
       /* ZB-52：档位取**该模型在顺序列表里自己的设置**（用户要求「顺序思考强度档位设置」）；
@@ -1835,21 +1857,17 @@ export function createDispatcher(options = {}) {
       autoFallback: false,
       hopReason: 'seq-model',
     });
+    seqRuns.delete(job.id);
+    if (nj) seqRuns.set(nj.id, run);
     return true;
   }
 
-  /** 从任务的 attempts 里推断"当前项在顺序链里的下标"（找得到就接着往下，找不到从头判断）。 */
-  function indexOfCurrent(job, seq) {
-    const attempts = Array.isArray(job.attempts) ? job.attempts : [];
-    for (let i = attempts.length - 1; i >= 0; i -= 1) {
-      const a = attempts[i];
-      const idx = seq.chain.findIndex((t) => t.provider === a.provider && t.model === a.model);
-      if (idx >= 0) return idx;
-    }
-    const p = job.spec?.provider ?? null;
-    const m = job.spec?.model ?? null;
-    const here = seq.chain.findIndex((t) => t.provider === p && t.model === m);
-    return here >= 0 ? here : -1; // -1 ⇒ 从链首开始
+  /** 顺序派发的**播种**：把"这个任务按顺序链起跑、当前在第 0 项"记进 `seqRuns`。
+   *  只在**派发那一刻**播种（dispatch / 降级到某目标时），失败推进才有据可依 ——
+   *  见 `advanceSequential` 里"只认登记过的任务"的理由。 */
+  function seedSequentialRun(jobId, seq) {
+    if (!jobId || !seq) return;
+    seqRuns.set(jobId, { engine: seq.engine, chain: seq.chain, idx: 0 });
   }
 
   /** 数**降级链专属**跳数（ZB-52）：从 attempts 里数 `reason === 'auto-fallback'` 的条数。
@@ -1861,30 +1879,18 @@ export function createDispatcher(options = {}) {
    *  旧记录（没有该 reason）⇒ 退化为 `hopCount`（保守：宁可少降一次，也不无限跳）。 */
   function countFallbackHops(job) {
     const attempts = Array.isArray(job?.attempts) ? job.attempts : [];
-    /* ⚠️ 判据与扫描方式都被实测纠正过（**纯函数单测**发现第一版算错）：
+    /* ⚠️ 判据演进（每一步都是实测逼出来的，别再"简化"回去）：
      *
-     * ① **不能用 `reason.startsWith('auto-fallback')` 当判据**：
-     *    那条"源 job"记录的 reason 是 `auto-fallback:<pauseReason>`，而**顺序派发也传 autoFallback:true**
-     *    ⇒ 两者格式完全一样，按它数必然把顺序跳算成降级跳（实测：1 个顺序交接算出 1）。
-     * ② **必须顺序无关地扫描**：attempts 是"源条目在前、目标条目在后"的成对结构，
-     *    单遍"用下一条回填上一条"会让最后一条悬空 ⇒ 漏数。
+     * ① 曾用 `reason.startsWith('auto-fallback')` —— **错**：那条"源记录"的 reason 正是
+     *    `auto-fallback:<pauseReason>`，而早期顺序派发也传 `autoFallback:true`，两者格式一样。
+     * ② 曾改为"两条记录都打 hopReason + pending 配对计数" —— **也错**：两条都带 hopReason 时
+     *    配对逻辑失效，一次交接被计成 **2 跳**，降级封顶实际只允许 ceil(L/2) 跳
+     *    （队友用最小复现抓到：链 `['plan','ch-b']` 两个目标都可用时只降 1 次就报"已达目标数上限"）。
+     * ③ **现在**：`hopReason` **只打在目标记录**上（见 retry 的 attempts 构造）⇒ 一次交接恰好一条。
+     *    故这里就是**朴素计数**，不需要任何配对状态。
      *
-     * 做法：只认 `hopReason`（调用方显式写入两条记录），用 pending 标记处理配对顺序 ——
-     * 先遇目标条目 ⇒ 此刻计一次；先遇源条目 ⇒ 挂起，等它的目标条目到来时再计（且只计一次）。 */
-    let n = 0;
-    let pendingSource = false;
-    for (const a of attempts) {
-      if (!a) continue;
-      if (a.hopReason === 'auto-fallback') {
-        if (!pendingSource) n += 1;
-        pendingSource = false;
-      } else if (a.hopReason === 'seq-model') {
-        pendingSource = false; // 顺序跳：不计
-      } else {
-        pendingSource = true; // 源条目（reason 形如 auto-fallback:* / handoff-retry）
-      }
-    }
-    return n;
+     * 判据只认 `hopReason === 'auto-fallback'`：顺序派发的目标是 `'seq-model'`，天然不计入。 */
+    return attempts.filter((a) => a && a.hopReason === 'auto-fallback').length;
   }
 
   /** 当前默认通道（dispatch 未显式指定 provider/model 时采用；reasoningLevel=通道默认思考强度）。 */
@@ -2074,8 +2080,7 @@ export function createDispatcher(options = {}) {
 
   function persistSequential() {
     atomicWrite(sequentialFile, `${JSON.stringify({
-      version: 1,
-      mode: seqMode,
+      version: 2, // v2：去掉全局 mode（"是否顺序派发"由模型是否为空表达）
       order: seqOrder,
       updatedAt: new Date(nowMs()).toISOString(),
     }, null, 2)}\n`);
@@ -2085,7 +2090,7 @@ export function createDispatcher(options = {}) {
     try {
       const data = JSON.parse(readFileSync(sequentialFile, 'utf8'));
       if (data && typeof data === 'object') {
-        seqMode = data.mode === true;
+        /* v1 的 `mode` 字段**照常忽略**（不再有全局开关）；旧文件的 order 直接可用。 */
         seqOrder = {};
         if (data.order && typeof data.order === 'object') {
           for (const [eng, list] of Object.entries(data.order)) {
@@ -2094,13 +2099,17 @@ export function createDispatcher(options = {}) {
           }
         }
       }
-    } catch { /* 无文件/损坏：默认关（不猜） */ }
+    } catch { /* 无文件/损坏：默认空（不猜） */ }
   }
 
-  /** 面板/工具读：`{enabled, order, levels, sequentialCount}`。
+  /** 面板/工具读：`{order, levels, sequentialCount}`。
    *  · `order[engine]` = **路由 id 数组**（从上到下 = 尝试次序；客户端既有渲染契约不变）；
    *  · `levels[engine]` = 与 `order[engine]` **同序**的档位数组（null = 该模型用引擎默认）。
-   *  永远给出**三个引擎的键**（哪怕为空）—— 客户端据此渲染，不必自己知道有哪些引擎。 */
+   *  永远给出**三个引擎的键**（哪怕为空）—— 客户端据此渲染，不必自己知道有哪些引擎。
+   *
+   *  ⚠️ **不再返回 `enabled`**：顺序派发没有全局开关，"是否启用"由**模型是否为空**表达
+   *  （面板「模型」下拉选「顺序派发」⇒ 该通道 model 存空值 ⇒ 走顺序列表）。
+   *  这样"开关"与"模型"不会出现互相矛盾的状态（用户要求去掉开关的根因）。 */
   function getSequential() {
     const order = {};
     const levels = {};
@@ -2110,19 +2119,22 @@ export function createDispatcher(options = {}) {
       levels[eng] = list.map((x) => x.reasoningLevel ?? null);
     }
     return {
-      enabled: seqMode,
       order,
       levels,
       sequentialCount: Object.values(order).reduce((n, l) => n + l.length, 0),
     };
   }
 
-  /** 面板写：{enabled?, order?}。
-   *  · `enabled` 只改开关；`order` **按引擎合并**（patch 里出现的引擎覆盖，未出现的保留）。
-   *  · 只传其一时另一项不动（面板两个控件各自保存，不互相覆盖）。 */
+  /** 面板写：`{order}`（**按引擎合并**：patch 里出现的引擎覆盖，未出现的保留）。
+   *
+   *  ⚠️ `enabled` 已废弃（用户要求去掉开关）：若调用方仍传它 ⇒ **明确报错**，
+   *  而不是静默忽略 —— 静默忽略会让"开了开关却没生效"变成一个查不出来的 bug。
+   *  新语义：把该通道的「模型」设成空值即顺序派发（`setChannel({provider, model:''})`）。 */
   function setSequential(patch) {
-    if (patch == null || typeof patch !== 'object') throw new TypeError('setSequential: 需要对象 {enabled?, order?}');
-    if ('enabled' in patch) seqMode = patch.enabled === true;
+    if (patch == null || typeof patch !== 'object') throw new TypeError('setSequential: 需要对象 {order}');
+    if ('enabled' in patch) {
+      throw new TypeError('setSequential: `enabled` 已废弃 —— 顺序派发由「模型」值表达（模型为空即顺序派发），不再有独立开关');
+    }
     if ('order' in patch) {
       /* ⚠️ **按引擎合并**，不是整体替换（队友真渲染探针抓到的真 bug）：
        * 原先 `seqOrder = next` ⇒ 调用方只想改**一个**引擎时（`{order:{opencode:[…]}}`），
@@ -2962,7 +2974,20 @@ export function createDispatcher(options = {}) {
     if (effSpec.model == null && channel.model && !effSpec.resume && !providerChanged) {
       effSpec.model = channel.model;
     }
-    return dispatchRaw(effSpec);
+    /* ── ZB-52 第三轮：**顺序派发**（用户要求"只要模型选顺序派发就等于开启模式"）──
+     * 判据 = 没有具体模型（`model` 为空）+ 目标引擎配了顺序列表（`sequentialChainForSpec`）。
+     * 此时把 spec.model 定位到**列表第一项** —— 否则第一跳会跑引擎默认模型，
+     * 而用户看到的面板顺序是"第一项就是我想先试的那个"，两者不一致就是骗人。
+     * 播种 `seqRuns` 后，失败时 `advanceSequential` 才知道该往下一项推进。 */
+    const seq = effSpec.resume ? null : sequentialChainForSpec(effSpec);
+    if (seq) {
+      const first = seq.chain[0];
+      effSpec.model = first.model;
+      if (first.reasoningLevel != null) effSpec.reasoningLevel = first.reasoningLevel;
+    }
+    const job = dispatchRaw(effSpec);
+    if (seq && job) seedSequentialRun(job.id, seq);
+    return job;
   }
 
   /**
@@ -3128,12 +3153,13 @@ export function createDispatcher(options = {}) {
     }
     nj.attempts = [
       ...prevAttempts,
-      /* ⚠️ 两条记录都要带 `hopReason`：源条目 + 目标条目**各一条**，缺任何一条都会让
-       * `countFallbackHops` 数不准（它按"配对"计一次降级跳）。 */
-      { jobId: job.id, provider: origProvider, model: job.spec.model ?? null, reason, hopReason: opts.hopReason ?? null, at },
-      /* ⚠️ `hopReason` 用于**区分交接来源**：`seq-model` = 顺序派发换模型；
-       * `auto-fallback` = 跨通道降级链。两者都走这条 retry 通道，但**各有独立的跳数预算** ——
-       * 不区分的话降级链的封顶会被顺序跳数吃掉（真 bug，见 maybeAutoFallback 注释）。 */
+      /* ⚠️ **只有"目标记录"带 `hopReason`**（它描述"要跳到哪"）；源记录只带 `reason`（描述"为什么跳"）。
+       * 两条都打 hopReason 会让 `countFallbackHops` 把**一次交接算成两跳** ⇒
+       * 降级封顶实际只允许 ceil(L/2) 跳（实测 L=2 时只降 1 次就报"已达目标数上限"，第三个目标永不尝试）
+       * —— 这是队友报出来、我读代码确认的真 bug。 */
+      { jobId: job.id, provider: origProvider, model: job.spec.model ?? null, reason, at },
+      /* `hopReason` 用于**区分交接来源**：`seq-model` = 顺序派发换模型；`auto-fallback` = 跨通道降级链。
+       * 两者都走这条 retry 通道，但**各有独立的跳数预算** —— 不区分的话降级链的封顶会被顺序跳数吃掉。 */
       { jobId: nj.id, provider: spec.provider, model: targetModel ?? null, reason: 'handoff-retry', hopReason: opts.hopReason ?? null, at },
     ];
     job.handedOffTo = nj.id;

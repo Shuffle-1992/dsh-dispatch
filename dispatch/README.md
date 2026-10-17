@@ -1,6 +1,6 @@
 # dsh-dispatch —— DSH 派发台（cordis bundle）
 
-在 DSH Harness 里派发/监视多个无头 agent 进程（**双引擎**：ZCode `collab-kit/zcode-run.mjs` ＋ OpenCode `collab-kit/opencode-run.mjs`，见「双引擎（ZCode + OpenCode）」一节）：单写者互斥、用量与上下文、套餐通道。
+在 DSH Harness 里派发/监视多个无头 agent 进程（**三引擎**：ZCode `collab-kit/zcode-run.mjs` ＋ OpenCode `collab-kit/opencode-run.mjs` ＋ Qoder `collab-kit/qoder-run.mjs`，见「三引擎（ZCode + OpenCode）」一节）：单写者互斥、用量与上下文、套餐通道。
 Host 半边（`index.js` + `wire.host.mjs` + `core/*`）跑进程调度并暴露 agent 工具 `dispatch`；
 Client 半边（`client.js` + `wire.client.mjs`）在 Web 页面**会话标题行**渲染一枚「DSH 派发台」入口（与「N 个子智能体 / 智能体团队 / 创造模式」同一行），点开即在入口下方弹出面板。
 
@@ -75,10 +75,10 @@ dsh plugin --profile web add "https://github.com/Shuffle-1992/dsh-dispatch#path:
 | 字段 | 类型/默认 | 说明 |
 |---|---|---|
 | `demo` | boolean / `false` | UI 演示模式：客户端用内置假数据渲染面板，不触达 dispatcher |
-| `maxConcurrent` | integer / `3` | 同时运行的 run 上限。**注意：它与单写者锁是两道独立的闸，实际并发 = min(两者)**，见下节。**双引擎下它仍是全局上限**（ZCode 侧独立上限就是它；OpenCode 侧另有 `maxConcurrentOpenCode`） |
-| `maxConcurrentOpenCode` | integer / `2` | **双引擎**：OpenCode 引擎的**独立**并发上限（与 ZCode **分开计数**）。上界依据：① 免费层**按 IP 限流**；② OpenCode 每次 `opencode run` 都会起一个临时服务，冷启动开销大（`glm-5.3-flash-free` 实测首响 ~14s）。**实测澄清**：两个**独立**的 `opencode run` 并发本身**可行**（2026-10-16 本机 2/2 成功，脚本 `tools/oc-concurrency-probe.mjs`）；真正的危险是**同一进程链里在 run 进行中再起一个 opencode**（例如探测）会让前者零输出 exit 1 —— 执行器已把元数据探测改成顺序 + 缓存。故默认 2 是"稳妥"而非"必须 1"，但**不要**把大量任务同时派给 OpenCode。`maxConcurrent` 仍是全局上限（实际并发 = min(两者)） |
+| `maxConcurrent` | integer / `3` | 同时运行的 run 上限。**注意：它与单写者锁是两道独立的闸，实际并发 = min(两者)**，见下节。**多引擎下它仍是全局上限**（ZCode 侧独立上限就是它；OpenCode 侧另有 `maxConcurrentOpenCode`） |
+| `maxConcurrentOpenCode` | integer / `2` | **引擎级**：OpenCode 引擎的**独立**并发上限（与 ZCode **分开计数**）。上界依据：① 免费层**按 IP 限流**；② OpenCode 每次 `opencode run` 都会起一个临时服务，冷启动开销大（`glm-5.3-flash-free` 实测首响 ~14s）。**实测澄清**：两个**独立**的 `opencode run` 并发本身**可行**（2026-10-16 本机 2/2 成功，脚本 `tools/oc-concurrency-probe.mjs`）；真正的危险是**同一进程链里在 run 进行中再起一个 opencode**（例如探测）会让前者零输出 exit 1 —— 执行器已把元数据探测改成顺序 + 缓存。故默认 2 是"稳妥"而非"必须 1"，但**不要**把大量任务同时派给 OpenCode。`maxConcurrent` 仍是全局上限（实际并发 = min(两者)） |
 | `runnerPath` | string / `''` | runner 绝对路径（通用工具仓库 `<本仓库>/collab-kit/zcode-run.mjs`，只读使用）。**与 `workRoot` 任一为空则不创建 dispatcher**（UI 走 demo 降级，工具动作返回可读错误） |
-| `opencodeRunnerPath` | string / `''` | **双引擎**：OpenCode 执行器脚本绝对路径（`<本仓库>/collab-kit/opencode-run.mjs`，只读使用，兼作 `--list-models` / `--version` 只读探测）。留空则用**默认推断**（env `DSP_OPENCODE_RUNNER` → 仓库内 `collab-kit/opencode-run.mjs`）。指向不存在的文件**不会**阻止 dispatcher 创建（只 warn；OpenCode 通道为空、ZCode 通道照常） |
+| `opencodeRunnerPath` | string / `''` | **引擎级**：OpenCode 执行器脚本绝对路径（`<本仓库>/collab-kit/opencode-run.mjs`，只读使用，兼作 `--list-models` / `--version` 只读探测）。留空则用**默认推断**（env `DSP_OPENCODE_RUNNER` → 仓库内 `collab-kit/opencode-run.mjs`）。指向不存在的文件**不会**阻止 dispatcher 创建（只 warn；OpenCode 通道为空、ZCode 通道照常） |
 | `runnerCwd` | string / `''` | runner 子进程的工作目录（通常设为宿主项目根）。runner 已迁出通用工具仓库、无法从自身位置推项目根，故它与「从绝对 `--task` 反推」构成**双保险**；留空 = 用 DSH 进程 cwd |
 | `ledgerPath` | string / `''` | 台账 `dispatch-runs.jsonl` 绝对路径；留空则跳过台账回读与用量聚合 |
 | `workRoot` | string / `''` | 派发器工作根目录（`locks/`、`state/jobs.json`、`logs/` 落在这里）。留空即落到本包 `.data/` |
@@ -103,38 +103,48 @@ dsh plugin --profile web add "https://github.com/Shuffle-1992/dsh-dispatch#path:
 > 三个路径全空时插件照常激活，只是不创建 dispatcher（面板 demo 降级、工具动作返回可读错误）——
 > 不会猜一个位置静默跑错。
 
-## 双引擎（ZCode + OpenCode）
+## 三引擎（ZCode + OpenCode + Qoder）
 
-派发台按**通道即执行目标**的既有抽象接入了第二个引擎：**ZCode**（`collab-kit/zcode-run.mjs`）与
-**OpenCode**（`collab-kit/opencode-run.mjs`）共用同一套进程列表 / 锁 / 队列 / 用量 / 唤醒 / 降级链 ——
-**不拆 tab**，因为拆开会把进程列表与降级链割裂，失去**跨引擎降级**这个主要增量。
+派发台按**通道即执行目标**的既有抽象接入了三个引擎：**ZCode**（`collab-kit/zcode-run.mjs`）、
+**OpenCode**（`collab-kit/opencode-run.mjs`）、**Qoder**（`collab-kit/qoder-run.mjs`）——
+三者共用同一套进程列表 / 锁 / 队列 / 用量 / 唤醒 / 降级链。
+**不拆 tab**：拆开会把进程列表与降级链割裂，失去**跨引擎降级**这个主要增量。
+
+**引擎自动发现**（`collab-kit/engine-discover.mjs`）：五级查找（env → 配置 → `PATH`+`PATHEXT`
+→ 已知位置（含跨盘）→ 失败并给出**可操作原因**），支持 CLI / 客户端自带 / IDE 三种形态；
+`action=channels` 的 `engineDetail` 回答每个引擎"找到哪个文件 / 版本 / 是否登录 / 什么形态"。
 
 | 项 | 说明 |
 |---|---|
-| 引擎 id | `zcode` / `opencode`。`action=channels` 的**每个通道带 `engine`**，顶层 `engines` 列出当前可用引擎 |
-| OpenCode 通道 id | `opencode/<model>`，如 `opencode/deepseek-v4.1-flash-free`、`opencode/glm-5.3-flash-free`。传 `provider: "opencode/<model>"` 即**自动识别**为 OpenCode 引擎（也可显式传 `engine`） |
-| 执行器 | `collab-kit/opencode-run.mjs`（与 `zcode-run.mjs` 同构：按需 spawn、用完即走、无常驻进程）；输出行协议唯一权威 = `collab-kit/run-line-protocol.mjs`（OpenCode 前缀 `[opencode-run]`） |
-| 免费模型 | **探测式**：每次跑 `opencode models` 的真实结果（无需账号），**代码里不写死枚举**（否则会重演 ZB-31「表变了但代码写死」的坑）。探测失败 ⇒ OpenCode 通道为空 + warnings，**ZCode 通道照常**，绝不猜 |
-| 并发 | **每引擎独立**：ZCode = `maxConcurrent`（默认 3）；OpenCode = `maxConcurrentOpenCode`（默认 2），**与 ZCode 分开计数**；`maxConcurrent` 仍是全局上限（实际并发 = min(两者)）。**实测澄清（2026-10-16）**：两个**独立**的 `opencode run` 并发本身可行（本机 2/2 成功，脚本 `tools/oc-concurrency-probe.mjs`）；零输出 exit 1 的真实触发条件是**同一进程链里在 run 进行中再起一个 opencode**（如探测）——执行器已把探测改成顺序 + 缓存。默认 2 取"稳妥"，不是"必须 1" |
-| 跨引擎降级 | 同一条降级链里可**混排** ZCode / OpenCode 通道；**换引擎 ＝ 新会话**，不会尝试 resume 原引擎的 session |
-| 思考强度 | OpenCode 侧叫 **variant**（`--variant`，模型相关，如 `high`/`max`/`minimal`）：`thinking` 参数在 OpenCode 通道上映射为 `--variant`；档位以 `channels[].thinkingLevels` 为准（缺失 = 未探测到，传 `agent` 即可） |
-| 不适用参数 | `mode` / `memoryBench` 是 ZCode 专属：对 OpenCode 引擎 `validateSpec` 会**可读报错拒绝**（不静默忽略） |
-| 权限放行 `auto` | **默认关**（安全默认）。OpenCode 的工具调用**可能**需要审批 —— 需要放行时用显式 `auto: true`（执行器 `--auto`，会放行所有未显式拒绝的权限）；仅对 `engine=opencode` 有意义（对 zcode 传 true 直接可读报错），开启后 job.`autoApproved` 可审计，且**跨 retry 沿用**同一放行级别（`retry` 时可用 `auto:false` 显式关掉） |
-| 续会话 `cwd` | OpenCode 的 session **按工作目录作用域**：同一 sessionId 换目录续跑会挂/静默失败。故 `retry` 的同通道 resume 与显式 `dispatch(..., {resume, cwd})` **都逐字沿用 `cwd`** |
-| 用户配置隔离 | **不读写用户自己的 OpenCode 配置与数据**（`~/.config/opencode/`、`~/.local/share/opencode/opencode.db`）。需要隔离环境时用**独立 XDG 根目录**（硬约束） |
+| 引擎 id | `zcode` / `opencode` / `qoder`。`action=channels` 的**每个通道带 `engine`**，顶层 `engines` 列出当前可用引擎 |
+| OpenCode 通道 id | `opencode/<model>`，如 `opencode/deepseek-v4.1-flash-free`。传 `provider: "opencode/<model>"` 即**自动识别**为 OpenCode 引擎 |
+| Qoder 通道 id | `qoder/<模型名>`（真机模型名含空格与点，如 `qoder/Qwen3.8-Max`、`qoder/GLM-5.3`）。共 15 个模型（`Auto` / `Fast` / `Qwen3.8-Max` / `DeepSeek-V4-Pro` / `GLM-5.3` / `Kimi-K3` …） |
+| **ZCode 通道白名单** | 只保留 `plan`（套餐）与 `account:bigmodel-start-plan`（免费额度）；其余路由（`personal` / `builtin:*` / 各 UUID 死路由）**从清单里剔除**并留 `[info]` 说明。⚠️ **只过滤派发台清单**，绝不改用户 `~/.zcode/v2/config.json`；白名单**不拦截显式调用**（显式传 `provider:'personal'` 仍可用） |
+| 执行器 | 三个执行器同构（按需 spawn、用完即走、无常驻进程）；输出行协议唯一权威 = `collab-kit/run-line-protocol.mjs`（前缀 `[zcode-run]` / `[opencode-run]` / `[qoder-run]`） |
+| 免费模型 | **探测式**：跑 CLI 的真实结果，**代码里不写死枚举**（否则会重演 ZB-31「表变了但代码写死」的坑）。探测失败 ⇒ 该引擎通道为空 + warnings，**其它引擎照常**，绝不猜 |
+| 并发 | **每引擎独立**：ZCode = `maxConcurrent`（默认 3）；OpenCode = `maxConcurrentOpenCode`（默认 2）；Qoder = `maxConcurrentQoder`（默认 1）。**实测澄清（2026-10-16）**：两个**独立**的 `opencode run` 并发本身可行（本机 2/2 成功，脚本 `tools/oc-concurrency-probe.mjs`）；零输出 exit 1 的真实触发条件是**同一进程链里在 run 进行中再起一个**（如探测）——执行器已把探测改成顺序 + 缓存 |
+| 跨引擎降级 | 同一条降级链里可**混排**三个引擎的通道；**换引擎 ＝ 新会话**，不会尝试 resume 原引擎的 session |
+| 思考强度 | 旗标**三者不同**：ZCode `--reasoning-level`、OpenCode `--variant`、Qoder `--reasoning-effort`（详见下文「思考强度」一节） |
+| 不适用参数 | `mode` / `memoryBench` 是 ZCode 专属：对 OpenCode / Qoder 引擎 `validateSpec` 会**可读报错拒绝**（不静默忽略） |
+| 权限放行 `auto` | OpenCode 侧**默认关**（安全默认），OpenCode 的工具调用**可能**需要审批 ⇒ 需要放行时用显式 `auto: true`（执行器 `--auto`）；仅对 `engine=opencode` 有意义（对 zcode 传 true 直接可读报错）。Qoder 侧是 `--permission-mode`（默认 `accept_edits`，无头下可改工作目录内文件；**非受信任目录会回落成 `default` 导致写操作静默失败** —— 执行器会比对 `init.permissionMode` 并在回落时明确报警） |
+| 续会话 | ZCode `--resume`；OpenCode `-s <id>`（**session 按 cwd 作用域**，换目录续跑会挂/静默失败，故 `retry` 与显式 `resume` **都逐字沿用 `cwd`**）；Qoder `--session-id`（按项目隔离） |
+| 用量口径 | ZCode / OpenCode 走 token 与台账；**Qoder 的 token 字段恒为 0**，真实计量是 `total_credits` 与 `usage.context_usage_ratio` |
+| 用户配置隔离 | **不读写用户自己的 OpenCode 配置与数据**，也不碰 Qoder 的 session JSONL 与设置（`~/.config/opencode/`、`~/.local/share/opencode/opencode.db`、`~/.qoder-cn/` 登录态）；需要隔离环境时用**独立 XDG 根目录**（硬约束） |
 
 CLI 对照（`bin/dispatch.mjs`）：
 
 ```bash
-node bin/dispatch.mjs channels                          # 通道行带 [zcode] / [opencode] 引擎标记
+node bin/dispatch.mjs channels                          # 通道行带 [zcode] / [opencode] / [qoder] 引擎标记
 node bin/dispatch.mjs dispatch --kind prompt --prompt "只回答 OK" \
   --provider opencode/deepseek-v4.1-flash-free          # provider 形态即自动识别引擎
-node bin/dispatch.mjs dispatch --kind prompt --prompt "只回答 OK" --engine opencode \
-  --provider opencode/glm-5.3-flash-free                # 也可显式 --engine（provider 仍以 channels 清单为准）
-# 执行器路径覆盖：--opencode-runner <abs path> 或 DSP_OPENCODE_RUNNER；缺省推断 <本仓库>/collab-kit/opencode-run.mjs
+node bin/dispatch.mjs dispatch --kind prompt --prompt "只回答 OK" \
+  --provider qoder/Qwen3.8-Flash --reasoning-effort high # Qoder：免费、credits=0 实测可用
+# 执行器路径覆盖：--opencode-runner / --qoder-runner <abs path>，或 DSP_OPENCODE_RUNNER / DSP_QODER_RUNNER
 ```
 
-> ⚠️ **改 Host 半边（`index.js`）后需完全重启 DSH**；执行器（`collab-kit/*.mjs`）**下次派发即生效**（见文末「生效语义」）。
+> ⚠️ **改 Host 半边（`index.js` / `wire.host.mjs` / `core/*`）后需完全重启 DSH**；
+> 执行器（`collab-kit/*.mjs`）**下次派发即生效**（见文末「生效语义」）；客户端（`client.js` / `locale/*`）
+> **无构建步骤，刷新页面即可**。
 
 ## ⚠️ 凭据从哪来 + 报「身份验证失败 / 401」怎么办
 
@@ -206,7 +216,7 @@ return Array.isArray(body?.data) && body.data.length > 0;
   ZCode 自主规划并自续跑直到达成，适合无人值守委托；与 prompt/task 互斥是 CLI 限制）；
   `task`=任务包文件绝对路径（含交付物/验收标准的正式任务，由 runner 读文件内联）。
   可选 `model(GLM-5.3|GLM-5.3-Flash)`、`provider(plan|personal)`、`engine(zcode|opencode，**通常不用传**——
-  传 `provider: "opencode/<model>"` 即自动识别，见「双引擎」)`、`mode(build|edit|plan|yolo，默认 edit；**OpenCode 不适用**)`、
+  传 `provider: "opencode/<model>"` / `"qoder/<模型名>"` 即自动识别，见「三引擎」)`、`mode(build|edit|plan|yolo，默认 edit；**OpenCode 不适用**)`、
   **`thinking(思考强度，默认 agent=Agent决定，见「思考强度（thinking）」小节；OpenCode 侧映射为 --variant)`**、
   `timeoutMin(>0，无上限；runner 生效下限 1 分钟)`、`memoryBench(仅 kind=prompt，**OpenCode 不适用**)`、
   **`auto(true = 显式放行 OpenCode 未显式拒绝的权限，默认 false；仅 engine=opencode 有意义；跨 retry 沿用)`**、`tag`、
@@ -537,17 +547,28 @@ paused/pausedAt 与 unknown 分支、timeoutMin 校验）。
 
 规则与边界：
 
-- **档位集合随模型声明不同，不写死枚举**：runner 探测 builtin 配置 `modelRules`（按序 overlay），
-  经 `--list-providers` 输出 `[zcode-run] reasoning-levels <model>=<a,b>`，core 解析为
-  `channels[].thinkingLevels` 供面板下拉与 Agent 查询。当前实测：**GLM-5.3 / GLM-5.3-Flash =
-  `low|high|max`**；**deepseek-flash / deepseek-v4 系 = `disabled|low|high|max`**。
-  - ⚠️ **匹配式必须与 ZCode 逐字同式**（ZB-31 修的现场 bug）：ZCode 用
+- **档位集合随模型声明不同，不写死枚举** —— 三个引擎的**旗标与探测来源各不相同**（ZB-52 补齐）：
+
+  | 引擎 | 旗标 | 档位从哪来 | 实测档位 |
+  |---|---|---|---|
+  | ZCode | `--reasoning-level` | runner 探测 builtin `modelRules`（按序 overlay），经 `--list-providers` 输出 `[zcode-run] reasoning-levels <model>=<a,b>` | `GLM-5.3`/`GLM-5.3-Flash` = `low,high,max` |
+  | OpenCode | `--variant` | `opencode models --verbose` 的 `variants` 键，经 `--list-models --with-variants` 输出 `[opencode-run] variants <id>=<a,b>` | **逐模型**：如 `low,medium,high,xhigh,max`；真机 10 个里 **6 个有档位、4 个确无**（`big-pickle` / `mimo-v2.6-flash-free` / `nemotron-3-ultra-free` / `nemotron-3.5-lightning-free`） |
+  | Qoder | `--reasoning-effort` | **哨兵值逼 CLI 报出权威合法集合**（`--reasoning-effort <非法值> --list-models` ⇒ `Valid values are: …`），再**逐个实测接受性**；经 `--with-efforts` 输出 `[qoder-run] reasoning-efforts <model>=<a,b>` | `auto,none,low,medium,high,xhigh,max,ultracode`（15/15 模型同集合） |
+
+  - ⚠️ **ZCode 的匹配式必须与 ZCode 逐字同式**（ZB-31 修的现场 bug）：ZCode 用
     `new RegExp('^(?:'+modelMatch+')$','i')`（**锚定 + 忽略大小写**）。漏 `i` 会让小写规则
     （如 `.*glm-5\.3(?:-flash)?(?:…)?` → `low,high,max`）**永不命中**大写模型 id `GLM-5.3`，
     于是只剩更早的宽规则 `.*glm-5(?:…)?` → `disabled,enabled` —— 面板就少了低/高/最高三档。
   - ⚠️ **枚举面必须含个人通道模型**：`--list-providers` 的模型集 = 桌面端 `config.json` 的
     `provider[*].models` **∪ 个人通道 `provider_config.json` 的 `personalModelIds`/`modelOrder`**。
     `deepseek-flash` 只出现在后者；漏了 ⇒ 该通道一条档位行都没有 ⇒ 面板无档位选项。
+  - ⚠️ **探测很慢 ⇒ 走 TTL 缓存 + 后台预热**（ZB-52）：Qoder 的 `--with-efforts` 真机约 **2 分钟**
+    （15 模型 × 9 次 CLI 调用）。故它**绝不能挡在通道清单的同步路径上** ——
+    首次拉清单时档位可能为空（**这是设计，不是坏了**），下次刷新即有值；
+    同时 `runQoderProbe`/`runOpenCodeProbe` 的**超时改为可配**（原先写死 15s/30s 会把探测误杀）。
+  - ⚠️ **面板档位下拉按「当前选中的模型」过滤**（ZB-52）：OpenCode 档位是逐模型的，
+    取引擎并集会把**别的模型**的档位也列出来（选 A 模型却能选到 A 不支持的档位）。
+    定位不到具体通道（ZCode 路由形态 / 探测未预热）时才退回引擎并集。
 - **fail-fast 不静默**：runner 校验（模型声明了档位集合而请求值不在其中 ⇒ 拒绝派发并列出可用值）；
   ZCode 会话创建也会校验（defaultModelSelection 非法 ⇒ 会话创建失败）。
 - **仅新建会话生效**：`--resume` 沿用原会话档位（ZCode 语义；core 对 resume 不透传，runner 警告）。
@@ -562,11 +583,14 @@ paused/pausedAt 与 unknown 分支、timeoutMin 校验）。
   派发一律按它执行；设 `Agent决定` 时派发 Agent 按任务自行改传具体档位。回退在 core `dispatch()`
   统一实现 ⇒ 工具/CLI/面板三条入口一致。面板**手动派发表单已移除**（ZB-29c：无需手动派发，
   有需要让 Agent 代劳）。
-- `--list-providers` 探测各模型档位集（`reasoning-levels` 行）；无档位数据（旧 runner）时
-  通道下拉只剩 Agent决定 —— 不猜。
+- **「顺序派发」模式下主档位下拉不可改**（ZB-52）：顺序列表会在**多个模型**间轮换，
+  而档位是**逐模型**的 ⇒ 一个全局档位说不通。故此时该下拉置灰并显示「设置默认」，
+  真正的档位在**顺序列表里逐模型设置**（每行右侧一个「档位」下拉，首项「默认」）。
+- `--list-providers` / `--list-models --with-variants` / `--list-models --with-efforts` 探测各模型档位集；
+  无档位数据（旧 runner / 探测未预热）时通道下拉只剩 Agent决定 —— 不猜。
 
-证据：`test/thinking-level.test.mjs`（7 项：解析/通道透出/core 透传与字段（含**通道默认回退与
-覆盖**）/wire 映射/validateSpec/交接沿用/runner 注入 hermetic 干跑 + fail-fast + resume 跳过）。
+证据：`test/thinking-level.test.mjs`、`test/thinking-levels-coverage.test.mjs`、
+`test/sequential-dispatch.test.mjs` C 组（假执行器验证解析与逐模型差异，不真跑 CLI）。
 
 ## 枚举与 channels 清单，以谁为准（ZB-28）
 
@@ -579,6 +603,32 @@ paused/pausedAt 与 unknown 分支、timeoutMin 校验）。
 - 要派发到**枚举之外**的通道（如 `builtin:…` 真实 id）：用 `action=channel`（provider 接受清单里任意 id）
   设为默认通道，再**不带** provider/model 派发（未显式指定时自动采用默认通道）——这条路径不受枚举限制；
 - per-dispatch 显式 `provider`/`model` 仅用于枚举内的常用值；两者不一致时，**以 channels 为准**。
+
+## 顺序派发（ZB-52）
+
+**一句话：让"免费模型有额度上限 / 用的人太多临时报错"不再直接失败** —— 按你排的顺序逐个试过去。
+
+| 项 | 说明 |
+|---|---|
+| 怎么开启 | 面板「模型」下拉选 **「顺序派发」**（存值为空）—— **这就是开启**。⚠️ **没有开关**：有开关时会出现"开关开着、模型却是具体值"这种自相矛盾状态 |
+| 顺序列表 | **每引擎各自一份**（ZCode / OpenCode / Qoder 互不影响），列表旁 **↑↓ 调整次序**；未在列表里的模型自动排在末尾（**新增模型不会消失**） |
+| 执行语义 | 按列表**从上到下**尝试：前一个报错就换下一个，全试完仍失败才报错。**第一跳就是列表第一项**（不是引擎默认模型） |
+| 触发面 | `failed` 与所有 `paused` 都延续（限流 / 额度 / 模型不可用都算）；**唯独 `config-error` 不延续** —— 那是参数/配置错，换任何模型都一样 |
+| 降级也支持 | **主通道与降级通道可同时**顺序派发（如主 OpenCode 顺序 + 降级 Qoder 顺序）—— 降级目标的「模型」也选「顺序派发」即可，**共用同一份按引擎存的列表** |
+| 与降级链的关系 | **先顺序、后降级**：顺序列表跑完仍失败 ⇒ 交回跨通道降级链；降级到某个"也是顺序派发"的目标时，在那个引擎的列表里**再跑一轮** |
+| 分界 | 顺序派发 = **同一引擎内**换模型；自动降级链 = **跨通道**续命。两者**各有独立的跳数预算**（`attempts[].hopReason` 区分 `seq-model` / `auto-fallback`），互不吃对方的额度 |
+| 逐模型档位 | 列表每行右侧的**「档位」**可单独设该模型的思考强度（首项「默认」= 用引擎默认）—— 因为档位是**逐模型**的，一个全局档位对轮换列表说不通 |
+| ⚠️ 换模型代价 | 换模型 = **新开会话**（换进程甚至换引擎，会话无法继承）：磁盘上**已完成的文件改动会保留**，新模型会收到**交接提示词**被告知"接着做" |
+| ⚠️ 不被劫持 | **显式指定了模型**的派发不会被顺序链接管（指定了就按指定的跑）；反向也成立 —— **没法用"显式命名列表第一项"来启动顺序派发**，想跑顺序就得把模型留空 |
+
+状态文件 `<workRoot>/state/sequential.json`（`version: 2`；`order[engine] = [{route, reasoningLevel}]`）。
+API：`getSequential()` → `{order, levels, sequentialCount}`；`setSequential({order})` **按引擎合并**
+（只改一个引擎不会清空别的）。⚠️ 传 `enabled` 会**抛 TypeError**（已废弃，明确报错而非静默忽略）。
+
+> 旧格式（`version: 1` 的纯字符串数组）**照常读入**，档位为 null（= 引擎默认，不猜）。
+
+证据：`test/sequential-dispatch.test.mjs`（**185 断言**：接管判据 / 失败推进 / 列表 N 项真的 spawn N 次 /
+降级目标也顺序 / 独立跳数预算 / 逐模型档位 / 落盘与 v1 兼容 / 档位探测解析）。
 
 ## 真数据 vs demo 判据（Z8 接线后）
 
@@ -671,7 +721,7 @@ paused/pausedAt 与 unknown 分支、timeoutMin 校验）。
 | `node test/shared-wire-liveness.test.mjs` | 18 | **共享 wire 存活哨兵**（ZB-28b：功能重放「面板开→关不得处决入口的 live wire」+ 配对释放/REMOTE_READY 补投/kind 标签源码不变量——修「状态灯冻结、切换会话才显示」） |
 | `node test/single-source.test.mjs` | 31 | **单源哨兵**（ZB-25：动作清单 ≡ switch、状态集合引用同一性、三表方法集相等、协议常量逐字相等、STRINGS ↔ locale 逐值） |
 | `node test/hardening.test.mjs` | 5 | **核对硬化**（ZB-26：B1 锁 realpath / B2 ownerPid 不改写活 job / B3 多进程不丢更新 / B4 tail 不读越界 / A2 非法 config 只 warn 不阻断激活） |
-| `node test/host-config.test.mjs` | 59 | **双引擎 Host 侧配置/契约哨兵**：`FIELDS` 新增 `maxConcurrentOpenCode`（def 2）/ `opencodeRunnerPath`（def `''`）且仍单源派生；非法值 warn + 安全默认**不抛/不返回 issues**；`~standard.validate` 契约；工具 schema `engine` **非 enum** + `provider` 描述含 `opencode/`；CLI `--engine` / `[opencode]` 标记 / 空路径不传；README 双引擎段落 |
+| `node test/host-config.test.mjs` | 59 | **引擎级 Host 侧配置/契约哨兵**：`FIELDS` 新增 `maxConcurrentOpenCode`（def 2）/ `opencodeRunnerPath`（def `''`）且仍单源派生；非法值 warn + 安全默认**不抛/不返回 issues**；`~standard.validate` 契约；工具 schema `engine` **非 enum** + `provider` 描述含 `opencode/`；CLI `--engine` / `[opencode]` 标记 / 空路径不传；README 三引擎段落 |
 | `node test/z2-verify.mjs` | — | 端到端验收（越界检查需 `Z2_HOST_REPO`，未设则 SKIP 并如实标注） |
 
 > `file-lock` 与 `wait-action` 用 `node:test` 语义（`node --test test/xxx.test.mjs`），
