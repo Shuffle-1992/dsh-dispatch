@@ -59,8 +59,12 @@ console.log('\nB. 三阶段分支与 a11y');
   ok(/onKeyDown: tvOnKeyDown\(toggle\)/.test(code) && /event\.key !== 'Enter' && event\.key !== ' '/.test(code),
     'B7 键盘 Enter / Space 可展开');
   ok(/'data-state': String\(m\.state\)/.test(code), 'B8 卡片带 data-state（状态既在文本也在属性上，不只靠颜色）');
-  ok(/className: `dsp-tv-pill s-\$\{tvPillClass\(m\.state\)\}`/.test(code) && /TV_PILL = \['queued'/.test(code),
-    'B9 状态胶囊的类名走白名单（脏状态串不会拼进 class）');
+  /* ⚠️ 锚点随「执行 3」调整（语义未变）：`TV_PILL` 已由 `JOB_STATE_META` **派生**（单一源），
+   * 故这里不再钉数组字面量，改为钉**行为**：胶囊类名必须过白名单、未知状态回落安全类名。 */
+  ok(/className: `dsp-tv-pill s-\$\{tvPillClass\(m\.state\)\}`/.test(code)
+    && /const tvPillClass = \(s\) => \(TV_PILL\.includes\(String\(s\)\) \? String\(s\) : 'queued'\)/.test(code)
+    && /const TV_PILL = \[\.\.\.JOB_STATES\.filter\(/.test(code),
+    'B9 状态胶囊的类名走白名单（未知状态回落 queued；TV_PILL 由 JOB_STATE_META 派生）');
 }
 
 /* ═══════════ C. 无误报的"绝不抛错"纪律（静态） ═══════════ */
@@ -142,7 +146,21 @@ console.log('\nF. 执行（沙箱里真跑解析层与行组件）');
   const h = (type, props, ...children) => el(type, props, ...children);
   /* t 用"键名当值"的桩：断言时直接看键是否被用过（真实文案由 E 段的三方同步守门）。 */
   const t = (k) => String(k);
-  const sandbox = new Function('t', 'h', 'React', 'TOOLVIEW_KEY', `${block}
+  /* ⚠️ 切片内的 D1 代码会引用**模块级** helper（`jobEngineOf` 及其依赖 `KNOWN_ENGINES`）——
+   * 它们是引擎判据的**单一源**，故从源码里**原样取真身**注入沙箱（不写测试专用仿制品，
+   * 否则"卡片用的判据"与"面板用的判据"就又分家了）。 */
+  const enginesSrc = src.match(/const KNOWN_ENGINES = \[[^\]]*\];/)[0];
+  const jobEngineOfSrc = src.match(/const jobEngineOf = \(job\) => \{[\s\S]*?\n {4}\};/)[0];
+  /* ⚠️ 执行 3（审计 R1）把"胶囊白名单"收敛成模块级 `TV_PILL`，由 `JOB_STATE_META` 派生（单一源）。
+   * 于是切片里的 `TV_PILL.includes(...)` 不再自带定义 ⇒ 沙箱里会 ReferenceError。
+   * 按本测试既有的同一原则（"取真身，不写测试专用仿制品"），把**状态表那一段**（源里从
+   * `JOB_STATE_META` 到 `TV_PILL` 是连续的）原样注入，而不是在测试里复制一份白名单 ——
+   * 否则"卡片用的胶囊集合"与"真代码的胶囊集合"又会分家。 */
+  const stateMetaSrc = src.match(/const JOB_STATE_META = \{[\s\S]*?\r?\n {4}const TV_PILL = \[[^\n]*\n/)[0];
+  const sandbox = new Function('t', 'h', 'React', 'TOOLVIEW_KEY', `${enginesSrc}
+${jobEngineOfSrc}
+${stateMetaSrc}
+${block}
     return { tvFirstLine, tvClip, tvJson, tvContentText, tvCountsText, tvElapsed, tvBriefLine, tvJobFacts,
              tvFactsFrom, tvEnvelopeSummary, tvModel, tvOnKeyDown, tvPillClass, tvPillTitle, tvFallbackRow, DispatchToolRow };`);
   const S = sandbox(t, h, React, 'dispatch');
@@ -228,6 +246,19 @@ console.log('\nF. 执行（沙箱里真跑解析层与行组件）');
   };
   const jm = S.tvModel(jobProps);
   ok(jm.state === 'paused' && jm.elapsed === '13s' && jm.model === 'opencode/x', 'F16 result/job：状态/耗时/模型来自 job');
+  /* ★ P0 回归（审计 R2a）：`action=list` 的 **brief 形状没有 `spec`** ⇒ 引擎判据必须走
+   * `jobEngineOf`（由 provider 形态推断），否则卡片里引擎一栏会空掉、与面板显示不一致。 */
+  const briefModel = S.tvModel({
+    phase: 'result', toolName: 'dispatch', callId: 'c3b',
+    block: {
+      kind: 'tool', callId: 'c3b', isError: false,
+      call: { name: 'dispatch', argsRaw: '{"action":"list"}' },
+      content: [{ type: 'text', text: JSON.stringify({ ok: true, job: { id: 'j-brief', state: 'done', provider: 'opencode/x', model: 'opencode/x' } }) }],
+    },
+  });
+  const briefEng = briefModel.facts.find((f) => f.k === 'tvEngineCh');
+  ok(!!briefEng && briefEng.v.includes('opencode'),
+    `F16b ★ brief 形状（无 spec）也能判出引擎（实际 ${JSON.stringify(briefEng)}）`);
   ok(jm.summary === '跑个任务', 'F17 result/job：摘要是派发原文首行（不是整段 JSON）');
   const jKeys = jm.facts.map((f) => f.k);
   ok(jKeys.includes('tvJobId') && jKeys.includes('tvEngineCh') && jKeys.includes('cwd') && jKeys.includes('timeout') && jKeys.includes('repoLock'),

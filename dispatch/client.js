@@ -82,34 +82,16 @@ window.__ModuleLoader__.load({
      * 弹窗内容（PanelBody）自己持 wire 并渲染实时数据，入口只是个开合开关（局部 useState）。
      * 原 store 的用途是"让另一个渲染器零网络成本显示计数徽标"，现在没有第二个渲染器了。 */
 
-    const LS = {
-      pos: 'dispatch:panel:pos:v1', // 悬浮位置 {left, top}
-      size: 'dispatch:panel:size:v1', // 宽度 {width}
-      collapsed: 'dispatch:panel:collapsed:v1', // 折叠态 true/false
-      pinned: 'dispatch:panel:pinned:v1', // ZB-08：固定（锁定位置，禁止拖动）true/false
-    };
     /* Z11：分区折叠——id 常量集中一处（勿散落魔法字符串），折叠态存
      * localStorage['dispatch:section:<id>']（复用 loadJson/saveJson，自带 try/catch）。 */
     const SEC = { channel: 'channel', dispatch: 'dispatch', jobs: 'jobs', quota: 'quota', locks: 'locks' };
     const secKey = (id) => `dispatch:section:${id}`;
     // 默认展开/收起：通道与派发收起（少滚动）；进程与用量展开（主信息）；单写者收起
     const SEC_DEFAULT_OPEN = { [SEC.channel]: false, [SEC.jobs]: true, [SEC.quota]: true, [SEC.locks]: false }; // ZB-29c：派发分区已移除
-    // z-index 仅约束浮层自身的层级（不写全局样式、不碰宿主 DOM），取固定较大值避免被页面浮层盖住
-    const Z_INDEX = 2000000000;
     const WIDTH = { min: 320, max: 600, def: 440 };
-    /* ZB-06：面板高度可调 + 持久化。未设置时 height=null → CSS 走 auto + max-height:min(72vh,560px)
-     * （与旧行为完全一致，不改变老用户的观感）；一旦用户拖过就把高度固定，由 .dsp-body 内部滚动。
-     * 上限随视口收敛，避免把面板拖到屏幕外。 */
-    const HEIGHT = { min: 160 };
-    const maxPanelHeight = () => {
-      const vh = (typeof window !== 'undefined' && Number(window.innerHeight)) || 900;
-      return Math.max(HEIGHT.min, Math.min(1200, vh - 80));
-    };
-    const clampHeight = (n) => Math.min(maxPanelHeight(), Math.max(HEIGHT.min, Math.round(Number(n) || HEIGHT.min)));
     /* ZB-07：进程分组内默认只展开最近 N 条 —— 进程累计上限是 1000 条（JOBS_FILE_CAP），
      * 全量渲染会让面板变成一条几百行的长列表。其余折进「还有 N 条更早的」按钮。 */
     const JOB_GROUP_PREVIEW = 5;
-    const EDGE = 8; // 拖拽时与视口边缘的最小间距
 
     /* ─────────────── TOKENS：主题令牌唯一出口 ───────────────
      * 纪律：JS 内零字面色值（#…），全部走主题令牌；每个值带同族回退链，
@@ -555,15 +537,11 @@ window.__ModuleLoader__.load({
          * 与那次渲染 bug 无关。 */
         headerTip: '打开 / 收起派发台面板',
         connConnecting: '连接中', connDemo: '演示数据', connExt: '外部数据', connLive: '已连接', connOffline: '未连接',
-        collapse: '折叠 / 展开', minimize: '最小化为胶囊', restore: '展开派发台', grip: '拖拽调整宽高（自动保存）',
-        pillRunning: '运行中', pillQueued: '排队中', pillIdle: '空闲',
-        pin: '固定位置（固定后不可拖动）', unpin: '取消固定（恢复可拖动）',
-        secDispatch: '派发', secJobs: '进程', secQuota: '用量', secLocks: '仓库文件锁',
+         secJobs: '进程', secQuota: '用量', secLocks: '仓库文件锁',
         noFileLocks: '（当前没有文件锁：任务未声明 write，走仓库整锁）',
         kind: '类型', kindPrompt: '提示词', kindTask: '任务文件', kindTarget: '目标',
-        phPrompt: '输入要发给 ZCode 的提示词…', phTask: '任务文件绝对路径…', phTarget: '要达成的目标…',
-        model: '模型', provider: '通道', providerPlan: '套餐', providerPersonal: '个人 Key',
-        mode: '模式', timeout: '超时(分)', bench: '--memory-bench',
+        model: '模型', provider: '通道',  
+        mode: '模式', timeout: '超时(分)', 
         thinking: '思考强度', thinkingAgent: 'Agent决定（按任务判断）', thinkingAgentShort: 'Agent决定',
         thinkDisabled: '关闭思考', thinkEnabled: '开启思考', thinkLow: '低强度', thinkHigh: '高强度', thinkMax: '最高强度',
         /* ZB-55：三引擎实测 11 档 —— 下方 6 个补齐（原先掉回英文原文 none/minimal/medium/xhigh …） */
@@ -571,13 +549,11 @@ window.__ModuleLoader__.load({
         thinkAuto: '自动', thinkUltracode: '极限强度',
         /* ZB-56：档位探测还没出结果时的占位（只报状态、不编造档位） */
         thinkLoading: '档位载入中…',
-        thinkingFollow: '跟随通道', dispatchThinkingHint: '跟随通道=按通道设置的思考强度派发（在「通道」分区设置）；具体档位=本条派发严格生效（仅新建会话）',
         chanThinkingHint: '通道默认思考强度：Agent决定=由派发方 Agent 按任务自行改传具体档位；具体档位=给派发 Agent 的硬性规定（未显式指定的派发一律按它执行，仅新建会话生效）',
-        thinkingHint: 'Agent决定=由派发方按任务判断并改传具体档位；具体档位严格生效（仅新建会话；--resume 沿用原会话档位）',
         thinkingStale: '已失效', thinkingStaleHint: '该档位不在当前模型声明的取值里（可能因模型档位表更新而失效）——派发会被 runner 拒绝，请改选一个有效档位',
-        dispatch: '派发', queuedBtn: '排队中…', runningBtn: '执行中…', sending: '提交中…',
-        fbQueued: '已排队：', errPrefix: '失败：', errEmpty: '请先填写内容',
-        content: '内容', noJobs: '暂无进程记录', exit: '退出', kill: '终止', tail: '输出', tailLoading: '读取中…', tailEmpty: '（无输出）',
+           sending: '提交中…',
+        fbQueued: '已排队：', errPrefix: '失败：', 
+         noJobs: '暂无进程记录', exit: '退出', kill: '终止', tail: '输出', tailLoading: '读取中…', tailEmpty: '（无输出）',
         closeJob: '关闭', cwd: '工作目录', createdAt: '创建于', sessionId: '会话',
         grpActive: '进行中', grpPaused: '需处理', grpFailed: '异常', grpDone: '已完成', grpOther: '其他',
         jobMore: '还有', jobMoreN: '条更早的', jobCollapse: '收起',
@@ -591,10 +567,8 @@ window.__ModuleLoader__.load({
         localNote: '本地用量（可核对）：台账聚合的 5 小时 / 本周 / 今日窗口',
         engineWeekUsed: '引擎本周已用（引擎本地库合计，非套餐已用）',
         planQuotaPending: '套餐剩余额度：未接入 —— CLI RPC 面无此方法（app-server usage/stats 语义是「本地已用」）；以 ZCode 客户端为准',
-        repoLock: '仓库锁', memoryLock: 'Zcode 记忆锁', queueLen: '队列', idle: '空闲', lockHeld: '持有仓库锁',
-        repoLockCb: '仓库文件锁', writePh: '要写的文件（逗号或换行分隔；留空=锁整个仓库）', writeHint: '只锁这些文件 ⇒ 与写其它文件的任务可并发执行',
-        writeFiles: '要写入的文件列表', lockNoneHint: '不取锁（确认无竞写关系时才用）',
-        lockScopeHint: '只锁上面列出的文件；留空则锁整个仓库（与其它任务互斥）',
+        repoLock: '仓库锁',  queueLen: '队列', idle: '空闲', lockHeld: '持有仓库锁',
+        writeFiles: '要写入的文件列表', 
         secChannel: '通道', chanNewTask: '新任务将使用：', chanDisabled: '不可用', chanLoadFail: '通道清单加载失败',
         /* 双引擎（OpenCode 接入）：通道下拉按引擎分组 + 引擎徽标 + 引擎专属提示。
          * 引擎是「通道」这个既有抽象的一个属性（不是新 tab）——进程列表/锁/队列/用量/降级链
@@ -621,17 +595,17 @@ window.__ModuleLoader__.load({
         filtHiddenB: ' 个通道（共 ',
         filtHiddenC: ' 个）',
         chanLoading: '通道清单加载中…（宿主刚启动或首次探测中；失败会自动重试，无需刷新）',
-        chanLoadRetry: '会自动重试', chanInfoPrefix: '通道清单说明：', zcFreeRoute: '免费额度（Start Plan）', zcRoutePlan: 'BigModel(Plan)', zcRouteFree: 'Start Plan(免费)', zcFreeSuffix: '免费',
+        chanLoadRetry: '会自动重试', chanInfoPrefix: '通道清单说明：',  zcRoutePlan: 'BigModel(Plan)', zcRouteFree: 'Start Plan(免费)', zcFreeSuffix: '免费',
         autoApproved: '已放行权限', autoApprovedHint: '该任务派发时显式开启了 OpenCode 的 --auto：放行了所有未显式拒绝的权限（默认不开启，仅调用方显式指定时生效）',
         giftQuota: '免费额度剩余', giftQuotaUnavailable: '免费额度余量不可用', chanQuotaExhausted: '5 小时窗口已满',
         jobCurrent: '当前：', jobLastBeat: '最近心跳', jobStalled: '可能卡住',
         jobStalledHint: '超过 150 秒没有收到 runner 的心跳/输出：可能卡在上游请求、MCP 连接或等锁。可用「终止」后重派，或 action=tail 看最后输出。',
         chanOfflineHint: '未连接宿主：通道/模型来自宿主远端面，连接后这两个下拉才可选',
-        chanDefaultModel: '（通道默认模型）', modelAgentDecide: 'Agent决定', modelAgentDecideHint: '未指定模型：由派发 Agent 按任务自行选择（它可换成任意可用模型）',
+        chanDefaultModel: '（通道默认模型）',  
         /* ZB-52：顺序派发（同一引擎内按列表从上到下换模型）。
          * ZB-52c：**没有开关** —— 「模型」选「顺序派发」即开启（主通道与降级目标各自一份列表）。
          * ⚠️ 这几把键必须与 locale/zh.json、locale/en.json **逐键逐值一致**（single-source.test.mjs ⑤ 守门）。 */
-        seqTitle: '顺序派发', seqThinkingDefault: '设置默认', seqThinkingDefaultHint: "顺序派发模式：档位由顺序列表里**逐个模型**设置（模型不同、支持的档位也不同），此处不可改",
+        seqTitle: '顺序派发', seqThinkingDefault: '设置默认', 
         seqHint: '「模型」选「顺序派发」即开启本模式（**没有开关**）：派发时按下面列表从上到下尝试，上一个报错就换下一个（额度耗尽 / 限流暂停同样换），全试完仍失败才报错 —— 之后才轮到「自动降级」。主通道与降级目标各自独立：主通道模型为空 ⇒ 用主通道引擎的列表；否则降级目标模型为空 ⇒ 用降级目标引擎的列表（列表按引擎分别保存）。列表只作用于**当前显示的那个引擎**（ZCode / OpenCode / Qoder 各自一份）。每一行右边的「档位」可单独设置该模型的思考强度（「默认」= 用引擎默认档位）—— 顺序派发模式下全局档位不可改：各模型支持的档位不同。注意：换模型 = 新开会话，前面已完成的文件改动会保留、模型会被告知接着做。',
         seqHintShort: '顺序派发：不绑定具体模型 ⇒ 报错时按「顺序派发」列表从上到下换模型（主通道与降级目标各自一份列表）',
         seqOrderLabel: '尝试顺序',
@@ -692,15 +666,11 @@ window.__ModuleLoader__.load({
         title: 'Dispatch Console',
         headerTip: 'Open or hide the dispatch panel',
         connConnecting: 'connecting', connDemo: 'demo data', connExt: 'external', connLive: 'live', connOffline: 'offline',
-        collapse: 'Collapse / Expand', minimize: 'Minimize to pill', restore: 'Restore console', grip: 'Drag to resize (saved automatically)',
-        pillRunning: 'running', pillQueued: 'queued', pillIdle: 'idle',
-        pin: 'Pin position (no dragging while pinned)', unpin: 'Unpin (allow dragging again)',
-        secDispatch: 'Dispatch', secJobs: 'Processes', secQuota: 'Usage', secLocks: 'Repo file locks',
+         secJobs: 'Processes', secQuota: 'Usage', secLocks: 'Repo file locks',
         noFileLocks: '(no file locks: jobs did not declare write, using whole-repo lock)',
         kind: 'Kind', kindPrompt: 'Prompt', kindTask: 'Task file', kindTarget: 'Target',
-        phPrompt: 'Prompt to send to ZCode…', phTask: 'Absolute path of task file…', phTarget: 'Goal to achieve…',
-        model: 'Model', provider: 'Channel', providerPlan: 'Plan', providerPersonal: 'Personal key',
-        mode: 'Mode', timeout: 'Timeout (min)', bench: '--memory-bench',
+        model: 'Model', provider: 'Channel',  
+        mode: 'Mode', timeout: 'Timeout (min)', 
         thinking: 'Thinking', thinkingAgent: 'Agent decides (per task)', thinkingAgentShort: 'Agent decides',
         thinkDisabled: 'Thinking off', thinkEnabled: 'Thinking on', thinkLow: 'Low effort', thinkHigh: 'High effort', thinkMax: 'Max effort',
         /* ZB-55: three engines actually report 11 levels — these 6 used to fall back to the raw id. */
@@ -708,13 +678,11 @@ window.__ModuleLoader__.load({
         thinkAuto: 'Auto', thinkUltracode: 'Ultracode',
         /* ZB-56: placeholder while the effort-level probe is still pending (report state, never invent levels). */
         thinkLoading: 'Loading effort levels…',
-        thinkingFollow: 'Follow channel', dispatchThinkingHint: "Follow channel = dispatch with the channel's thinking setting (set in the Channels section); a concrete level is enforced for this dispatch (new sessions only)",
         chanThinkingHint: 'Channel default thinking: Agent decides = the dispatching agent picks a concrete level per task; a concrete level is a hard rule for dispatched agents (dispatches without an explicit level follow it; new sessions only)',
-        thinkingHint: 'Agent decides = the dispatching agent picks a concrete level per task; a concrete level is enforced (new sessions only; --resume keeps the session level)',
         thinkingStale: 'stale', thinkingStaleHint: 'This level is not in the current model declaration (the model level table may have changed) — dispatch would be rejected by the runner; pick a valid level',
-        dispatch: 'Dispatch', queuedBtn: 'Queued…', runningBtn: 'Running…', sending: 'Sending…',
-        fbQueued: 'Queued: ', errPrefix: 'Failed: ', errEmpty: 'Content is required',
-        content: 'Content', noJobs: 'No process records yet', exit: 'exit', kill: 'Kill', tail: 'Tail', tailLoading: 'Loading…', tailEmpty: '(no output)',
+           sending: 'Sending…',
+        fbQueued: 'Queued: ', errPrefix: 'Failed: ', 
+         noJobs: 'No process records yet', exit: 'exit', kill: 'Kill', tail: 'Tail', tailLoading: 'Loading…', tailEmpty: '(no output)',
         closeJob: 'Close', cwd: 'Workdir', createdAt: 'Created', sessionId: 'Session',
         grpActive: 'Running', grpPaused: 'Needs action', grpFailed: 'Failed', grpDone: 'Completed', grpOther: 'Other',
         jobMore: 'Show', jobMoreN: 'older', jobCollapse: 'Collapse',
@@ -728,10 +696,8 @@ window.__ModuleLoader__.load({
         localNote: 'Local usage (verifiable): ledger-aggregated 5h / week / today windows',
         engineWeekUsed: 'Engine week used (engine-local DB total, not plan usage)',
         planQuotaPending: 'Plan quota remaining: not wired — no such method on the CLI RPC surface (app-server usage/stats is local-used only); defer to the ZCode client',
-        repoLock: 'Repo lock', memoryLock: 'Zcode memory lock', queueLen: 'queue', idle: 'idle', lockHeld: 'holds the repo lock',
-        repoLockCb: 'Repo file lock', writePh: 'files to write (comma/newline separated; empty = whole repo)', writeHint: 'locks only these files, so tasks writing other files can run in parallel',
-        writeFiles: 'files to write', lockNoneHint: 'no lock (only when no write conflict is possible)',
-        lockScopeHint: 'locks only the files listed above; empty locks the whole repo (exclusive)',
+        repoLock: 'Repo lock',  queueLen: 'queue', idle: 'idle', lockHeld: 'holds the repo lock',
+        writeFiles: 'files to write', 
         secChannel: 'Channels', chanNewTask: 'New tasks will use: ', chanDisabled: 'unavailable', chanLoadFail: 'Failed to load channels',
         engZcode: 'ZCode', engOpencode: 'OpenCode', engGroupZcode: 'ZCode channels', engGroupOpencode: 'OpenCode free models',
         engQoder: 'Qoder', engGroupQoder: 'Qoder channels',
@@ -752,18 +718,18 @@ window.__ModuleLoader__.load({
         filtHiddenB: ' of ',
         filtHiddenC: ' channels',
         chanLoading: 'Loading channel list… (host just started or first probe in flight; failures retry automatically, no refresh needed)',
-        chanLoadRetry: 'will retry automatically', chanInfoPrefix: 'Channel notes: ', zcFreeRoute: 'Free quota (Start Plan)', zcRoutePlan: 'BigModel (Plan)', zcRouteFree: 'Start Plan (free)', zcFreeSuffix: 'free',
+        chanLoadRetry: 'will retry automatically', chanInfoPrefix: 'Channel notes: ',  zcRoutePlan: 'BigModel (Plan)', zcRouteFree: 'Start Plan (free)', zcFreeSuffix: 'free',
         autoApproved: 'auto-approved', autoApprovedHint: 'This job explicitly enabled OpenCode --auto: all permissions not explicitly denied were allowed (off by default; only takes effect when the caller sets it explicitly)',
         giftQuota: 'Free quota left', giftQuotaUnavailable: 'Free-quota balance unavailable', chanQuotaExhausted: '5h window full',
         jobCurrent: 'Now: ', jobLastBeat: 'last heartbeat', jobStalled: 'possibly stuck',
         jobStalledHint: 'No runner heartbeat/output for over 150s: it may be stuck on an upstream request, MCP connect or a lock. Kill and re-dispatch, or use action=tail for the last output.',
         chanOfflineHint: 'Host not connected: channel/model come from the host Remote face and unlock once connected',
-        chanDefaultModel: '(channel default model)', modelAgentDecide: 'Agent decides', modelAgentDecideHint: 'No model pinned: the dispatching Agent picks one per task (and may switch to any available model)',
+        chanDefaultModel: '(channel default model)',  
         /* ZB-52: sequential dispatch (switch models in list order inside one engine).
          * ZB-52c: there is NO switch — selecting "Sequential dispatch" in "Model" is the switch
          * (main channel and fallback target each keep their own per-engine list).
          * These keys must match locale/en.json and locale/zh.json word for word (single-source.test.mjs ⑤). */
-        seqTitle: 'Sequential dispatch', seqThinkingDefault: 'Set default', seqThinkingDefaultHint: "Sequential mode: effort is set per model in the sequence list (models differ in supported levels), so it is not editable here",
+        seqTitle: 'Sequential dispatch', seqThinkingDefault: 'Set default', 
         seqHint: 'Selecting "Sequential dispatch" in "Model" IS the switch (there is no separate toggle): the list below is tried top to bottom, an error moves on to the next entry (quota exhausted / rate-limited pauses count too), and it only reports failure after the whole list is exhausted — auto fallback runs after that. The main channel and the fallback target are independent: an empty model on the main channel uses the main engine\'s list; otherwise an empty model on the fallback target uses the fallback engine\'s list (lists are stored per engine). The list applies to the engine currently shown (ZCode / OpenCode / Qoder each have their own). The "Effort" dropdown on each row sets that model\'s own thinking level ("Default" = the engine default) — the global effort setting is locked in sequential mode because models differ in supported levels. Note: switching models starts a NEW session; file changes already made are kept and the model is told to continue.',
         seqHintShort: 'Sequential dispatch: no model pinned, so an error switches to the next model down the list (main channel and fallback target each keep their own list)',
         seqOrderLabel: 'Try order',
@@ -866,16 +832,24 @@ window.__ModuleLoader__.load({
     };
     /* job 的引擎判据（与 core 的 `resolveEngineOf()` **顺序一致**）：
      * ① job.engine（core 落库，最权威）② spec.engine ③ provider 形态（`qoder/<m>` / `opencode/<m>` / 裸名）
-     * ④ 兜底 zcode。旧记录没有这些字段 ⇒ 显示 ZCode（与事实相符）。 */
+     * ④ 兜底 zcode。旧记录没有这些字段 ⇒ 显示 ZCode（与事实相符）。
+     *
+     * ⚠️ provider 要看**两处**：`spec.provider`（面板快照的 slimJob 形状）与**顶层 `job.provider`**
+     * （`action=list` 的 **brief 形状没有 `spec`** —— 宿主 briefJob() 把 provider 放在顶层）。
+     * 只读 spec.provider 会让 brief 形状的 job 一律回落成 zcode（审计 R2a：卡片/列表与面板显示不一致）。
+     * 顺序仍是"spec 优先、顶层兜底"，故对既有快照路径**零行为变化**。 */
     const jobEngineOf = (job) => {
       const spec = job?.spec ?? {};
       for (const v of [job?.engine, spec.engine]) {
         const s = typeof v === 'string' ? v.trim().toLowerCase() : '';
         if (KNOWN_ENGINES.includes(s)) return s;
       }
-      const p = typeof spec.provider === 'string' ? spec.provider.trim().toLowerCase() : '';
-      if (p.startsWith('opencode/') || p === 'opencode') return 'opencode';
-      if (p.startsWith('qoder/') || p === 'qoder' || p === 'qoder-cn' || p === 'qoder-global') return 'qoder';
+      for (const raw of [spec.provider, job?.provider]) {
+        const p = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+        if (!p) continue;
+        if (p.startsWith('opencode/') || p === 'opencode') return 'opencode';
+        if (p.startsWith('qoder/') || p === 'qoder' || p === 'qoder-cn' || p === 'qoder-global') return 'qoder';
+      }
       return 'zcode';
     };
 
@@ -893,84 +867,6 @@ window.__ModuleLoader__.load({
         window.localStorage.setItem(key, JSON.stringify(value));
       } catch { /* 写不进就算了 */ }
     };
-    const clampWidth = (n) => Math.min(WIDTH.max, Math.max(WIDTH.min, Number(n) || WIDTH.def));
-    /* ZB-07：把保存的悬浮位置钳进当前视口（纯函数，便于独立测试）。
-     * 为什么需要：localStorage 里的位置可能是脏值 —— 早期版本存的负数/越界值，
-     * 或者存完之后用户把窗口缩小了。沿用脏值会让整个面板跑到屏幕外、彻底点不到。
-     * 约束：left/top 都至少留 EDGE；上界为「视口 - 面板尺寸 - EDGE」，且不小于 EDGE
-     * （面板比视口还大时退化为 EDGE，保证左上角可见而不是负数）。
-     * @param {{left:number, top:number}|null} p
-     * @param {{vw:number, vh:number, w:number, h:number}} view
-     * @returns {{left:number, top:number}|null} null = 没存过位置（调用方走默认右下角）
-     */
-    /* ZB-11：浮动位置改为**锚定语义**（纯函数，便于独立测试）。
-     *
-     * 起因（用户报告）：「DSH 全屏时把派发台固定在右上角 → 缩到默认大小 → 派发台被挤到
-     * 中间对话上面 → 再全屏，它仍留在中间」。
-     *
-     * 根因（★ 这正是 ZB-10「钳制」引入的反效果）：位置只存绝对 {left, top}。
-     * 窗口缩小时钳制会把坐标**改写**进 pos 并落盘（left 被拉到视口内 ⇒ 落到中间）；
-     * 再放大时钳制只保证"不越界"，**不会**把它还原回右上角 ⇒ 用户的意图被永久破坏。
-     *
-     * 正解：记住面板**贴的是哪条边**与**该方向的边距**，位置由「边距 + 当前视口」推导：
-     *   贴右 ⇒ left = vw - w - rx   贴下 ⇒ top = vh - h - by
-     *   贴左 ⇒ left = lx            贴上 ⇒ top = ty
-     * 于是缩小窗口时它贴着右边一起收（仍在右上角），放大时自然回到右上角。
-     * 四条边距在拖拽/固定时一次记录齐全，只有被锚定的那一对参与推导。
-     *
-     * @param {{left:number, top:number}} rect 面板当前矩形左上角
-     * @param {{vw:number, vh:number, w:number, h:number}} view
-     * @returns {{ax:'left'|'right', ay:'top'|'bottom', lx:number, ty:number, rx:number, by:number, left:number, top:number}}
-     */
-    function anchorOf(rect, view) {
-      const vw = (view && view.vw) || 0, vh = (view && view.vh) || 0;
-      const w = (view && view.w) || 0, h = (view && view.h) || 0;
-      const left = Number(rect && rect.left) || 0;
-      const top = Number(rect && rect.top) || 0;
-      return {
-        /* 面板中心落在视口哪一半 ⇒ 贴哪条边。
-         * 用"中心过半"而不是"距边多近"：用户把面板放在右上角时中心在上半+右半，判定稳定；
-         * 也天然覆盖"面板比视口还大"的退化情形（此时中心仍在某一半）。 */
-        ax: left + w / 2 <= vw / 2 ? 'left' : 'right',
-        ay: top + h / 2 <= vh / 2 ? 'top' : 'bottom',
-        lx: left,
-        ty: top,
-        rx: Math.max(0, vw - left - w),
-        by: Math.max(0, vh - top - h),
-        left,
-        top,
-      };
-    }
-
-    /** 由锚定信息 + 当前视口推导实际位置；仍过一遍 clampPos 作安全网（绝不跑到视口外）。
-     *  旧格式（只有 {left, top}，无 ax/ay）按"贴左+贴上"处理 —— 与旧行为一致，向后兼容。 */
-    function resolvePos(p, view) {
-      if (!p || typeof p !== 'object') return null;
-      const vw = (view && view.vw) || 0, vh = (view && view.vh) || 0;
-      const w = (view && view.w) || 0, h = (view && view.h) || 0;
-      if (!vw || !vh) {
-        // 拿不到视口尺寸时不猜，用记录里的绝对坐标
-        return Number.isFinite(Number(p.left)) && Number.isFinite(Number(p.top))
-          ? { left: Number(p.left), top: Number(p.top) }
-          : null;
-      }
-      const left = p.ax === 'right' ? vw - w - (Number(p.rx) || 0) : (Number.isFinite(Number(p.lx)) ? Number(p.lx) : Number(p.left) || 0);
-      const top = p.ay === 'bottom' ? vh - h - (Number(p.by) || 0) : (Number.isFinite(Number(p.ty)) ? Number(p.ty) : Number(p.top) || 0);
-      return clampPos({ left, top }, view); // 安全网：贴边距若因面板变大而越界，仍钳回视口内
-    }
-
-    function clampPos(p, view) {
-      if (!p || typeof p !== 'object') return null;
-      const left = Number(p.left), top = Number(p.top);
-      if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
-      const vw = (view && view.vw) || 0, vh = (view && view.vh) || 0;
-      const w = (view && view.w) || 0, h = (view && view.h) || 0;
-      if (!vw || !vh) return { left, top }; // 拿不到视口尺寸时不猜，原样返回
-      return {
-        left: Math.min(Math.max(EDGE, left), Math.max(EDGE, vw - w - EDGE)),
-        top: Math.min(Math.max(EDGE, top), Math.max(EDGE, vh - h - EDGE)),
-      };
-    }
     const fmtTokens = (n) => {
       if (n == null) return '—';
       if (n < 1000) return String(n);
@@ -2315,6 +2211,49 @@ window.__ModuleLoader__.load({
       };
     }
 
+    /* ─────────────── 单一源：job 状态词汇表（执行 3 / 审计 R1）───────────────
+     * 背景：同一份「有哪些 job 状态」此前散在 **4 处**（`DISMISSABLE_STATES` / `StatusDot` 白名单 /
+     * `JOB_GROUPS` / D1 卡片的 `TV_PILL`）——加一个新状态时必漏改其中一处。ZB-03 的分组表就踩过
+     * （那段注释至今写着"绝不能因为新状态没进分组表就让 job 在列表里凭空消失"）。
+     * 现在只维护**这一张表**，其余全部派生。
+     *
+     * 字段：
+     *   group       —— 进程列表分组（grpActive / grpPaused / grpFailed / grpDone）
+     *   dismissable —— 「关闭」（从列表移除 + 落盘 dismissed.json）是否允许；
+     *                  **必须与宿主 `wire.host.mjs` 的 `DISMISSABLE`（= core `SETTLED_STATES`）一致**，
+     *                  由 `test/cross-check.test.mjs` 守门
+     *   dot / pill  —— 状态点 / 卡片胶囊是否使用同名类（未知值一律回落安全类名）
+     *
+     * ⚠️ **表内顺序即渲染次序**（分组内 job 的归类与胶囊集合都按它走），别随手重排。 */
+    const JOB_STATE_META = {
+      queued: { group: 'grpActive', dismissable: false, dot: true, pill: true },
+      running: { group: 'grpActive', dismissable: false, dot: true, pill: true },
+      paused: { group: 'grpPaused', dismissable: true, dot: true, pill: true },
+      failed: { group: 'grpFailed', dismissable: true, dot: true, pill: true },
+      interrupted: { group: 'grpFailed', dismissable: true, dot: true, pill: true },
+      killed: { group: 'grpFailed', dismissable: true, dot: true, pill: true },
+      done: { group: 'grpDone', dismissable: true, dot: true, pill: true },
+    };
+    /** 全部 job 状态（顺序 = 上表字面顺序）。 */
+    const JOB_STATES = Object.keys(JOB_STATE_META);
+    /** 「关闭」允许的状态（= 宿主 DISMISSABLE / core SETTLED_STATES；cross-check 测试钉住）。 */
+    const DISMISSABLE_STATES = JOB_STATES.filter((s) => JOB_STATE_META[s].dismissable);
+    /** 进程列表分组表（**顺序即 tab 顺序**；states 由状态表派生，新增状态自动归位）。 */
+    const JOB_GROUPS = [
+      { key: 'grpActive', states: JOB_STATES.filter((s) => JOB_STATE_META[s].group === 'grpActive') },
+      { key: 'grpPaused', states: JOB_STATES.filter((s) => JOB_STATE_META[s].group === 'grpPaused') },
+      { key: 'grpFailed', states: JOB_STATES.filter((s) => JOB_STATE_META[s].group === 'grpFailed') },
+      { key: 'grpDone', states: JOB_STATES.filter((s) => JOB_STATE_META[s].group === 'grpDone') },
+    ];
+    /** 状态点类名（未知状态回落 `s-idle`，不拼脏类名）。 */
+    const stateDotClass = (state) => (JOB_STATE_META[state]?.dot ? state : 'idle');
+    /** D1 卡片胶囊的类名白名单：job 状态 + 「派发中」这个**伪状态**（不是 job 状态，故不入表）。 */
+    const PREPARING_STATE = 'preparing';
+    const TV_PILL = [...JOB_STATES.filter((s) => JOB_STATE_META[s].pill), PREPARING_STATE];
+
+    /* 暂停**原因** → 文案键（另一根轴：它不是 job 状态，而是 paused 的成因）。
+     * 与 core `AUTO_FALLBACK_REASONS`（quota-exhausted / plan-not-entitled / provider-signing）对齐，
+     * 另含 config-error（不降级、但同样要显示）；cross-check.test.mjs 守门。 */
     const PAUSE_LABEL_KEY = { 'quota-exhausted': 'pQuota', 'plan-not-entitled': 'pEntitled', 'provider-signing': 'pSigning', 'config-error': 'pConfig' };
     const pauseLabel = (r) => t(PAUSE_LABEL_KEY[r] ?? 'pUnknown');
     /* ZB-29e（用户要求）：思考强度档位**中文显示** —— 值与传输一律用原始字符串（disabled/enabled/
@@ -2354,14 +2293,13 @@ window.__ModuleLoader__.load({
       const rl = job.spec ? job.spec.reasoningLevel : null;
       return rl && rl !== 'agent' ? rl : null;
     };
-    /* ZB-02：「关闭」（= 从列表移除 + 落盘 dismissed.json）允许的状态集合，
-     * 与宿主 wire.host.mjs 的 DISMISSABLE 逐一对应（paused / 各终态）。
+    /* ZB-02：「关闭」（= 从列表移除 + 落盘 dismissed.json）允许的状态集合。
+     * ⚠️ 已收敛进上面的 `JOB_STATE_META`（`dismissable` 列）—— 这里不再有第二份字面量。
      * 原先 UI 只在 paused 时渲染关闭按钮 → done/failed/killed/interrupted 的 job
      * 既没有终止按钮（非 active）也没有关闭按钮，列表里清不掉。 */
-    const DISMISSABLE_STATES = ['paused', 'done', 'failed', 'killed', 'interrupted'];
 
     function StatusDot({ state }) {
-      const cls = ['queued', 'running', 'done', 'failed', 'killed', 'interrupted', 'paused'].includes(state) ? state : 'idle';
+      const cls = stateDotClass(state); // 单一源：JOB_STATE_META.dot（未知状态回落 idle）
       return h('span', { className: `dsp-dot s-${cls}`, title: state, 'aria-label': state });
     }
 
@@ -2393,10 +2331,6 @@ window.__ModuleLoader__.load({
           stroke: 'currentColor',
         }));
     }
-    function IconMinus() {
-      return h('svg', { width: 12, height: 12, viewBox: '0 0 12 12', 'aria-hidden': true },
-        h('path', { d: 'M2.5 6 H9.5', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.5, 'stroke-linecap': 'round' }));
-    }
     function IconKill() {
       return h('svg', { width: 11, height: 11, viewBox: '0 0 12 12', 'aria-hidden': true },
         h('path', { d: 'M3 3 L9 9 M9 3 L3 9', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.5, 'stroke-linecap': 'round' }));
@@ -2414,22 +2348,6 @@ window.__ModuleLoader__.load({
         h('rect', { x: 1.5, y: 1.5, width: 9, height: 7, rx: 1.5, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.5 }),
         h('path', { d: 'M4 8.5 L4 11 L6.8 8.5', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.5, 'stroke-linejoin': 'round' }));
     }
-    /* ZB-11：右下角缩放三角标（贴角实心三角，只用 currentColor + opacity，无字面色值）。 */
-    function IconResizeMark() {
-      return h('svg', { width: 12, height: 12, viewBox: '0 0 12 12', 'aria-hidden': true },
-        h('path', { d: 'M11.5 4.2 L11.5 11.5 L4.2 11.5 Z', fill: 'currentColor', opacity: '0.55' }));
-    }
-    /* ZB-08：固定/取消固定（图钉）。on=true 用实心填充表示"已钉住"，on=false 空心。
-     * 填充值只用 currentColor / none 两个关键字，不引入字面色值。 */
-    function IconPin({ on }) {
-      return h('svg', { width: 11, height: 11, viewBox: '0 0 12 12', 'aria-hidden': true },
-        h('path', {
-          d: 'M4.2 1.2 H7.8 L7.1 4 L8.9 5.8 V6.6 H3.1 V5.8 L4.9 4 Z',
-          fill: on ? 'currentColor' : 'none', stroke: 'currentColor', 'stroke-width': 1.2, 'stroke-linejoin': 'round',
-        }),
-        h('path', { d: 'M6 6.6 V10.6', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.2, 'stroke-linecap': 'round' }));
-    }
-
     /* Z12：派发总开关徽标（标题栏）。sw 来自快照 snapshot.switch（host 读真值文件）；
      * live=可点按钮（点击 switchSet 翻转，成功后 1s 轮询带回新快照）；
      * 非 live=只读（浏览器读不到宿主文件，诚实提示走终端 CLI），状态未知时如实显示「未知」。 */
@@ -2558,11 +2476,6 @@ window.__ModuleLoader__.load({
     };
 
     const FOLD_ENGINES = KNOWN_ENGINES; // 三引擎**全部**折叠（用户要求：通道只列引擎）
-    /** ZCode 折叠条目里的"免费额度"伪模型项（选中它会路由到专用通道 id）。 */
-    /** ZCode 折叠条目里，"模型项"就是**路由 id**（`plan` / `account:bigmodel-start-plan`）——
-     *  这样 Plan 与免费额度不会因"提供同样的模型名"而互相覆盖（真机反馈"ZCode 怎么剩 1 个？"）。
-     *  ⚠️ 这个常量仅保留给"旧存值兼容"路径使用，不再是下拉里的伪项。 */
-    const ZC_FREE_OPTION = '__zcode_free__';
     const foldChannels = (list) => {
       const out = [];
       for (const c of list) {
@@ -3974,16 +3887,10 @@ window.__ModuleLoader__.load({
     }
 
     /* ─────────────── ZB-03：进程分组（用户要求「进行中 / 已完成 / 异常」分类显示）───────────────
-     * 分组表是**唯一真值**（要调分组只改这张表）。状态名取自 core 的 job.state。
-     * 两条纪律：
+     * ⚠️ 分组表**已上移**到 `JOB_STATE_META` 旁边（单一源，由 `group` 列派生）——这里不再有第二份字面量。
+     * 两条纪律（保持）：
      *  1) 空分组不渲染 —— 所以分组可以取细，不会占版面；
      *  2) **未归属状态兜底**（grpOther）—— 绝不能因为「新状态没进分组表」就让 job 在列表里凭空消失。 */
-    const JOB_GROUPS = [
-      { key: 'grpActive', states: ['queued', 'running'] },              // 进行中（含排队）
-      { key: 'grpPaused', states: ['paused'] },                        // 需处理：暂停等你决定续跑/交接
-      { key: 'grpFailed', states: ['failed', 'interrupted', 'killed'] }, // 异常：非成功终态
-      { key: 'grpDone', states: ['done'] },                            // 已完成
-    ];
 
     function JobList({ snapshot, onKill, onDismiss, onTail, onRetry, onContinue, channels, refreshKey, offline }) {
       /* ZB-07：分组内展开状态（按分组 key）。会话内记忆即可 —— 刷新后回到「只看最近 N 条」，
@@ -4804,7 +4711,11 @@ window.__ModuleLoader__.load({
           state: typeof job.state === 'string' && job.state ? job.state : null,
           tag: job.tag ?? spec.tag ?? null,
           kind: spec.kind ?? null,
-          engine: job.engine ?? spec.engine ?? null,
+          /* ⚠️ 引擎判据必须走**面板同一份** `jobEngineOf`（870-880）：`action=list` 的 **brief 形状
+           * 没有 `spec`**（宿主 briefJob() 已剔除），只读 `job.engine ?? spec.engine` 会在
+           * engine 字段缺失的旧记录上什么都显示不出来，而面板能由 provider 形态推断 ⇒
+           * 同一个 job 在卡片与面板里显示不一致（审计 R2a / P0）。 */
+          engine: jobEngineOf(job),
           provider: job.provider ?? spec.provider ?? null,
           model: job.model ?? spec.model ?? null,
           cwd: spec.cwd ?? null,
@@ -4830,10 +4741,10 @@ window.__ModuleLoader__.load({
         const act = typeof a.action === 'string' && a.action ? a.action : (typeof a.kind === 'string' ? a.kind : '');
         if (act) rows.push({ k: t('tvAction'), v: String(act) });
         if (job) {
-          /* 引擎与通道常常是同一个词（OpenCode/Qoder 的 provider 就是裸引擎名）⇒ 去重后再拼，
-           * 免得显示成「opencode / opencode」。 */
-          const eng = [...new Set([job.engine, job.provider].filter(Boolean))].join(' / ');
-          if (eng || job.model) rows.push({ k: t('tvEngineCh'), v: [eng, job.model].filter(Boolean).join(' · ') });
+          /* 引擎 / 通道 / 模型**去重后**拼一行：OpenCode、Qoder 的 provider 就是 `opencode/<model>`
+           * 形态（与模型同名），不去重会显示成「opencode · opencode/x · opencode/x」。 */
+          const parts = [...new Set([job.engine, job.provider, job.model].filter(Boolean).map(String))];
+          if (parts.length) rows.push({ k: t('tvEngineCh'), v: parts.join(' · ') });
           if (job.cwd) rows.push({ k: t('cwd'), v: String(job.cwd) });
           if (job.timeoutMin != null) rows.push({ k: t('timeout'), v: String(job.timeoutMin) });
           if (job.lock) rows.push({ k: t('repoLock'), v: String(job.lock) });
@@ -4978,8 +4889,8 @@ window.__ModuleLoader__.load({
         toggle();
       } catch { /* 键盘交互异常不影响渲染 */ }
     };
-    /** 状态胶囊的**类名白名单**（未知状态不拼进 class，避免脏类名/样式注入）。 */
-    const TV_PILL = ['queued', 'running', 'done', 'failed', 'killed', 'paused', 'interrupted', 'preparing'];
+    /** 状态胶囊的**类名白名单**（未知状态不拼进 class，避免脏类名/样式注入）。
+     *  ⚠️ `TV_PILL` 已由上面的 `JOB_STATE_META` 派生（单一源）——这里不再有第二份字面量。 */
     const tvPillClass = (s) => (TV_PILL.includes(String(s)) ? String(s) : 'queued');
     /** 胶囊的悬停说明：有本地化词条的（paused）给中文，其余用协议里的原始状态词。 */
     const tvPillTitle = (s) => (String(s) === 'paused' ? t('paused') : String(s));
