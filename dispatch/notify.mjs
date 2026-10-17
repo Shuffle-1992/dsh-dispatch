@@ -31,6 +31,10 @@ import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 /* ZB-25：落地判据取自 core（状态机所有者），不在本文件重新写一份集合。 */
 import { SETTLED_STATES } from './core/dispatch-core.mjs';
+/* ZB-63（P0-2）：引擎清单的**唯一权威**是协议模块（core 与各执行器同源）。
+ * 原先落地通知的摘要硬写 `zcode job …` ⇒ OpenCode / Qoder 的任务会被贴上**错引擎标签**（用户可见）。
+ * 这里 import 引擎白名单与归一，绝不本地再抄一份（否则第四个引擎加入时又漏）。 */
+import { ENGINES } from '../collab-kit/run-line-protocol.mjs';
 
 /** 通知消息的 producer 标识。会话格式 v4 只要求「非空字符串且不等于 'plugin'」，未知 kind 是合法且被保留的归属（dsh-session-format-v3-to-v4/lib/index.js:124-137）。 */
 export const SOURCE_KIND = 'dispatch';
@@ -84,6 +88,27 @@ function specOf(job) {
 }
 
 /**
+ * 落地通知里的**引擎标签**（ZB-63 / 审计 P0-2）。
+ *
+ * 判据顺序与 core/客户端一致：`job.engine`（core 落库）→ `spec.engine`。
+ * 只认协议层登记的引擎名（`ENGINES`）；取不到或不认识 ⇒ 返回 `''`（**不冒充任何引擎**）。
+ *
+ * ⚠️ 真机症状（用户可见）：摘要行原先硬写 `zcode job …`，于是 OpenCode / Qoder 的任务落地后
+ * 通知卡片上写着「zcode job」—— 用户以为派的是 ZCode。**旧快照**（升级前落盘的 job 没有
+ * `job.engine`，但 spec 里可能有）也要能认出，故两个来源都看；真认不出就中性处理，绝不猜。
+ *
+ * @param {object} job dispatcher 的 job（serialize 后的纯 JSON）
+ * @returns {string} 'zcode' | 'opencode' | 'qoder' | ''（未知）
+ */
+export function engineLabelOf(job) {
+  for (const cand of [job?.engine, specOf(job).engine]) {
+    const s = typeof cand === 'string' ? cand.trim().toLowerCase() : '';
+    if (ENGINES.includes(s)) return s;
+  }
+  return '';
+}
+
+/**
  * 生成模型可见的落地通知正文与折叠摘要。
  * 正文要求：一眼看出「哪个 job、什么结局、下一步用什么动作拿结果」。
  * @param {object} job dispatcher 的 job（serialize 后的纯 JSON）
@@ -93,6 +118,8 @@ export function buildSettleNotice(job) {
   const id = String(job?.id ?? 'unknown');
   const spec = specOf(job);
   const kind = typeof spec.kind === 'string' && spec.kind ? spec.kind : 'prompt';
+  /* ZB-63（P0-2）：引擎标签按 job 的真实引擎写；未知引擎用**中性文案**（`job …`），绝不冒充 zcode。 */
+  const engine = engineLabelOf(job);
   const tag = typeof spec.tag === 'string' && spec.tag ? `, tag=${spec.tag}` : '';
   const exit = job?.exitCode == null ? '' : `, exit=${job.exitCode}`;
   const paused = job?.state === 'paused';
@@ -103,10 +130,94 @@ export function buildSettleNotice(job) {
     : `派发任务 ${id} 已落地。`;
   const text = [
     `[dispatch] ${head}`,
-    `（kind=${kind}${tag}${exit}${pause}）[status: ${status}]`,
+    `（kind=${kind}${engine ? `, engine=${engine}` : ''}${tag}${exit}${pause}）[status: ${status}]`,
     `用 dispatch action=tail（id=${id}, n=30）读最近输出，或 action=list 看全部 job。`,
   ].join('\n');
-  return { text, summary: `zcode job ${id} ${status}${tag}` };
+  return { text, summary: `${engine ? `${engine} ` : ''}job ${id} ${status}${tag}` };
+}
+
+/* ───────── ZB-63（M6）：工具动作 → 唤醒账本的**唯一决策表** ─────────
+ * 原先 index.js（工具层）与 notify.mjs（投递层）各维护一份状态与顺序知识：index 记「谁派发的」
+ * 与「kill 必须先登记（pre-hook）」，notify 管 owners/notified/suppressed 与投递。现在决策表
+ * 与顺序都在这里（账本唯一所有者），index 只做两次转发。
+ *
+ * ⚠️ 纪律：`noteOwnerAction` 仍从 index.js 导出、签名不变（notify.test.mjs / wake-integration
+ * 钉住），它现在只是这里的**薄转发**。 */
+
+/** 动作里提到的 job id（`id` 优先，兼容 `jobId`）。 */
+function jobIdOf(params) {
+  if (typeof params?.id === 'string' && params.id) return params.id;
+  if (typeof params?.jobId === 'string' && params.jobId) return params.jobId;
+  return '';
+}
+
+/** kill 的目标 id（只有 kill 才有"必须先登记抑制"的顺序要求）。 */
+function killTargetOf(params) {
+  return params?.action === 'kill' ? jobIdOf(params) : '';
+}
+
+/**
+ * 一次工具动作 ⇒ 一次账本更新（**纯函数**，无副作用）。
+ *
+ * 语义与 `dsh-tool-jobs` 的 killedByModel / awaited 同款：
+ *   · dispatch / retry 成功 ⇒ `track`：登记 job→发起会话（`exec.agent.id`），落地时叫醒它；
+ *   · kill 成功             ⇒ `kill`：模型自己终止的 job 不必再叫醒它；
+ *   · kill 失败             ⇒ `unsuppress`：回滚预登记（否则真正该唤醒的 job 被误抑制）；
+ *   · wait 到落地           ⇒ `awaited`：结果已由本次工具调用返回；
+ *   · wait 超时             ⇒ 不抑制（job 仍在跑，落地时应当唤醒）；
+ *   · 其它动作 / 失败       ⇒ `{op:null}`（什么都不动）。
+ *
+ * @param {object} params 工具入参（含 action / id）
+ * @param {object} result handleAction 的返回信封
+ * @param {object} exec 官方工具执行上下文（exec.agent.id = 发起会话）
+ * @returns {{op: 'track'|'kill'|'awaited'|'unsuppress'|null, jobId?: string, ownerId?: string, id?: string}}
+ */
+export function decodeOwnerAction(params, result, exec) {
+  const action = params?.action;
+  if ((action === 'dispatch' || action === 'retry') && result?.ok === true && typeof result.job?.id === 'string') {
+    /* 无会话（非 agent 调用）时登记空 owner —— notifier 侧按「无 owner 不唤醒」处理（既有语义）。 */
+    return { op: 'track', jobId: result.job.id, ownerId: typeof exec?.agent?.id === 'string' ? exec.agent.id : '' };
+  }
+  /* ⚠️ kill 与 wait 都是"抑制"，但必须落到**不同**的簿记函数：桩/唤醒器上它们各自计数与语义
+   * （killedByModel / awaited）不同，合并会让 notify.test.mjs 钉住的调用面漂移。 */
+  if (action === 'kill') {
+    const id = killTargetOf(params);
+    if (!id) return { op: null };
+    return result?.ok === true ? { op: 'kill', id } : { op: 'unsuppress', id };
+  }
+  if (action === 'wait' && result?.ok === true && result.timedOut === false) {
+    const id = jobIdOf(params);
+    if (id) return { op: 'awaited', id };
+  }
+  return { op: null };
+}
+
+/**
+ * 把 decodeOwnerAction 的结果落进一个「账本接收方」——真唤醒器，或测试桩。
+ * 桩只需暴露 `track` / `markKilled` / `markAwaited`（`unmarkSuppressed` 可缺：缺了就跳过回滚，
+ * 不抛）。这样 index 的 `noteOwnerAction` 能保持**签名与行为不变**地转发，同时决策表仍只有一份。
+ *
+ * @returns {boolean} 是否真的落了一次账本更新
+ */
+export function applyOwnerAction(notifier, op) {
+  if (!notifier || !op || !op.op) return false;
+  if (op.op === 'track') {
+    if (typeof notifier.track !== 'function') return false;
+    notifier.track(op.jobId, op.ownerId);
+    return true;
+  }
+  if (op.op === 'kill' || op.op === 'awaited') {
+    const fn = op.op === 'kill' ? notifier.markKilled : notifier.markAwaited;
+    if (typeof fn !== 'function') return false;
+    fn.call(notifier, op.id);
+    return true;
+  }
+  if (op.op === 'unsuppress') {
+    if (typeof notifier.unmarkSuppressed !== 'function') return false;
+    notifier.unmarkSuppressed(op.id);
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -287,46 +398,76 @@ export function createSettleNotifier({ dispatcher, agents, log, config = {}, ctx
     return true;
   }
 
+  /* ───────── ZB-63（M6）：账本动作的**实现**（决策表在模块级的 decodeOwnerAction）───────── */
+
+  /** 登记 job 的发起会话。登记后**立刻**做一次落地判定：dispatch 返回通常还是 queued，
+   *  但 job 可能在「返回」与「登记」之间就已落地（排队被 kill / 直接 paused），事件已错过。 */
+  function track(jobId, agentId) {
+    if (disposed) return false;
+    if (typeof jobId !== 'string' || !jobId) return false;
+    if (typeof agentId !== 'string' || !agentId) return false;
+    owners.set(jobId, agentId);
+    counter.registered += 1;
+    check(jobId);
+    return true;
+  }
+
+  /** 模型自己 kill 的 job：不发通知（否则等于自己叫醒自己）。
+   *  ⚠️ **必须在调用 dispatcher.kill 之前登记**（ZB-25，审计 A#1 实测）：core 的 `kill()` 对
+   *  queued job 会**就地置 killed 并同步 emit** 'job-updated'，订阅者在那一刻就投递通知 ——
+   *  若等工具拿到返回值再登记，排队中的 job 会先被唤醒一次。顺序错了不报错、只多一条
+   *  "自己叫醒自己"的通知，故工具层改走 `beforeAction()`（账本所有者统一保证顺序）。 */
+  function markKilled(jobId) {
+    if (disposed || typeof jobId !== 'string' || !jobId) return;
+    remember(suppressed, jobId);
+    counter.suppressed += 1;
+  }
+
+  /** 模型自己 wait 到落地的 job：结果已拿到，不发通知。 */
+  function markAwaited(jobId) {
+    if (disposed || typeof jobId !== 'string' || !jobId) return;
+    remember(suppressed, jobId);
+    counter.suppressed += 1;
+  }
+
+  /** kill 未成功（如 job 不存在）时撤销预登记，避免误抑制真正该唤醒的 job。 */
+  function unmarkSuppressed(jobId) {
+    if (typeof jobId !== 'string' || !jobId) return;
+    suppressed.delete(jobId);
+  }
+
+  /** 内部账本接收方：四个簿记函数装配成 `applyOwnerAction` 认识的面 —— 真实路径与
+   *  index 的桩转发走**同一段**应用逻辑（否则"转发路径/真实路径"又会各写一份判定）。 */
+  const ledgerFace = { track, markKilled, markAwaited, unmarkSuppressed };
+
+  /** 动作**前置**簿记（ZB-25 的顺序纪律收进账本所有者）：kill 必须先登记抑制，再调用
+   *  dispatcher.kill。返回预登记的 job id（'' = 本次动作无需前置簿记），供排障与测试读取。 */
+  function beforeAction(params) {
+    if (disposed) return '';
+    const id = killTargetOf(params);
+    if (!id) return '';
+    markKilled(id);
+    return id;
+  }
+
+  /** 动作**后置**簿记：把这次工具动作翻译成账本更新（决策表见 decodeOwnerAction）。
+   *  kill 失败的回滚也在这里（预登记过的抑制必须撤掉，否则真正该唤醒的 job 被静默吞掉）。 */
+  function noteAction(params, result, exec) {
+    return applyOwnerAction(ledgerFace, decodeOwnerAction(params, result, exec));
+  }
+
   return {
-    /**
-     * 登记 job 的发起会话。
-     * 登记后**立刻**做一次落地判定：dispatch 返回通常还是 queued，但 job 可能在
-     * 「返回」与「登记」之间就已落地（排队被 kill / 直接 paused），事件已错过。
-     * @returns {boolean} 是否登记成功（无会话 id 时返回 false，不唤醒）
-     */
-    track(jobId, agentId) {
-      if (disposed) return false;
-      if (typeof jobId !== 'string' || !jobId) return false;
-      if (typeof agentId !== 'string' || !agentId) return false;
-      owners.set(jobId, agentId);
-      counter.registered += 1;
-      check(jobId);
-      return true;
-    },
-    /**
-     * 模型自己 kill 的 job：不发通知（否则等于自己叫醒自己）。
-     *
-     * ⚠️ **必须在调用 dispatcher.kill 之前登记**（ZB-25，审计 A#1 实测）：
-     * core 的 `kill()` 对 queued job 会**就地置 killed 并同步 emit** 'job-updated'，
-     * 订阅者在那一刻就投递通知 —— 若等工具拿到返回值再登记，排队中的 job 会先被唤醒一次。
-     * 顺序错了不会有任何报错，只会多一条"自己叫醒自己"的通知，所以工具层用 pre-hook 保证。
-     */
-    markKilled(jobId) {
-      if (disposed || typeof jobId !== 'string' || !jobId) return;
-      remember(suppressed, jobId);
-      counter.suppressed += 1;
-    },
-    /** 模型自己 wait 到落地的 job：结果已拿到，不发通知。 */
-    markAwaited(jobId) {
-      if (disposed || typeof jobId !== 'string' || !jobId) return;
-      remember(suppressed, jobId);
-      counter.suppressed += 1;
-    },
-    /** kill 未成功（如 job 不存在）时撤销预登记，避免误抑制真正该唤醒的 job。 */
-    unmarkSuppressed(jobId) {
-      if (typeof jobId !== 'string' || !jobId) return;
-      suppressed.delete(jobId);
-    },
+    /** 登记 job 的发起会话（返回是否登记成功；无会话 id 时 false，不唤醒）。 */
+    track,
+    /** 模型自己 kill 的 job ⇒ 抑制通知（但现在请走 beforeAction，顺序由账本所有者保证）。 */
+    markKilled,
+    /** 模型自己 wait 到落地的 job ⇒ 抑制通知。 */
+    markAwaited,
+    /** kill 未成功时撤销预登记。 */
+    unmarkSuppressed,
+    /** ZB-63：动作前置/后置簿记（index 的工具 execute 只留这两次转发）。 */
+    beforeAction,
+    noteAction,
     /** 诊断快照（测试、落盘、激活信标共用同一份）。 */
     stats() {
       return snapshotStats();
