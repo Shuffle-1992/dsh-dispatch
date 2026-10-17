@@ -244,6 +244,47 @@ window.__ModuleLoader__.load({
       '.dsp-job:hover{border-color:' + T.text3 + ';}',
       '.dsp-job-head{cursor:pointer;}',
       '.dsp-planline{margin-top:4px;font-size:11px;line-height:16px;color:' + T.text3 + ';white-space:normal;overflow-wrap:anywhere;}',
+      /* ── ZB-58（用户：「右侧的下拉框和排序按钮，还是没有完全对齐。…布局再细调整下」）──
+       * 用户上一轮仍看到不齐，真因**不是**列宽，而是**盒子模型不一致**：↑↓ 按钮此前只带
+       * `.dsp-btn2` 内联 24×24 —— 按钮默认 `box-sizing:content-box`（除非被 `.dsp-menu *` 命中），
+       * 24px 是**内容盒**，加左右各 1px 边框后实际占 26px；下拉是 `border-box` 的 24px。
+       * 两者高度差 2px、基线也差 1px，内联样式怎么写都对不齐（DOM 桩不跑真实样式表，所以看不出来）。
+       * 本组规则是唯一权威：下拉与按钮 **同 22px 高 / 同 border-box / 同 1px 边框 / 同行高 22px**，
+       * 列宽也全在类里（序号 20 / 档位 96→84 可缩 / 排序 56→50 可缩 / 模型 flex），
+       * 列头用**同一批列宽类** ⇒ 头与行左边缘严格同线；窄容器只缩列不换行。 */
+      '.dsp-seq-row{display:flex;align-items:center;gap:6px;min-height:26px;padding:1px 0;border-bottom:1px solid ' + T.border + ';min-width:0;}',
+      '.dsp-seq-row:last-child{border-bottom:0;}',
+      '.dsp-seq-row:hover{background:' + T.hover + ';}',
+      '.dsp-seq-idx{flex:0 0 20px;text-align:right;font-size:11px;line-height:22px;color:' + T.text3 + ';}',
+      /* ⚠️ 模型列必须 `flex:1 1 0`（basis **0**，不是 auto）—— 这是列头/行不漂移的关键：
+       * basis:auto 时，列头「模型」二字的基线宽 ≈ 24px，而行里模型 id 有 ~220px，
+       * 同一个 `flex-shrink:1` 在两处的**缩放系数 = shrink × base** 完全不同 ⇒ 窄容器下
+       * 表头几乎不缩、行里的下拉/按钮缩了 18px，左右边缘就对不上了（ZB-58 真机实测 dx=18px）。
+       * basis 0 后两行的四列基准完全相同（20 / 0 / 96 / 56），任何宽度下收缩量必然一致。 */
+      '.dsp-seq-name{flex:1 1 0;min-width:0;font-family:' + T.mono + ';font-size:12px;line-height:22px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+      '.dsp-seq-lv{flex:0 1 96px;min-width:84px;}',
+      /* 下拉：与 .dsp-seq-move **同一盒子模型**（22px / border-box / 1px 边框）—— 对齐的硬保证。 */
+      '.dsp-seq-row .dsp-select{height:22px;box-sizing:border-box;border-width:1px;padding:0 6px;font-size:11px;line-height:20px;border-radius:4px;}',
+      '.dsp-seq-sort{flex:0 1 56px;min-width:50px;display:flex;align-items:center;justify-content:flex-start;gap:4px;}',
+      '.dsp-seq-sort-col{flex:0 1 56px;min-width:50px;}',
+      '.dsp-seq-move{flex:0 0 22px;width:22px;height:22px;box-sizing:border-box;border:1px solid ' + T.border + ';padding:0;margin:0;display:inline-flex;align-items:center;justify-content:center;background:transparent;color:' + T.text2 + ';font-size:11px;line-height:1;border-radius:4px;cursor:pointer;transition:background-color .15s ease,color .15s ease,border-color .15s ease;}',
+      '.dsp-seq-move:hover:not(:disabled){background:' + T.hover + ';color:' + T.text + ';border-color:' + T.text3 + ';}',
+      '.dsp-seq-move:disabled{opacity:.45;cursor:default;}',
+      /* 列头：列宽类与行**完全共用**（不另写宽度）⇒ 天然同线；文字左对齐（不居中）。
+       * ⚠️ 这条 `> *` 必须排在上面列宽类之后（同特异性、后写者胜）：只管排版文字，
+       * 不改 flex 宽度，所以列宽仍由 .dsp-seq-idx/.dsp-seq-lv/.dsp-seq-sort-col 决定。 */
+      '.dsp-seq-head{display:flex;align-items:center;gap:6px;padding:0 0 3px;border-bottom:1px solid ' + T.border + ';min-width:0;}',
+      '.dsp-seq-head > *{font-family:inherit;font-size:11px;line-height:16px;color:' + T.text3 + ';overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+      /* ZB-58：逐模型「可用」开关列。列宽类**由列头与行共用**（与其它列同一套口径 ⇒ 严格同线）；
+       * 开关沿用 `dsp-switch dsp-toggle` + `dsp-dot` 的视觉语言（点 = 可用，灰点 = 已关闭）。 */
+      '.dsp-seq-sw-col{flex:0 1 34px;min-width:26px;}',
+      'button.dsp-seq-sw{flex:0 1 34px;min-width:26px;height:22px;box-sizing:border-box;padding:0 4px;gap:4px;border-radius:999px;font-size:11px;line-height:20px;color:' + T.text2 + ';}',
+      'button.dsp-seq-sw[aria-pressed="false"]{opacity:.72;color:' + T.text3 + ';}',
+      'button.dsp-seq-sw:hover:not(:disabled){background:' + T.hover + ';color:' + T.text + ';}',
+      'button.dsp-seq-sw:disabled{opacity:.45;cursor:default;}',
+      /* 已关闭行：序号/模型名降不透明度（开关仍可点回 ⇒ 不给整行 disabled）。 */
+      '.dsp-seq-row.dsp-seq-row-off .dsp-seq-idx,.dsp-seq-row.dsp-seq-row-off .dsp-seq-name{opacity:.55;}',
+      '.dsp-seq-off{color:' + T.text3 + ';font-family:inherit;}',
       /* ── ZB-27：会话标题行入口 + 悬浮弹窗（照抄 DSH 自带入口的 visual language）──
        * 触发样式逐项对齐 **dsh-client-ui-subagent 的 CatalogDropdown 触发按钮**（用户点名参考它），
        * 与 dsh-client-ui-jobs 的 job-list 同值：
@@ -522,6 +563,10 @@ window.__ModuleLoader__.load({
         seqUseNone: '当前未生效：把通道的「模型」选成「顺序派发」后才按此列表尝试',
         /* ZB-55：加载态 / 保存反馈 / 表头列名（卡片与浮窗共用） */
         seqLoading: '正在加载通道与模型…', seqSaving: '保存中…', seqSortCol: '排序',
+        /* ZB-58（用户要求「每个模型一个单独开关」）：可用列 + 已关闭标记 + 区块头可用计数。
+         * `modelAvailCount` 含 `{n}` / `{total}` 占位符，由 `tFmt()` 填充（t() 本身只做静态查表）。
+         * ⚠️ 与 locale/zh.json、locale/en.json **逐键逐值一致**（single-source ⑤ 守门）。 */
+        modelSwitchCol: '可用', modelDisabledTag: '已关闭', modelAvailCount: '可用 {n}/{total}',
         paused: '已暂停', pQuota: '额度耗尽', pEntitled: '未开通', pSigning: '需签名', pConfig: '配置错误', pUnknown: '未知原因',
         lockWait: '排队等待', timedOut: '超时终止',
         timedOutRunner: 'runner 超时（exit 124，--timeout-min 到点）', timedOutWatchdog: '看门狗强制终止（timeoutMin+120s 宽限后未退出）',
@@ -631,6 +676,8 @@ window.__ModuleLoader__.load({
         seqUseNone: 'Not active yet: pick "Sequential dispatch" in Model to try this list',
         /* ZB-55: loading state / saving feedback / table column labels (shared by card + panel). */
         seqLoading: 'Loading channels and models…', seqSaving: 'Saving…', seqSortCol: 'Order',
+        /* ZB-58: per-model enable switch column + "off" tag + available counter in the block header. */
+        modelSwitchCol: 'Available', modelDisabledTag: 'Off', modelAvailCount: '{n}/{total} available',
         paused: 'Paused', pQuota: 'Quota exhausted', pEntitled: 'Not entitled', pSigning: 'Signing required', pConfig: 'Config error', pUnknown: 'Unknown',
         lockWait: 'Queue wait', timedOut: 'Timed out',
         timedOutRunner: 'runner timeout (exit 124, --timeout-min elapsed)', timedOutWatchdog: 'watchdog kill (still running after timeoutMin+120s grace)',
@@ -655,6 +702,9 @@ window.__ModuleLoader__.load({
       return String(s).toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en';
     })();
     const t = (k) => STRINGS[LANG][k] ?? STRINGS.zh[k] ?? k;
+    /** ZB-58：带占位符的文案（`{n}` / `{total}` …）—— `t()` 只做静态查表，这里补一层极简替换。
+     *  占位符缺失时保留原文（`{n}` 原样可见 = 可读的失败信号，不静默变成空串）。 */
+    const tFmt = (k, vars) => String(t(k)).replace(/\{(\w+)\}/g, (m0, name) => (vars && vars[name] != null ? String(vars[name]) : m0));
 
     /* ─────────────── 引擎归一（**模块级唯一权威**）───────────────
      * ZB-51：原先到处写 `c.engine === 'opencode' ? 'opencode' : 'zcode'` —— 二元判断，
@@ -953,6 +1003,11 @@ window.__ModuleLoader__.load({
        * `test/single-source.test.mjs` ③ 守门（历史上曾漏 dismiss 造成三表漂移）。 */
       ['sequentialGet', [], []],
       ['sequentialSet', ['patch'], ['patch']],
+      /* ZB-58：逐模型开关（关掉的模型不出现在面板选项里、也不参与顺序派发）。
+       * host 面 `modelSwitchesGet/modelSwitchSet` 与 `wire.client.mjs` 描述符已由 Lead 落地，
+       * 本内联表必须同步（`single-source.test.mjs` ③ 钉死三表相等，缺失即 17 vs 19 报错）。 */
+      ['modelSwitchesGet', [], []],
+      ['modelSwitchSet', ['patch'], ['patch']],
     ];
     const remoteCodec = (method, field) => ({
       mode: 'strict',
@@ -1048,6 +1103,25 @@ window.__ModuleLoader__.load({
       };
     };
 
+    /* ─────────────── ZB-58：逐模型开关的**形状归一** ───────────────
+     * core 的 `getModelSwitches()` / `setModelSwitch(patch)` 契约：
+     *   `{ disabled: [路由id...], userDisabledCount }` —— **禁用清单**（不是启用清单，上游新模型默认可用）。
+     * 远端 face / ext / demo 三条路径共用本函数，保证面板拿到的形状一致；
+     * `disabled` 一律归一成去重、去空、字符串数组（顺序保留，便于稳定渲染与断言）。
+     * ⚠️ 与 `normSeqShape` 同理必须是模块级、定义在所有使用点之前（client-tdz 守门）。 */
+    const normModelSwitchShape = (v) => {
+      const src = v && typeof v === 'object' ? v : {};
+      const disabled = [];
+      const seen = new Set();
+      for (const raw of Array.isArray(src.disabled) ? src.disabled : []) {
+        const id = String(raw == null ? '' : raw).trim();
+        if (!id || seen.has(id)) continue; // 空项/重复项丢弃（不静默造出假路由）
+        seen.add(id);
+        disabled.push(id);
+      }
+      return { disabled, userDisabledCount: disabled.length };
+    };
+
     /** 远端数据源 wire（conn='live'，真数据）：1s 轮询快照 + $on 抢答，动作与 face 同形。 */
     function remoteWire(ctx, remote) {
       const subs = new Set();
@@ -1120,6 +1194,10 @@ window.__ModuleLoader__.load({
          * patch 只带 `{enabled}` 或 `{order}` 之一 —— host 侧按缺键保持另一项不动。 */
         sequentialGet: () => remote.call('sequentialGet'),
         sequentialSet: (patch) => remote.call('sequentialSet', patch == null ? null : patch),
+        /* ZB-58：逐模型开关（host 面 `modelSwitchesGet` / `modelSwitchSet(patch)`）。
+         * 读 = 禁用清单 `{disabled, userDisabledCount}`；写 patch = `{route, enabled}` 或 `{disabled:[...]}`。 */
+        modelSwitchesGet: () => remote.call('modelSwitchesGet'),
+        modelSwitchSet: (patch) => remote.call('modelSwitchSet', patch == null ? null : patch),
         // Z12：派发总开关（switchGet 读状态；switchSet 走宿主唯一写入口）
         switchGet: () => remote.call('switchGet'),
         switchSet: (next) => remote.call('switchSet', next && typeof next === 'object' ? next : {}),
@@ -1274,6 +1352,22 @@ window.__ModuleLoader__.load({
           }
         },
         sequentialSet: (patch) => sequentialSetImpl(patch),
+        /* ZB-58：逐模型开关读/写（面板「可用」开关 + 「模型」下拉过滤的数据源）。
+         * 读/写都归一到 `normModelSwitchShape`（`{disabled,userDisabledCount}`），失败折 `{ok:false,error}`。 */
+        async modelSwitchesGet() {
+          try {
+            return { ok: true, ...normModelSwitchShape(await face.modelSwitchesGet()) };
+          } catch (e) {
+            return errOf(e);
+          }
+        },
+        async modelSwitchSet(patch) {
+          try {
+            return { ok: true, ...normModelSwitchShape(await face.modelSwitchSet(patch && typeof patch === 'object' ? patch : {})) };
+          } catch (e) {
+            return errOf(e);
+          }
+        },
         // 与宿主 face 同名对齐（转发旧实现，语义一致）
         setChannel: (c) => channelSetImpl(c),
         setFallbackChain: (l) => fallbackSetImpl(l),
@@ -1368,6 +1462,10 @@ window.__ModuleLoader__.load({
          * （与 fallback 同范式：读传空对象、写把 patch 原样透传）。 */
         sequentialGet: () => call('sequential', {}),
         sequentialSet: (patch) => call('sequential', patch ?? {}),
+        /* ZB-58：逐模型开关（外部源未提供时 call() 返回 {ok:false,error}，UI 降级为只读 + 可读错误）。
+         * 与 `sequential` 同范式：读传空对象、写把 patch 原样透传，共用外部源一个方法名。 */
+        modelSwitchesGet: () => call('modelSwitches', {}),
+        modelSwitchSet: (patch) => call('modelSwitches', patch ?? {}),
         // Z12：外部源未提供时 call() 返回 {ok:false,error}，UI 自行降级为只读
         switchGet: () => call('switchGet', {}),
         switchSet: (next) => call('switchSet', next ?? {}),
@@ -1423,6 +1521,9 @@ window.__ModuleLoader__.load({
         // ZB-52：离线无真值可读（浏览器读不到宿主文件），顺序派发读写一律拒绝 ⇒ UI 只读 + 提示走终端
         sequentialGet: denied,
         sequentialSet: denied,
+        // ZB-58：逐模型开关同上（离线无真值可读，写也不能假装成功）
+        modelSwitchesGet: denied,
+        modelSwitchSet: denied,
         // Z12：offline 无真值可读（浏览器也读不到宿主文件），动作拒绝 → UI 只读 + 提示走终端
         switchGet: denied,
         switchSet: denied,
@@ -1561,6 +1662,9 @@ window.__ModuleLoader__.load({
         order: { zcode: [], opencode: [], qoder: [] },
         levels: { zcode: [], opencode: [], qoder: [] },
       };
+      /* ZB-58：demo 逐模型开关（纯内存，不写真值文件）——语义与 core 一致：
+       * **禁用清单**（关掉谁记谁，上游新模型默认可用）+ 「关掉的模型不出现在「模型」下拉」。 */
+      let demoDisabledModels = new Set();
       const pendingTransitions = new Set(); // dispose 时连同派发编排的挂起定时器一起清
       const later = (fn, ms) => {
         const t = setTimeout(() => {
@@ -1750,7 +1854,7 @@ window.__ModuleLoader__.load({
            * 走"正常列档位"分支；不是 pending，不会显示"载入中"）。 */
           return {
             ok: true,
-            channels: demoChannels.map((c) => ({ ...c, models: [...c.models] })),
+            channels: demoChannels.map((c) => ({ ...c, models: [...c.models], userDisabled: demoDisabledModels.has(String(c.id)) })),
             warnings: [],
             levelsStatus: null,
           };
@@ -1849,11 +1953,27 @@ window.__ModuleLoader__.load({
           demoSeq = next;
           return { ok: true, ...normSeqShape(demoSeq) };
         },
+        /* ZB-58：demo 逐模型开关（纯内存）。写语义与 core `setModelSwitch` 一致：
+         * `{route, enabled}` 翻单个 / `{disabled:[...]}` 整体替换；读回**归一后的禁用清单**。 */
+        async modelSwitchesGet() {
+          return { ok: true, ...normModelSwitchShape({ disabled: [...demoDisabledModels] }) };
+        },
+        async modelSwitchSet(patch) {
+          const p = patch && typeof patch === 'object' ? patch : {};
+          if (Array.isArray(p.disabled)) {
+            demoDisabledModels = new Set(p.disabled.map((x) => String(x)).filter(Boolean));
+          } else if (typeof p.route === 'string' && p.route) {
+            if (p.enabled === false) demoDisabledModels.add(p.route);
+            else demoDisabledModels.delete(p.route);
+          } else {
+            return { ok: false, error: 'modelSwitchSet 需要 {route, enabled} 或 {disabled}' };
+          }
+          return { ok: true, ...normModelSwitchShape({ disabled: [...demoDisabledModels] }) };
+        },
         // Z12：demo 不读/写真值文件（假数据不伪装开关状态，更不许写真值）
         async switchGet() {
           return { ok: false, error: '演示模式无真值文件（demo）' };
-        },
-        async switchSet() {
+        },        async switchSet() {
           return { ok: false, error: '演示模式不写总开关（demo）' };
         },
         dispose() {
@@ -1924,6 +2044,9 @@ window.__ModuleLoader__.load({
         sequentialCount: 0,
       }),
       sequentialSet: async () => ({ ok: false, error: 'wire 不可用' }),
+      /* ZB-58：逐模型开关（读给诚实空清单 = 一个都不禁用；写报错）。 */
+      modelSwitchesGet: async () => ({ ok: true, disabled: [], userDisabledCount: 0 }),
+      modelSwitchSet: async () => ({ ok: false, error: 'wire 不可用' }),
       switchGet: async () => ({}),
       switchSet: async () => ({ ok: false, error: 'wire 不可用' }),
     };
@@ -2061,6 +2184,8 @@ window.__ModuleLoader__.load({
         channels: wire.channels, channelGet: wire.channelGet, channelSet: wire.channelSet,
         retry: wire.retry, fallbackGet: wire.fallbackGet, fallbackSet: wire.fallbackSet,
         sequentialGet: wire.sequentialGet, sequentialSet: wire.sequentialSet,
+        /* ZB-58：逐模型开关（面板「可用」开关 + 「模型」下拉过滤）。 */
+        modelSwitchesGet: wire.modelSwitchesGet, modelSwitchSet: wire.modelSwitchSet,
         switchGet: wire.switchGet, switchSet: wire.switchSet,
       };
     }
@@ -2334,6 +2459,9 @@ window.__ModuleLoader__.load({
             _routeOf: Object.create(null),   // 模型项 key → 实际通道 id（回写时用）
             _modelOf: Object.create(null),   // 模型项 key → 真实模型名（ZCode 才有 key）
             _modelsByRoute: Object.create(null), // 路由 id → 该路由可用的模型名（档位/回显用）
+            /* ZB-58：模型项 key → 是否被用户关闭（core 给**每条通道**打的 `userDisabled`）。
+             * 折叠条目本身可能混合状态（ZCode 一条路由 = 多个模型项）⇒ 必须逐项记。 */
+            _userDisabled: Object.create(null),
           };
           out.push(agg);
         }
@@ -2374,6 +2502,9 @@ window.__ModuleLoader__.load({
             if (!agg.models.includes(key)) agg.models.push(key);
             agg._routeOf[key] = routeId;
             agg._modelOf[key] = m;
+            /* ZB-58：core 已在**每条通道**上打 `userDisabled`（禁用清单命中即为 true）。
+             * ⚠️ 只在**可用通道**上收集模型项，故这里只影响"模型是否被用户关掉"，不影响通道可用性。 */
+            agg._userDisabled[key] = c.userDisabled === true;
           }
         } else {
           /* 不可用通道仍**登记路由**（旧存值可能指向它 ⇒ 要能被解析成"该引擎条目"，而不是多固定一条），
@@ -2428,6 +2559,27 @@ window.__ModuleLoader__.load({
     const fbModelValue = (fbSel, fbProvider, fbTarget) => (fbSel
       ? modelValueOf(fbSel, fbProvider, fbTarget?.model)
       : (fbTarget?.model ?? ''));
+    /* ───────────── ZB-58：逐模型开关（「可用」开关）的**共用判据** ─────────────
+     * core 契约：`modelSwitchesGet()` → `{disabled:[模型项 key...]}`，且**每条通道**带 `userDisabled` 标记。
+     * 两处口径统一到这里，避免"下拉过滤"和"列表开关"各算一套而互相矛盾。 */
+    /** 禁用清单 / `modelSwitchSet({route})` 的**身份 = 模型项 key**（=「模型」下拉的 option key）。
+     *  ⚠️ ZB-58 修正（Lead 真机定证）：**不要**再经 `_routeOf` 映射成路由 id ——
+     *  ZCode 的模型项 key 是复合键 `<路由id>::<模型名>`，而 core 的顺序链
+     *  （`expandSequentialChain`）正是按**复合键**判 `disabledModels`；映射成 `plan` 会造成：
+     *   ① 同一路由下的多个模型被一起关掉；
+     *   ② core 顺序链查不到 `plan`（它查 `plan::GLM-5.3`）⇒ **"UI 关了但实际没关"**。
+     *  opencode/qoder 的模型项 key 本来就等于通道 id ⇒ 行为不变。 */
+    const routeIdOfModelKey = (_agg, key) => String(key ?? '');
+    /** 禁用清单（数组）→ Set；null = 该数据源没给清单 ⇒ 退回通道上的 `userDisabled` 标记。 */
+    const disabledSetOf = (modelSw) => (modelSw && Array.isArray(modelSw.disabled)
+      ? new Set(modelSw.disabled.map((x) => String(x)))
+      : null);
+    /** 该模型项是否被用户关闭。优先用权威禁用清单，缺失时退回通道标记（同源数据，不会互相矛盾）。 */
+    const isModelKeyDisabled = (agg, disabledSet, key) => {
+      if (key == null || key === '') return false;
+      if (disabledSet) return disabledSet.has(routeIdOfModelKey(agg, key));
+      return agg?._userDisabled?.[key] === true;
+    };
     /** 某折叠条目的候选模型集（与对应「模型」下拉**同一套 key**）：模型表为空时退回当前值。 */
     const seqCandidatesOf = (agg, provider, model) => {
       const models = agg && Array.isArray(agg.models) ? agg.models : [];
@@ -2439,7 +2591,7 @@ window.__ModuleLoader__.load({
      *  浮窗与配置卡共用；写入时**只发本块引擎**那一份 order（core 按引擎合并 ⇒ 互不干扰）。
      *  `engineName`：调用方**已经知道引擎**时直接给（配置卡按引擎编辑，agg 可能为空）；
      *  不给则从折叠条目推断（浮窗两块：主通道 / 降级目标）。 */
-    const makeSeqBlock = ({ owner, agg, candidates, channels, sequential, onSet, engineName, levelsStatus }) => {
+    const makeSeqBlock = ({ owner, agg, candidates, channels, sequential, onSet, engineName, levelsStatus, disabledSet, onToggleModel }) => {
       const engine = engineName ? engineOf(engineName) : (agg ? engineOf(agg.engine) : null);
       const stored = engine && Array.isArray(sequential?.order?.[engine]) ? sequential.order[engine] : [];
       /* 显示顺序 = 三段拼接（**从上到下 = 尝试次序**）：
@@ -2496,6 +2648,14 @@ window.__ModuleLoader__.load({
         /* ZB-56：该引擎的档位探测状态（ready/pending/none/null=未知）—— 行渲染据此显示「档位载入中…」 */
         levelsStatus: levelsStatus ?? null,
         setLevel: (m, lv) => write(list, { route: m, level: lv }),
+        /* ── ZB-58：逐模型开关（列表**仍显示已关闭的模型**，否则用户没法重新打开）──
+         * `isOff` 判据与「模型」下拉过滤共用（见 `isModelKeyDisabled`），显示与选项不会打架。 */
+        isOff: (m) => isModelKeyDisabled(agg, disabledSet, m),
+        routeOf: (m) => routeIdOfModelKey(agg, m),
+        setEnabled: (m, enabled) => {
+          if (typeof onToggleModel !== 'function') return;
+          onToggleModel(routeIdOfModelKey(agg, m), enabled !== false);
+        },
       };
     };
     /** 折叠清单里 provider 对应的条目（主通道 / 降级目标共用；provider 为空 ⇒ null）。
@@ -2506,7 +2666,7 @@ window.__ModuleLoader__.load({
     /** 顺序派发的"两块列表"（**浮窗**用）：
      *  · 主通道模型为空 ⇒ 主块；
      *  · 降级目标模型为空 ⇒ 降级块（与主块**同一引擎**时去重 —— 列表按引擎存，重复显示会误导成两份）。 */
-    const buildSeqBlocks = ({ channels, channel, fallback, sequential, onSet, levelsStatusByEngine }) => {
+    const buildSeqBlocks = ({ channels, channel, fallback, sequential, onSet, levelsStatusByEngine, disabledSet, onToggleModel }) => {
       const list = Array.isArray(channels) ? channels : [];
       const provider = channel?.provider;
       const sel = foldedEntryFor(list, provider) ?? list.find((c) => c.id === provider) ?? null;
@@ -2523,12 +2683,14 @@ window.__ModuleLoader__.load({
         blocks.push(makeSeqBlock({
           owner: 'main', agg: sel, candidates: seqCandidatesOf(sel, provider, channel?.model),
           channels: list, sequential, onSet, levelsStatus: lvStatusOf(sel),
+          disabledSet, onToggleModel, // ZB-58：逐模型开关（列表显示禁用态、可原地重开）
         }));
       }
       if (seqFbOn && (!seqEnabled || !sel || engineOf(fbSel.engine) !== engineOf(sel.engine))) {
         blocks.push(makeSeqBlock({
           owner: 'fallback', agg: fbSel, candidates: seqCandidatesOf(fbSel, fbProvider, fbTarget?.model),
           channels: list, sequential, onSet, levelsStatus: lvStatusOf(fbSel),
+          disabledSet, onToggleModel,
         }));
       }
       return blocks;
@@ -2538,13 +2700,14 @@ window.__ModuleLoader__.load({
       .find((c) => engineOf(c.engine) === engineOf(engine)) ?? null;
     /** **按引擎**构造顺序块（插件详情页配置卡用）——与"主通道/降级是否顺序派发"**解耦**：
      *  只要选中该引擎就渲染它的列表。用户打开插件配置就是**去设置**，不能要求"先开了才有东西配"（鸡生蛋）。 */
-    const makeEngineSeqBlock = ({ channels, engine, sequential, onSet, levelsStatus }) => {
+    const makeEngineSeqBlock = ({ channels, engine, sequential, onSet, levelsStatus, disabledSet, onToggleModel }) => {
       const list = Array.isArray(channels) ? channels : [];
       const agg = foldEngineAgg(list, engine);
       return makeSeqBlock({
         owner: engineOf(engine), engineName: engine, agg,
         candidates: agg && Array.isArray(agg.models) ? agg.models : [],
         channels: list, sequential, onSet, levelsStatus,
+        disabledSet, onToggleModel, // ZB-58：逐模型开关（配置卡每行一个「可用」开关）
       });
     };
     /** 主通道当前引擎（按折叠条目解析 provider；解析不到 ⇒ null）。 */
@@ -2588,53 +2751,40 @@ window.__ModuleLoader__.load({
      *    窄容器（440px）靠"序号 22px + 档位 104px + 排序 56px 定宽、模型列 flex 自适应 + 省略号"不换行错乱。 */
     function SeqBlocksView({ blocks, offline, busy, saving, hint, hintTitle }) {
       if (!blocks || !blocks.length) return null;
-      const row = { display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0' };
-      /* ZB-57（用户反馈「下拉偏高偏胖、与 ↑↓ 不齐」）：把行内元素统一成 **24px 高 + 垂直居中**。
-       * 下拉显式定死 height/box-sizing/font-size/padding，压住 `.dsp-select` 的 `font:inherit` + 默认 padding
-       * ⇒ 与 24px 方形 ↑↓ 按钮同高、视觉重量相当；序号/模型名也用 lineHeight 24px 对齐基线。
-       * 列宽与列头**严格一致**：序号 22px / 档位 104px / 排序 56px（模型列 flex 自适应 + 省略号）。 */
-      const idxW = { flex: '0 0 22px', textAlign: 'right', lineHeight: '24px' };
-      const nameW = {
-        flex: '1 1 auto', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        lineHeight: '24px',
-      };
-      const lvW = {
-        flex: '0 0 104px', height: '24px', boxSizing: 'border-box',
-        padding: '0 6px', fontSize: '11px', lineHeight: '16px', borderRadius: '4px',
-      };
-      const sortW = { flex: '0 0 56px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' };
-      const btnW = {
-        flex: '0 0 24px', width: '24px', height: '24px', minWidth: '24px', padding: 0,
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: '11px', lineHeight: '1', borderRadius: '4px',
-      };
+      /* ZB-58（用户：「右侧的下拉框和排序按钮，**还是没有完全对齐**。…布局再细调整下」）：
+       * **行内不再写任何盒模型样式**。上一轮（ZB-57）内联定死 24px 仍不齐，真因是盒子模型：
+       * ↑↓ 按钮默认 content-box（24 + 2×1px 边框 = 实际 26px），下拉是 border-box 的 24px ⇒
+       * 差 2px，内联怎么写都对不上（DOM 桩不跑真实样式表，看不出这个冲突）。
+       * 现在对齐由 `ensureStyle()` 里的 `.dsp-seq-*` 组保证（下拉与按钮同 22px / border-box /
+       * 1px 边框 / 同行高；行与列头**共用同一批列宽类** ⇒ 左边缘严格同线；窄容器只缩列不换行）。
+       * 本组件只剩**数据驱动**属性（data-*、title、value、disabled 等），无盒模型内联样式。 */
+      /** ZB-58：该块某模型是否被用户关闭（块可能由旧调用方构造 ⇒ 缺 `isOff` 时按"可用"处理，不炸）。 */
+      const isOffOf = (blk, m) => (blk && typeof blk.isOff === 'function' ? blk.isOff(m) : false);
       return h('div', { className: 'dsp-stack', 'data-dsp-sequential': 'list' },
         h('div', { className: 'dsp-note', role: 'status', title: hintTitle ?? (offline ? t('seqOfflineHint') : undefined) },
           hint ?? t('seqHint')),
         blocks.map((b) => h('div', {
           className: 'dsp-stack', key: b.owner, 'data-dsp-seq-block': b.owner,
         },
-          /* 区块头：标题在**列表上方** + 右对齐徽标（引擎 · 条数）+ 保存中指示 */
+          /* 区块头：标题在**列表上方** + 右对齐徽标（引擎 · 可用 n/m）+ 保存中指示 */
           h('div', { className: 'dsp-field', title: t('seqOrderLabel') },
             h('span', { className: 'dsp-field-k' }, t('seqOrderLabel')),
             h('span', { className: 'dsp-spring' }),
             saving ? h('span', { className: 'dsp-dim', role: 'status', 'data-dsp-seq-saving': '1' }, t('seqSaving')) : null,
-            h('span', { className: 'dsp-badge' },
-              `${b.owner === 'fallback' ? `${t('fallbackTitle')} → ` : ''}${b.engine ? engLabel(b.engine) : '-'} · ${b.list.length}`)),
+            /* ZB-58：徽标带上**可用计数**（用户要求「可用 8/10」）—— 关掉的仍留在列表里可重开。 */
+            h('span', { className: 'dsp-badge', 'data-dsp-seq-avail': `${b.list.length - b.list.filter((m) => isOffOf(b, m)).length}/${b.list.length}` },
+              `${b.owner === 'fallback' ? `${t('fallbackTitle')} → ` : ''}${b.engine ? engLabel(b.engine) : '-'} · ${tFmt('modelAvailCount', { n: b.list.length - b.list.filter((m) => isOffOf(b, m)).length, total: b.list.length })}`)),
           !b.engine || !b.list.length
             ? h('div', { className: 'dsp-note', role: 'status' }, t('seqEmpty'))
-            : h('div', { className: 'dsp-stack', style: { minWidth: '0' } },
-              /* 列头：`#` / 模型 / 档位 / 排序（次级文字色 + 略小字号） */
-              h('div', {
-                style: {
-                  ...row, color: T.text2, fontSize: '11px', lineHeight: '16px',
-                  padding: '0 0 3px', borderBottom: `1px solid ${T.border}`,
-                },
-              },
-                h('span', { style: idxW }, '#'),
-                h('span', { style: nameW }, t('model')),
-                h('span', { style: { flex: lvW.flex } }, t('seqLevelLabel')),
-                h('span', { style: { flex: sortW.flex, textAlign: 'center' } }, t('seqSortCol'))),
+            : h('div', { className: 'dsp-stack' },
+              /* 列头：与行**共用同一批列宽类**（dsp-seq-idx / -name / -lv / -sort-col / -sw-col）⇒ 不另写宽度就不会错位；
+               * 文字样式由 `.dsp-seq-head > *` 统一（11px/16px/次级色、左对齐），不居中。 */
+              h('div', { className: 'dsp-seq-head', 'data-dsp-seq-head': b.owner },
+                h('span', { className: 'dsp-seq-idx' }, '#'),
+                h('span', { className: 'dsp-seq-name' }, t('model')),
+                h('span', { className: 'dsp-seq-lv' }, t('seqLevelLabel')),
+                h('span', { className: 'dsp-seq-sort-col' }, t('seqSortCol')),
+                h('span', { className: 'dsp-seq-sw-col' }, t('modelSwitchCol'))),
               b.list.map((m, i) => {
                 /* ZB-52b：该行模型的档位下拉选项（取不到档位声明 ⇒ 只有「默认」，不瞎列）。 */
                 const lvList = b.levelsOf(m);
@@ -2647,27 +2797,30 @@ window.__ModuleLoader__.load({
                  * 否则 <select value> 命不中 option 会显示首项「默认」，与真实存值不符（ZB-31 同类坑）。 */
                 const lvStale = curLv != null && !lvList.includes(curLv);
                 const lvAria = `${t('seqLevelLabel')}：${b.labelOf(m)}`;
+                /* ZB-58：该模型是否被用户关闭（关闭 ⇒ 仍显示在列表里可重开；行降不透明度 + 开关呈关）。 */
+                const off = isOffOf(b, m);
                 return h('div', {
                   key: m, 'data-dsp-seq-item': m, 'data-dsp-seq-owner': b.owner,
-                  style: { ...row, minHeight: '26px', borderBottom: `1px solid ${T.border}` },
+                  'data-dsp-model-disabled': off ? '1' : '0',
+                  className: `dsp-seq-row${off ? ' dsp-seq-row-off' : ''}`,
                 },
-                  h('span', { className: 'dsp-dim', style: idxW }, `${i + 1}`),
+                  h('span', { className: 'dsp-seq-idx' }, `${i + 1}`),
                   h('span', {
-                    className: 'dsp-note',
-                    style: { ...nameW, fontFamily: T.mono },  // 等宽字体利于读模型 id
-                    title: b.stale.includes(m) ? `${m}${t('seqUnavailable')}` : b.labelOf(m),
-                  }, b.stale.includes(m) ? `${b.labelOf(m)}${t('seqUnavailable')}` : b.labelOf(m)),
+                    className: 'dsp-seq-name',
+                    title: `${b.labelOf(m)}${off ? `（${t('modelDisabledTag')}）` : ''}${b.stale.includes(m) ? t('seqUnavailable') : ''}`,
+                  },
+                    b.stale.includes(m) ? `${b.labelOf(m)}${t('seqUnavailable')}` : b.labelOf(m),
+                    off ? h('span', { className: 'dsp-seq-off' }, ` · ${t('modelDisabledTag')}`) : null),
                   /* 逐模型档位下拉：value = 原始档位字符串（'' = 引擎默认）；label = 中文标签。
                    * ZB-56：该引擎 `levelsStatus === 'pending'` 且**还没探到**任何档位 ⇒ 首项显示
                    * 「档位载入中…」（disabled，值仍为空=保持默认），而不是只列一个「默认」让人
                    * 以为这模型没档位；探测完成后数据自然重渲、自动恢复可选项（不轮询）。 */
                   h('select', {
-                    className: 'dsp-select', 'data-dsp-seq-level': m,
+                    className: 'dsp-select dsp-seq-lv', 'data-dsp-seq-level': m,
                     ...(lvPending ? { 'data-dsp-seq-level-pending': '1' } : {}),
                     value: curLv ?? '',
                     disabled: busy || lvPending,
                     title: lvPending ? t('thinkLoading') : lvAria, 'aria-label': lvPending ? t('thinkLoading') : lvAria,
-                    style: lvW,
                     onChange: (e) => b.setLevel(m, e.target.value),
                   },
                     lvPending
@@ -2675,20 +2828,34 @@ window.__ModuleLoader__.load({
                       : h('option', { key: '__default', value: '' }, t('seqLevelDefault')),
                     lvPending ? null : (lvStale ? h('option', { key: '__stale', value: curLv }, `${thinkingLabel(curLv)}（${t('thinkingStale')}）`) : null),
                     lvPending ? null : lvList.map((lv) => h('option', { key: lv, value: lv }, thinkingLabel(lv)))),
-                  /* ↑↓ 两个方形小按钮（不用拖拽库）。首/末项各自禁用对应方向；保存中整块禁用。 */
-                  h('span', { style: sortW },
+                  /* ↑↓ 两个方形小按钮（不用拖拽库）。首/末项各自禁用对应方向；保存中整块禁用。
+                   * 尺寸/边框/盒子模型全在 `.dsp-seq-move` 类里（与左侧下拉同 22px ⇒ 水平一条线）。 */
+                  h('span', { className: 'dsp-seq-sort' },
                     h('button', {
-                      className: 'dsp-btn2', type: 'button', style: btnW,
+                      className: 'dsp-seq-move', type: 'button',
                       disabled: busy || i === 0, title: t('seqUp'),
                       'aria-label': `${t('seqUp')}：${b.labelOf(m)}`,
                       onClick: () => b.move(i, -1),
                     }, '↑'),
                     h('button', {
-                      className: 'dsp-btn2', type: 'button', style: btnW,
+                      className: 'dsp-seq-move', type: 'button',
                       disabled: busy || i === b.list.length - 1, title: t('seqDown'),
                       'aria-label': `${t('seqDown')}：${b.labelOf(m)}`,
                       onClick: () => b.move(i, 1),
-                    }, '↓')));
+                    }, '↓')),
+                  /* ZB-58：逐模型「可用」开关（关掉 ⇒ 不出现在「模型」下拉、不参与顺序派发链；
+                   * 顺序列表本身不动，仍显示在此以便随时重开）。视觉语言 = dsp-switch/dsp-toggle + dsp-dot。 */
+                  h('button', {
+                    className: 'dsp-switch dsp-toggle dsp-seq-sw', type: 'button',
+                    'data-dsp-model-toggle': b.routeOf(m),
+                    'data-dsp-model-enabled': off ? '0' : '1',
+                    'aria-pressed': !off,
+                    disabled: busy || offline,
+                    title: `${b.labelOf(m)}：${off ? t('modelDisabledTag') : t('modelSwitchCol')}`,
+                    'aria-label': `${b.labelOf(m)}：${off ? t('modelDisabledTag') : t('modelSwitchCol')}`,
+                    onClick: () => b.setEnabled(m, off),
+                  },
+                    h('span', { className: 'dsp-dot', style: { background: off ? T.text3 : T.stDone } })));
               })))));
     }
 
@@ -2700,9 +2867,12 @@ window.__ModuleLoader__.load({
     /* ⚠️ ZB-52：新增的 `sequential` / `onSequentialSet` **追加在 `sw` 之后** ——
      * `frozen-probe.test.mjs` F 段钉住了 `… offline, offlineReason, sw` 这段**参数顺序**
      * （它用"包含"而非全等来防漏传，故插入到中间会误报）。 */
-    function ChannelSection({ channelsInfo, channel, fallback, onSwitch, onFallbackSet, offline, offlineReason, sw, chanError, sequential, onSequentialSet }) {
+    function ChannelSection({ channelsInfo, channel, fallback, onSwitch, onFallbackSet, offline, offlineReason, sw, chanError, sequential, onSequentialSet, disabledModels, onToggleModel }) {
       const [fbFeedback, setFbFeedback] = useState(null);
       const [busy, setBusy] = useState(false);
+      /* ZB-58：逐模型开关的禁用清单（null = 父层还没读到 ⇒ 退回通道上的 `userDisabled` 标记）。
+       * 判据统一走模块级 `isModelKeyDisabled` —— 与配置卡列表开关**同一口径**，不会互相矛盾。 */
+      const disabledSet = disabledSetOf(Array.isArray(disabledModels) ? { disabled: disabledModels } : null);
 
       /* ── ZB-51：**通道折叠**（用户要求：「通道」选引擎，「模型」里选模型）──
        *
@@ -2767,6 +2937,8 @@ window.__ModuleLoader__.load({
        * · OpenCode/Qoder：key 就是模型名。
        * 反查不到就不给值（select 会落到首项「通道默认模型」——因为确实没选具体模型）。 */
       const modelValue = modelValueOf(sel, channel.provider, channel.model);
+      /* ZB-58：该模型项是否被用户关闭（关闭 ⇒ 不出现在「模型」下拉；**当前值例外**，见 modelOptions）。 */
+      const modelOff = (agg, m) => isModelKeyDisabled(agg, disabledSet, m);
       /* ── ZB-33：免费额度（Start Plan）通道的**额度条** ──
        * 数据来自宿主 `action=channels` 的 `channels[].quota`（只读 ZCode 客户端日志，
        * 零网络请求；同一份数据也暴露给 agent 工具，见 index.js 的工具描述）。
@@ -2786,9 +2958,9 @@ window.__ModuleLoader__.load({
         const folded = foldChannels(channels);
         const c = resolveFoldedChannel(folded, id) ?? channels.find((x) => x.id === id);
         if (!c || !c.enabled) return; // 不可用项不允许选中（option 已 disabled）
-        /* 选中引擎条目 ⇒ 模型默认取该引擎的**第一个模型**，并经 routeForPick 映射回真实路由
-         * （ZCode 的首项可能是"免费额度"伪项 ⇒ provider 要换成那条真实通道 id）。 */
-        const first = c.models && c.models.length ? c.models[0] : null;
+        /* 选中引擎条目 ⇒ 模型默认取该引擎的**第一个可用模型**（ZB-58：跳过用户已关闭的模型，
+         * 免得一切引擎就落到一个"不会出现在下拉里"的死值上），并经 routeForPick 映射回真实路由。 */
+        const first = (c.models ?? []).find((m) => !modelOff(c, m)) ?? (c.models && c.models.length ? c.models[0] : null);
         const pick = routeForPick(c, first) ?? { provider: c.id, model: first };
         onSwitch(pick);
       };
@@ -2801,14 +2973,23 @@ window.__ModuleLoader__.load({
         if (sel && sel.engine === 'zcode') { const p = routeForPick(sel, m); onSwitch({ provider: p.provider, model: p.model }); return; }
         onSwitch({ provider: channel.provider, model: m || null });
       };
-      /** 模型下拉里某一项的**显示文案**（上面「通道」分区用）。 */
-      const modelOptionLabel = (m) => modelLabelFor(sel?.engine, sel?._routeOf, sel?._modelOf, m);
+      /** 模型下拉里某一项的**显示文案**（上面「通道」分区用）。
+       *  ZB-58：当前值若恰好被用户关闭，仍要能渲染出来并标注「已关闭」（见 modelOptions 的例外）。 */
+      const modelOptionLabel = (m) => {
+        const base = modelLabelFor(sel?.engine, sel?._routeOf, sel?._modelOf, m);
+        return modelOff(sel, m) ? `${base}（${t('modelDisabledTag')}）` : base;
+      };
 
       /* 模型下拉的选项：折叠条目的模型并集；ZCode 的「免费额度」也在其中（伪项）。
        * 当前值必须**始终可渲染**（否则 select 会掉到首项显示成「通道默认模型」）。 */
-      const modelOptions = models.length
+      const modelOptionsAll = models.length
         ? models
         : (modelValue ? [modelValue] : []); // 通道没给模型表时至少显示当前值
+      /* ── ZB-58（用户要求「关闭的话，则不再在派发台面板的选项中展示」）──
+       * 被关掉的模型**不出现在「模型」下拉里**；**唯一例外 = 当前存值** ——
+       * 否则 `<select value>` 匹配不到 option 会掉到首项、显示与真实存值不符（ZB-31 同类坑），
+       * 所以当前值仍然渲染，并在 label 上标注「已关闭」。 */
+      const modelOptions = modelOptionsAll.filter((m) => m === modelValue || !modelOff(sel, m));
 
       /* ── 双引擎（OpenCode 接入）：通道下拉按**引擎分组**（optgroup）──
        * 设计决策（与用户确认，别再改成双 tab）：引擎是「通道」的**属性**，不是第二个维度 ——
@@ -2977,6 +3158,8 @@ window.__ModuleLoader__.load({
       /* 与上方同一套"模型项 key"解析（ZCode 是 `<路由id>::<模型名>`；其它引擎是模型名）。
        * ZB-53：规则已上提到共用件 `fbModelValue()`（浮窗与插件详情页配置卡同一套，不重复实现）。 */
       const fbModel = fbModelValue(fbSel, fbProvider, fbTarget);
+      /* ZB-58：降级目标的模型下拉同样**过滤已关闭项**（当前值例外 —— 保证 <select value> 能命中）。 */
+      const fbModelsShown = fbModels.filter((m) => m === fbModel || !modelOff(fbSel, m));
       /* ZB-30b（用户要求「不要沿用原任务，就跟上面完全一致的选项逻辑」）：降级目标的模型/思考强度
        * 用与上面「通道」分区**逐字相同**的选项集与默认值 —— 模型首项 `（通道默认模型）`（值 ''）、
        * 思考强度首项 `Agent决定（按任务判断）`（值 'agent'）。语义也随之对齐：
@@ -2989,8 +3172,11 @@ window.__ModuleLoader__.load({
        * 此时全局档位不可改 —— 与主通道一致：档位由顺序列表里**逐模型**设置。 */
       const fbSeqMode = fbModel === '';
 
-      /** 降级区模型下拉的**显示文案**（与上面「通道」分区同一纪律）。 */
-      const fbModelLabel = (m) => modelLabelFor(fbSel?.engine, fbSel?._routeOf, fbSel?._modelOf, m);
+      /** 降级区模型下拉的**显示文案**（与上面「通道」分区同一纪律；已关闭的当前值标注「已关闭」）。 */
+      const fbModelLabel = (m) => {
+        const base = modelLabelFor(fbSel?.engine, fbSel?._routeOf, fbSel?._modelOf, m);
+        return modelOff(fbSel, m) ? `${base}（${t('modelDisabledTag')}）` : base;
+      };
 
       /** 写降级目标（对象 ⇒ 开启；null ⇒ 关闭）。乐观回显交给 PanelBody 的权威值校正。
        * ⚠️ 面板里**显示什么就写什么**（与上面「通道」分区同一纪律）：
@@ -3062,6 +3248,8 @@ window.__ModuleLoader__.load({
         channels, channel, fallback, sequential, onSet: onSequentialSet,
         /* ZB-56：逐引擎档位探测状态（`channelsInfo.levelsStatus`）⇒ 浮窗的档位下拉同样能显示「载入中」 */
         levelsStatusByEngine: channelsInfo?.levelsStatus ?? null,
+        /* ZB-58：逐模型开关 —— 浮窗列表里显示已关闭态并可原地重开；与配置卡同一口径 */
+        disabledSet, onToggleModel,
       });
 
       return h('div', { className: 'dsp-stack' },
@@ -3309,7 +3497,7 @@ window.__ModuleLoader__.load({
               disabled: busy || !fbSel || !fbSel.enabled,
             },
               h('option', { value: '', title: t('seqHintShort') }, t('seqTitle')),
-              fbModels.map((m) => h('option', { key: m, value: m }, fbModelLabel(m))))),
+              fbModelsShown.map((m) => h('option', { key: m, value: m }, fbModelLabel(m))))),
           h('div', { className: 'dsp-field' },
             h('span', { className: 'dsp-field-k' }, t('thinking')),
             h('select', {
@@ -3952,6 +4140,7 @@ window.__ModuleLoader__.load({
         conn, snapshot, quota, planQuota, dispatch, kill, dismiss, tail,
         channels, channelGet, channelSet, retry, fallbackGet, fallbackSet,
         sequentialGet, sequentialSet,
+        modelSwitchesGet, modelSwitchSet,
         switchSet,
       } = useWire();
       /* ZB-21 / ZB-27u：样式只注入一次到 document.head（脱离 React 重渲染路径）。
@@ -3979,8 +4168,9 @@ window.__ModuleLoader__.load({
         levels: { zcode: [], opencode: [], qoder: [] },
         sequentialCount: 0,
       });
-      /* 【真机事故修复（本轮用户现场）】面板三个下拉全部显示「不可用：-」、通道分区空、没有过滤提示。
-       * 根因：① `channels()` 只在**挂载时拉一次**；② `wire.client` 把失败包成 `{ok:false, error}`
+      /* ZB-58：逐模型开关（禁用清单）。null = 还没读到/数据源无此能力 ⇒ 退回通道上的 `userDisabled` 标记。 */
+      const [modelSw, setModelSw] = useState(null);
+      /* 【真机事故修复（本轮用户现场）】面板三个下拉全部显示「不可用：-」、通道分区空、没有过滤提示。       * 根因：① `channels()` 只在**挂载时拉一次**；② `wire.client` 把失败包成 `{ok:false, error}`
        * （不抛），而下面那个 `.then` 只处理 `ok` ⇒ **失败被静默丢弃、清单永远是空数组**；
        * ③ 客户端也没有任何重试 —— 一次失败（例如冷探测较慢/宿主刚重启时首次调用）就永久残废。
        * 现在三件事一起做：
@@ -4010,10 +4200,14 @@ window.__ModuleLoader__.load({
         Promise.resolve(sequentialGet()).then((r) => {
           if (alive && r && r.ok) setSequentialState(normSeqShape(r));
         }).catch(() => { /* 同上 */ });
+        /* ZB-58：逐模型开关（禁用清单）—— 读失败**不阻塞面板**（通道上的 `userDisabled` 是同源兜底）。 */
+        Promise.resolve(modelSwitchesGet()).then((r) => {
+          if (alive && r && r.ok) setModelSw(normModelSwitchShape(r));
+        }).catch(() => { /* 同上 */ });
         return () => {
           alive = false;
         };
-      }, [channels, channelGet, fallbackGet, sequentialGet]);
+      }, [channels, channelGet, fallbackGet, sequentialGet, modelSwitchesGet]);
 
       /* 快照兜底回填通道清单（自愈路径）：`snapshot()` 的载荷里本来就有 `channels[]`。
        * 只在"当前清单为空"时采纳 —— 否则会用旧快照覆盖用户刚切通道后的权威值。
@@ -4061,6 +4255,24 @@ window.__ModuleLoader__.load({
           if (r && r.ok) setSequentialState(normSeqShape(r));
         });
       }, [sequentialSet]);
+      /** ZB-58：逐模型「可用」开关（浮窗的顺序列表里也能就地开关，与配置卡**同一写入口径**）。
+       *  乐观翻转 + 权威回读校正；失败进面板 feedback 行（可读错误）。 */
+      const onModelToggle = useCallback((route, enabled) => {
+        setModelSw((prev) => {
+          const cur = new Set(prev && Array.isArray(prev.disabled) ? prev.disabled.map(String) : []);
+          if (enabled) cur.delete(String(route));
+          else cur.add(String(route));
+          return { disabled: [...cur].sort(), userDisabledCount: cur.size };
+        });
+        Promise.resolve(modelSwitchSet({ route, enabled })).then((r) => {
+          if (r && r.ok) setModelSw(normModelSwitchShape(r));
+          else {
+            setFeedback({ kind: 'err', text: `${t('errPrefix')}${(r && r.error) || 'unknown'}` });
+            /* 写失败 ⇒ 回读权威清单，回滚乐观翻转（不留下"改了但没落盘"的假状态）。 */
+            Promise.resolve(modelSwitchesGet()).then((rr) => { if (rr && rr.ok) setModelSw(normModelSwitchShape(rr)); }).catch(() => { /* 错误已可见 */ });
+          }
+        }).catch((e) => setFeedback({ kind: 'err', text: `${t('errPrefix')}${e?.message ?? e}` }));
+      }, [modelSwitchSet, modelSwitchesGet]);
       // Z12：派发总开关切换（成功 → 1s 轮询带回新快照、徽标自动翻转；失败 → 错误进面板反馈行）
       const onSwitchToggle = useCallback((next) => Promise.resolve(switchSet(next)).then((r) => {
         if (!r || !r.ok) setFeedback({ kind: 'err', text: `${t('errPrefix')}${(r && r.error) || 'unknown'}` });
@@ -4122,7 +4334,10 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsp-body' },
           h(Section, { id: SEC.channel, title: t('secChannel'), collapsible: true },
             /* 离线说明只在 body 首行渲染一处（去重）：这里不再重复同一句话。 */
-            h(ChannelSection, { channelsInfo, channel, fallback, onSwitch, onFallbackSet, sequential, onSequentialSet, offline: conn !== 'live', offlineReason, sw: dispatchSwitch, chanError })),
+            h(ChannelSection, { channelsInfo, channel, fallback, onSwitch, onFallbackSet, sequential, onSequentialSet, offline: conn !== 'live', offlineReason, sw: dispatchSwitch, chanError,
+              /* ZB-58：逐模型开关 —— 「模型」下拉据此过滤已关闭项；顺序列表里可原地重开。 */
+              disabledModels: modelSw && Array.isArray(modelSw.disabled) ? modelSw.disabled : null,
+              onToggleModel: onModelToggle })),
           /* ZB-29c（用户要求）：**派发分区已移除**——无需手动派发，有需要让 Agent 通过
            * dispatch 工具代劳。
            * 【用户要求（本轮）：**用量移到最下面**】顺序 = 通道 → 进程 → 单写者/文件锁 → 用量。
@@ -4150,7 +4365,7 @@ window.__ModuleLoader__.load({
      * 卡片据此渲染"未连接宿主 / 通道清单加载中"提示，**绝不白屏、绝不抛错**（组件内不直接碰 ctx/remote）。
      * 样式沿用既有 `dsp-*` 类名 + 主题令牌（`DSP_CSS_VARS` 挂在卡片根上，否则 `var(--dsp-*)` 不解析）。 */
     function DispatchConfigCard() {
-      const { conn, channels, channelGet, fallbackGet, sequentialGet, sequentialSet } = useWire();
+      const { conn, channels, channelGet, fallbackGet, sequentialGet, sequentialSet, modelSwitchesGet, modelSwitchSet } = useWire();
       const [channelsInfo, setChannelsInfo] = useState({ channels: [], warnings: [], levelsStatus: null });
       /* ZB-55：**区分"还在加载"与"真的没有模型"** —— 首帧通道清单还没到时，
        * 旧实现会显示「该引擎当前没有可选模型」= **谎报**。现在用三态：
@@ -4169,6 +4384,9 @@ window.__ModuleLoader__.load({
       /* 防连点：在途时**同步**拦截（React state 更新是异步的，光靠 `saving` 拦不住双击）。 */
       const savingRef = useRef(false);
       const [err, setErr] = useState(null);
+      /* ZB-58：逐模型开关（禁用清单）。null = 还没读到 / 数据源没这个能力
+       * ⇒ 退回通道上的 `userDisabled` 标记（同源真相，不会与权威清单互相矛盾）。 */
+      const [modelSw, setModelSw] = useState(null);
       useEffect(() => {
         let alive = true;
         Promise.resolve(channels()).then((r) => {
@@ -4191,8 +4409,13 @@ window.__ModuleLoader__.load({
         Promise.resolve(sequentialGet()).then((r) => {
           if (alive && r && r.ok) setSequentialState(normSeqShape(r));
         }).catch(() => { /* 同上 */ });
+        /* ZB-58：逐模型开关（禁用清单）—— 读失败**不阻塞卡片**：通道清单里的 `userDisabled`
+         * 标记是同源真相，可照常渲染开关初值；只有**写失败**才必须可见（见 onToggleModel）。 */
+        Promise.resolve(modelSwitchesGet()).then((r) => {
+          if (alive && r && r.ok) setModelSw(normModelSwitchShape(r));
+        }).catch(() => { /* 同上：退回通道标记 */ });
         return () => { alive = false; };
-      }, [channels, channelGet, fallbackGet, sequentialGet]);
+      }, [channels, channelGet, fallbackGet, sequentialGet, modelSwitchesGet]);
       /** 写入顺序列表：与浮窗同一套 patch（`{order}` 单引擎）；失败只显示可读错误，不抛。
        *  ⚠️ 防连点：`savingRef` 同步拦截在途期间的重复写入（双击/连点不会发第二次）。
        *  保存期间 `saving=true` ⇒ 该块下拉与 ↑↓ 全部禁用 + 区块头显示「保存中…」（不整卡闪）。 */
@@ -4209,6 +4432,32 @@ window.__ModuleLoader__.load({
           setSaving(false);
         });
       }, [sequentialSet]);
+      /** ZB-58：逐模型「可用」开关写入（`modelSwitchSet({route, enabled})`）。
+       *  **乐观翻转**（列表/下拉立即响应）→ 再用权威禁用清单校正；失败进 `err` 行（用户要求"失败要可读"）。
+       *  与顺序写入共用 `savingRef` 同步拦截 ⇒ 连点/双写不会把两次 toggle 交错落盘。 */
+      const onToggleModel = useCallback((route, enabled) => {
+        if (savingRef.current) return;
+        savingRef.current = true;
+        setSaving(true);
+        setErr(null);
+        setModelSw((prev) => {
+          const cur = new Set(prev && Array.isArray(prev.disabled) ? prev.disabled.map(String) : []);
+          if (enabled) cur.delete(String(route));
+          else cur.add(String(route));
+          return { disabled: [...cur].sort(), userDisabledCount: cur.size };
+        });
+        Promise.resolve(modelSwitchSet({ route, enabled })).then((r) => {
+          if (r && r.ok) setModelSw(normModelSwitchShape(r));
+          else {
+            setErr(String((r && r.error) || '模型开关写入失败'));
+            /* 写失败 ⇒ 乐观翻转**必须回滚**：回读权威禁用清单，别让界面停在"改了但没落盘"的假状态。 */
+            Promise.resolve(modelSwitchesGet()).then((rr) => { if (rr && rr.ok) setModelSw(normModelSwitchShape(rr)); }).catch(() => { /* 保持现状，错误已可见 */ });
+          }
+        }).catch((e) => setErr(String(e?.message ?? e))).finally(() => {
+          savingRef.current = false;
+          setSaving(false);
+        });
+      }, [modelSwitchSet, modelSwitchesGet]);
       /** 用户手动选中的编辑引擎（null = 还没选 ⇒ 用默认推导）。 */
       const [pickedEng, setPickedEng] = useState(null);
       const chans = channelsInfo.channels;
@@ -4217,9 +4466,11 @@ window.__ModuleLoader__.load({
       const activeEng = pickedEng ?? defaultSeqEngine(chans, channel, sequential);
       const usage = seqEngineUsage(chans, channel, fallback, activeEng);
       /* 选中的引擎**始终**渲染它的顺序列表（哪怕当前没被任何链使用 —— 否则就是"先开了才有东西配"的鸡生蛋）。 */
+      const disabledSet = disabledSetOf(modelSw);
       const block = makeEngineSeqBlock({
         channels: chans, engine: activeEng, sequential, onSet,
         levelsStatus: channelsInfo.levelsStatus?.[activeEng] ?? null,  // ZB-56：pending ⇒ 行内显示「档位载入中…」
+        disabledSet, onToggleModel, // ZB-58：逐模型「可用」开关（列表仍显示已关闭项，便于重开）
       });
       const offline = conn === 'offline';
       /* 该引擎"没有模型"的**诚实原因**（探针未返回 / 执行器未配置等，来自 core 的 warnings）——

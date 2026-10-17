@@ -117,6 +117,9 @@ export const TYPERT_REMOTE = {
      * 顺序派发由「模型」值表达 —— 模型为空即顺序派发，不再有独立开关）；写接受 `{order}`。 */
     ['sequentialGet', [], 'sequentialGet(): Promise<{order, levels, sequentialCount}>', [], '{order:{zcode:[],opencode:[],qoder:[]}, levels:{…}, sequentialCount}'],
     ['sequentialSet', ['patch'], 'sequentialSet(patch): Promise<{order, levels, sequentialCount}|{ok:false, error}>', ['patch'], '{order, levels, sequentialCount}（patch={order}）'],
+    /* ZB-58：逐模型开关（关掉的模型不出现在面板选项里、也不参与顺序派发） */
+    ['modelSwitchesGet', [], 'modelSwitchesGet(): Promise<{disabled, userDisabledCount}>', [], '{disabled:[路由id...], userDisabledCount}'],
+    ['modelSwitchSet', ['patch'], 'modelSwitchSet(patch): Promise<{disabled, userDisabledCount}|{ok:false, error}>', ['patch'], '{disabled, userDisabledCount}（patch={route,enabled} 或 {disabled:[...]}）'],
   ].map(([method, parameters, , optionals]) => ({
     id: `dsh-dispatch#${FACE_NAME}/${method}`,
     service: FACE_NAME,

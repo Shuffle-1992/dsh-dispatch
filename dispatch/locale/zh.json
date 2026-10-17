@@ -222,6 +222,9 @@
     "seqUseNone": "当前未生效：把通道的「模型」选成「顺序派发」后才按此列表尝试",
     "seqLoading": "正在加载通道与模型…",
     "seqSaving": "保存中…",
-    "seqSortCol": "排序"
+    "seqSortCol": "排序",
+    "modelSwitchCol": "可用",
+    "modelDisabledTag": "已关闭",
+    "modelAvailCount": "可用 {n}/{total}"
   }
 }

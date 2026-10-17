@@ -890,6 +890,28 @@ export function createRemoteFace(dispatcher, config = {}) {
         return { ok: false, error: e?.message ?? String(e) };
       }
     },
+    /* ── ZB-58：逐模型开关（用户要求：关掉的模型不出现在面板选项里、也不参与顺序派发）──
+     * 读：{disabled:[路由id...], userDisabledCount}
+     * 写：{route, enabled}（翻单个）或 {disabled:[...]}（整体替换） */
+    async modelSwitchesGet() {
+      if (!dispatcher) return { ok: false, error: NOT_READY };
+      try {
+        return { ok: true, ...dispatcher.getModelSwitches() };
+      } catch (e) {
+        return { ok: false, error: e?.message ?? String(e) };
+      }
+    },
+    async modelSwitchSet(patch) {
+      if (!dispatcher) return { ok: false, error: NOT_READY };
+      if (!patch || typeof patch !== 'object') {
+        return { ok: false, error: 'modelSwitchSet 需要对象 {route, enabled} 或 {disabled}' };
+      }
+      try {
+        return { ok: true, ...dispatcher.setModelSwitch(patch) };
+      } catch (e) {
+        return { ok: false, error: e?.message ?? String(e) };
+      }
+    },
   };
 
   /**
@@ -939,6 +961,10 @@ export function createRemoteFace(dispatcher, config = {}) {
     sequentialGet() { return impl.sequentialGet(); }
     /** sequentialSet({order}) → 同上 | { ok:false, error }（传 enabled 会抛 TypeError：已废弃）。 */
     sequentialSet(patch) { return impl.sequentialSet(patch); }
+    /** → { disabled, userDisabledCount }（逐模型开关：关掉的不出现在面板选项、不参与顺序派发）。 */
+    modelSwitchesGet() { return impl.modelSwitchesGet(); }
+    /** modelSwitchSet({route, enabled} | {disabled:[...]}) → 同上 | { ok:false, error }。 */
+    modelSwitchSet(patch) { return impl.modelSwitchSet(patch); }
   }
 
   // 方法标记写原型（协议 mark() 的落盘形状：版本化冻结描述符，键跨副本稳定）；
@@ -958,7 +984,7 @@ export function createRemoteFace(dispatcher, config = {}) {
 }
 
 /** face 方法面（标记/描述符/文档共用这一份表）：[方法名, 参数名数组, 签名, 结果说明]。 */
-const REMOTE_METHODS = ['snapshot', 'dispatch', 'kill', 'dismiss', 'retry', 'tail', 'setChannel', 'setFallbackChain', 'switchGet', 'switchSet', 'quota', 'quotaPlan', 'channels', 'channel', 'fallbackChain', 'sequentialGet', 'sequentialSet'];
+const REMOTE_METHODS = ['snapshot', 'dispatch', 'kill', 'dismiss', 'retry', 'tail', 'setChannel', 'setFallbackChain', 'switchGet', 'switchSet', 'quota', 'quotaPlan', 'channels', 'channel', 'fallbackChain', 'sequentialGet', 'sequentialSet', 'modelSwitchesGet', 'modelSwitchSet'];
 
 const FACE_METHOD_TABLE = [
   ['snapshot', [], 'snapshot(): Promise<snapshot>', '快照数据对象 {generatedAt, counts, locks, queue, jobs[], channels[], workRoot, maxConcurrent}', []],

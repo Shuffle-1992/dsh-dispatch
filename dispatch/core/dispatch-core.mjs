@@ -729,14 +729,28 @@ export function createDispatcher(options = {}) {
    *   ⚠️ 换模型 = 换进程（甚至换引擎）⇒ **会话无法继承**，只能是"新会话 + 交接提示词接着做"；
    *   磁盘上已完成的改动仍然留着。 */
   const sequentialFile = join(dirState, 'sequential.json');
+  /* ── ZB-58（用户要求，参照模型选择器）：**逐模型开关** ──
+   * 关掉的模型 ⇒ 不出现在面板的「模型」选项里，也不参与顺序派发链。
+   * 存储：`<workRoot>/state/models.json` = `{version:1, disabled:[<路由id>...], updatedAt}`。
+   * **用"禁用清单"而不是"启用清单"**：新探测到的模型默认**可用**（不会被静默藏起来），
+   * 用户只需关心自己关掉的那几个 —— 否则上游新增模型会默认不可见，那是更坏的默认。 */
+  const modelsFile = join(dirState, 'models.json');
+  let disabledModels = new Set();
+  /* ZB-57（用户反馈「加载有点久」）：档位探测结果**落盘**。
+   * 真机上 Qoder `--with-efforts` 约 2 分钟；原先结论只存在**内存**里 ⇒ **每次重启 DSH 都要重等 2 分钟**。
+   * 落盘后：首次探测一次，之后启动即读盘（秒级），并在后台按 TTL 静默刷新。
+   * ⚠️ 只是**缓存上次真实探测结果**，不编造；文件损坏/过期 ⇒ 当作没有（fail-open）。 */
+  const effortCacheFile = join(dirState, 'effort-cache.json');
+  /* 落盘值的"可用"时长：比内存刷新 TTL（30 分钟）长得多 —— 档位随模型目录变化，但变得很慢。
+   * 6 小时内的上次结论直接可用；超时才重新探测。 */
+  const EFFORT_DISK_TTL_MS = 6 * 60 * 60 * 1000;
   /** order[engine] = 该引擎的有序项（`{route, reasoningLevel}`）；`route` 形如
    *  `<通道id>::<模型名>`（ZCode）或 `<model>`（opencode/qoder）。
    *
-   *  ⚠️ ZB-52 第三轮（用户要求）：**没有全局开关** —— "是否顺序派发"由**模型是否为空**表达：
-   *  面板「模型」下拉选「顺序派发」⇒ 该通道的 model 存空值 ⇒ 派发时走顺序列表。
-   *  故 `enabled` 不再是独立布尔（`getSequential()` 也不再返回它）：
-   *  它一旦与"模型为空"两个真相并存，就会出现"开关开着但模型是具体值"这类**自相矛盾**的状态。
-   *  降级目标同理：目标 model 为空 + 该引擎有顺序 ⇒ 降级到该目标时也按顺序列表试。 */
+   *      关闭 ⇒ 派发不再走顺序链，面板「模型」下拉也不再出现「顺序派发」选项。
+   *   ② **激活条件**（精确到通道）：该通道的 `model` 为空 ⇒ 用该引擎的顺序列表。
+   *  早先去掉的是"②的独立开关"（那会与模型值自相矛盾）；①是功能级开关，不矛盾 ——
+   *  关掉时连选项都不出现，自然不存在"开着却没生效"的中间态。 */
   let seqOrder = {};
   /** 顺序派发在当前任务上的交接状态：jobId → { engine, chain:[{provider,model,reasoningLevel}], idx }。 */
   const seqRuns = new Map();
@@ -1782,6 +1796,8 @@ export function createDispatcher(options = {}) {
     for (const entry of list) {
       const route = typeof entry === 'string' ? entry : entry?.route;
       if (typeof route !== 'string' || !route) continue;
+      /* ZB-58：**被关掉的模型不参与顺序派发**（逐模型开关）—— 顺序列表本身不动，只是派发时跳过。 */
+      if (disabledModels.has(route)) continue;
       /* ZB-52：每项自带档位（用户要求「顺序思考强度档位设置」）；null = 该模型用引擎默认。 */
       const rl = (typeof entry === 'object' && entry ? entry.reasoningLevel : null) ?? null;
       const sep = route.indexOf('::');
@@ -1804,6 +1820,9 @@ export function createDispatcher(options = {}) {
    *  首次派发由 `dispatch()` 用它决定"用列表第一项"；降级目标由 `maybeAutoFallback` 用它决定
    *  "降到该目标时也按列表试"。 */
   function sequentialChainForSpec(spec) {
+    /* ZB-58：**功能总开关关闭 ⇒ 整块功能不生效**（派发不走顺序链；面板也不展示该选项）。
+     * 已在进行中的顺序链（`seqRuns` 里登记过的任务）按"登记即继续"处理 ——
+     * 关开关不该把正在跑的任务搞成半途而废（见 advanceSequential 只认已登记任务）。 */
     if (spec?.model != null && spec.model !== '') return null; // 指定了模型 ⇒ 不接管
     const eng = normalizeEngine(spec?.engine ?? resolveEngineOf(spec ?? {}));
     const chain = expandSequentialChain(eng);
@@ -2078,9 +2097,54 @@ export function createDispatcher(options = {}) {
     return (seqOrder[engine] ?? []).map((x) => x.route);
   }
 
+  /* ── ZB-58：逐模型开关（状态 + API） ── */
+
+  function persistModelSwitches() {
+    atomicWrite(modelsFile, `${JSON.stringify({
+      version: 1,
+      disabled: [...disabledModels].sort(),
+      updatedAt: new Date(nowMs()).toISOString(),
+    }, null, 2)}\n`);
+  }
+
+  function loadModelSwitches() {
+    try {
+      const data = JSON.parse(readFileSync(modelsFile, 'utf8'));
+      disabledModels = new Set(
+        (Array.isArray(data?.disabled) ? data.disabled : []).map((x) => String(x)).filter(Boolean),
+      );
+    } catch { /* 无文件/损坏：默认一个都不禁用（不猜、不抛） */ }
+  }
+
+  /** 面板读：`{disabled: [路由id...], userDisabledCount}`。
+   *  ⚠️ 用**禁用清单**：上游新探测到的模型默认可用（不会被静默藏起来）。 */
+  function getModelSwitches() {
+    return { disabled: [...disabledModels].sort(), userDisabledCount: disabledModels.size };
+  }
+
+  /**
+   * 面板写：`{route, enabled}`（翻单个）或 `{disabled: [...]}`（整体替换）。
+   * 返回写入后的 `getModelSwitches()`。
+   * ⚠️ 关掉某模型**不影响**已存顺序列表里的条目（那是"顺序"，不是"可用性"）——
+   * 只是派发时跳过它（见 expandSequentialChain）。
+   */
+  function setModelSwitch(patch) {
+    if (patch == null || typeof patch !== 'object') throw new TypeError('setModelSwitch: 需要对象 {route, enabled} 或 {disabled}');
+    if (Array.isArray(patch.disabled)) {
+      disabledModels = new Set(patch.disabled.map((x) => String(x)).filter(Boolean));
+    } else if (typeof patch.route === 'string' && patch.route) {
+      if (patch.enabled === false) disabledModels.add(patch.route);
+      else disabledModels.delete(patch.route);
+    } else {
+      throw new TypeError('setModelSwitch: 需要 {route, enabled} 或 {disabled}');
+    }
+    persistModelSwitches();
+    return getModelSwitches();
+  }
+
   function persistSequential() {
     atomicWrite(sequentialFile, `${JSON.stringify({
-      version: 2, // v2：去掉全局 mode（"是否顺序派发"由模型是否为空表达）
+      version: 2, // v2：无全局开关（"是否顺序派发"由模型是否为空表达）
       order: seqOrder,
       updatedAt: new Date(nowMs()).toISOString(),
     }, null, 2)}\n`);
@@ -2090,7 +2154,7 @@ export function createDispatcher(options = {}) {
     try {
       const data = JSON.parse(readFileSync(sequentialFile, 'utf8'));
       if (data && typeof data === 'object') {
-        /* v1 的 `mode` 字段**照常忽略**（不再有全局开关）；旧文件的 order 直接可用。 */
+        /* `enabled` 缺省 = **开**（旧 v1/v2 文件没有这个字段 ⇒ 保持原有行为，不让用户升级后功能突然消失）。 */
         seqOrder = {};
         if (data.order && typeof data.order === 'object') {
           for (const [eng, list] of Object.entries(data.order)) {
@@ -2099,17 +2163,17 @@ export function createDispatcher(options = {}) {
           }
         }
       }
-    } catch { /* 无文件/损坏：默认空（不猜） */ }
+    } catch { /* 无文件/损坏：默认开 + 空顺序（不猜） */ }
   }
 
-  /** 面板/工具读：`{order, levels, sequentialCount}`。
+  /** 面板/工具读：`{enabled, order, levels, sequentialCount}`。
    *  · `order[engine]` = **路由 id 数组**（从上到下 = 尝试次序；客户端既有渲染契约不变）；
    *  · `levels[engine]` = 与 `order[engine]` **同序**的档位数组（null = 该模型用引擎默认）。
    *  永远给出**三个引擎的键**（哪怕为空）—— 客户端据此渲染，不必自己知道有哪些引擎。
    *
-   *  ⚠️ **不再返回 `enabled`**：顺序派发没有全局开关，"是否启用"由**模型是否为空**表达
-   *  （面板「模型」下拉选「顺序派发」⇒ 该通道 model 存空值 ⇒ 走顺序列表）。
-   *  这样"开关"与"模型"不会出现互相矛盾的状态（用户要求去掉开关的根因）。 */
+   *    ② 激活条件 = **该通道的 model 为空**（精确到通道；由「模型」下拉的选中值表达）。
+   *  之前去掉的是"② 的独立开关"（它会和模型值自相矛盾）；①是**功能级**开关，不会矛盾：
+   *  关掉 ⇒ 整块功能隐藏（连选项都不出现），产出的状态也就无从矛盾。 */
   function getSequential() {
     const order = {};
     const levels = {};
@@ -2125,15 +2189,17 @@ export function createDispatcher(options = {}) {
     };
   }
 
-  /** 面板写：`{order}`（**按引擎合并**：patch 里出现的引擎覆盖，未出现的保留）。
-   *
-   *  ⚠️ `enabled` 已废弃（用户要求去掉开关）：若调用方仍传它 ⇒ **明确报错**，
-   *  而不是静默忽略 —— 静默忽略会让"开了开关却没生效"变成一个查不出来的 bug。
-   *  新语义：把该通道的「模型」设成空值即顺序派发（`setChannel({provider, model:''})`）。 */
+  /** 面板写：`{enabled?, order?}`。
+   *  · `order` = **按引擎合并**（patch 里出现的引擎覆盖，未出现的保留）。
+   *  两者可单传，互不覆盖。 */
   function setSequential(patch) {
     if (patch == null || typeof patch !== 'object') throw new TypeError('setSequential: 需要对象 {order}');
+    /* ⚠️ **没有"总开关"**（用户明确澄清：要的是**逐模型开关**，不是整块功能的总开关）。
+     * 传 `enabled` ⇒ 明确报错，不静默忽略 —— 静默忽略会让"我关掉了却没生效"变成查不出来的 bug。
+     * 正确做法：① 是否用顺序派发 = 把该通道「模型」设成空值；② 哪些模型可用 = `setModelSwitch()`。 */
     if ('enabled' in patch) {
-      throw new TypeError('setSequential: `enabled` 已废弃 —— 顺序派发由「模型」值表达（模型为空即顺序派发），不再有独立开关');
+      throw new TypeError('setSequential: `enabled` 已废弃 —— 顺序派发由「模型」值表达（模型为空即启用顺序派发）；'
+        + '要控制某个模型是否可用请用 setModelSwitch({route, enabled})');
     }
     if ('order' in patch) {
       /* ⚠️ **按引擎合并**，不是整体替换（队友真渲染探针抓到的真 bug）：
@@ -2345,9 +2411,40 @@ export function createDispatcher(options = {}) {
     if (cache == null) return false;
     return nowMs() - cache.at < (cache.ok ? QODER_EFFORT_TTL_MS : EFFORT_TTL_RETRY_MS);
   };
-  /* 缓存本体也在这里声明（不能只靠"async 函数调用得晚"侥幸躲过 TDZ —— 那是 latent 陷阱）。 */
+  /* 缓存本体也在这里声明（不能只靠"async 函数调用得晚"侥幸躲过 TDZ —— 那是 latent 陷阱）。
+   * OpenCode 的缓存也**一并提前**声明：下面 `loadEffortDiskCache`/`saveEffortDiskCache` 会引用它。 */
   let qoderEffortCache = null;
   let qoderEffortInFlight = null;
+  let opencodeEffortCache = null;
+  let opencodeEffortInFlight = null;
+
+  /* ── ZB-57：档位探测结果的**磁盘缓存**（解决"每次重启都要等 2 分钟"）──
+   * 形状：`{version:1, opencode:{at,value}, qoder:{at,value}}`（只存**成功**的结果）。
+   * 只读/只写 `<workRoot>/state/effort-cache.json`；任何异常都 fail-open（当作没有缓存）。 */
+  function loadEffortDiskCache() {
+    try {
+      const data = JSON.parse(readFileSync(effortCacheFile, 'utf8'));
+      const take = (slot) => {
+        if (!slot || typeof slot !== 'object' || slot.value == null) return null;
+        if (!Number.isFinite(slot.at) || nowMs() - slot.at >= EFFORT_DISK_TTL_MS) return null; // 过期 ⇒ 不要
+        return { at: slot.at, value: slot.value, ok: true, fromDisk: true };
+      };
+      const q = take(data?.qoder);
+      const o = take(data?.opencode);
+      if (q) qoderEffortCache = q;
+      if (o) opencodeEffortCache = o;
+    } catch { /* 无文件/损坏：当作没有（不猜、不抛） */ }
+  }
+
+  function saveEffortDiskCache() {
+    try {
+      const slot = (cache) => (cache && cache.value != null ? { at: cache.at, value: cache.value } : null);
+      const q = slot(qoderEffortCache);
+      const o = slot(opencodeEffortCache);
+      if (!q && !o) return; // 一个成功结果都没有 ⇒ 不写空文件
+      atomicWrite(effortCacheFile, `${JSON.stringify({ version: 1, qoder: q, opencode: o }, null, 2)}\n`);
+    } catch { /* 落盘失败只影响下次启动速度，绝不影响本次功能 */ }
+  }
 
   async function detectQoderChannels() {
     if (!qoderRunnerPath) return { models: [], version: null, warning: null };
@@ -2412,6 +2509,7 @@ export function createDispatcher(options = {}) {
         }
         if (value) {
           qoderEffortCache = { at: nowMs(), value, ok: true };
+          saveEffortDiskCache(); // ZB-57：落盘 ⇒ 下次重启 DSH 秒级可用（不用再等 2 分钟）
         } else {
           /* 失败 / 解析不出任何档位 ⇒ 保留旧值（若有），时间戳只用来决定"多久后再试"。
            * ⚠️ 不能编造档位；也**不能**因为失败就把重试推迟到 30 分钟后。 */
@@ -2495,9 +2593,8 @@ export function createDispatcher(options = {}) {
 
   /* ── ZB-52：OpenCode **逐模型**档位探测（`--with-variants`）的缓存 ──
    * 与 Qoder 侧同一套范式（TTL + 后台刷新 + in-flight 去重）。`models --verbose` 需要跑 CLI，
-   * 故同样不能挡在通道清单的同步路径上。 */
-  let opencodeEffortCache = null;
-  let opencodeEffortInFlight = null;
+   * 故同样不能挡在通道清单的同步路径上。
+   * ⚠️ 缓存本体（`opencodeEffortCache`/`opencodeEffortInFlight`）已在上方统一声明（避免 TDZ）。 */
 
   function refreshOpenCodeEfforts() {
     if (opencodeEffortInFlight) return opencodeEffortInFlight;
@@ -2520,6 +2617,7 @@ export function createDispatcher(options = {}) {
         /* ZB-56：成功才用长 TTL；失败/空结果用**短 TTL**（见 Qoder 侧的注释）—— */
         if (value) {
           opencodeEffortCache = { at: nowMs(), value, ok: true };
+          saveEffortDiskCache(); // ZB-57：落盘 ⇒ 下次重启 DSH 秒级可用
         } else {
           opencodeEffortCache = { at: nowMs(), value: opencodeEffortCache?.value ?? null, ok: false };
         }
@@ -2719,7 +2817,27 @@ export function createDispatcher(options = {}) {
       return allowed.length ? { ...c, models: allowed } : c; // 白名单写空时 fail-open（不清空）
     });
 
-    const all = [...zcodeChannelsFinal, ...opencodeChannels, ...qoderChannels];
+    const all = [...zcodeChannelsFinal, ...opencodeChannels, ...qoderChannels]
+      /* ZB-58（逐模型开关）：给每条通道打上 `userDisabled` 标记 —— **不删除**。
+       * 为什么不删除：① 面板要能列出"已关闭"的模型让用户重新打开；② 当前选中的值若恰好被关掉，
+       * 下拉仍需能渲染出它（否则 <select> 会掉到首项、显示与真实存值不符）。
+       * 面板「模型」选项据此过滤（关掉的不出现），顺序链也在 expandSequentialChain 里跳过。
+       *
+       * ⚠️ **禁用清单的身份是「模型项 key」**（面板「模型」下拉的 key）：
+       *   · opencode/qoder：key = 通道 id（一个通道就是一个模型）⇒ 与 id 相同；
+       *   · ZCode：key = `<路由id>::<模型名>`（一条路由可带多个模型）⇒ **必须用复合键**，
+       *     否则"关掉 GLM-5.3"会连带关掉同路由的 GLM-5.3-Flash（真机反馈过的粒度问题）。
+       * 通道级标记 = 该通道的模型 key **全部**被关掉时才算关（部分关时由面板按 key 精确判断）。 */
+      .map((c) => {
+        const eng = normalizeEngine(c.engine ?? inferEngine({ provider: c.id }));
+        const modelKeys = (Array.isArray(c.models) ? c.models : [])
+          .map((m) => (eng === 'zcode' ? `${c.id}::${m}` : String(m)));
+        const allModelsOff = modelKeys.length > 0 && modelKeys.every((k) => disabledModels.has(k));
+        return {
+          ...c,
+          userDisabled: disabledModels.has(String(c.id)) || allModelsOff,
+        };
+      });
     /* ZB-56（用户真机反馈「思考强度选项有时候会加载不出来」）：
      * 把**档位探测的状态**如实告诉面板 —— `pending` = 还没探到（探测在后台跑，Qoder 约 2 分钟），
      * `ready` = 已探到。面板据此显示「档位载入中…」而不是**只列一个「默认」**让人以为这模型没档位。
@@ -3318,6 +3436,8 @@ export function createDispatcher(options = {}) {
   loadEngineMap(); // ZB-44：通道→引擎快照（fail-open：读不到 ⇒ 全部按默认引擎 zcode）
   loadFallbackState();
   loadSequentialState(); // ZB-52：顺序派发配置（fail-open：读不到 ⇒ 默认关）
+  loadModelSwitches(); // ZB-58：逐模型开关（fail-open：读不到 ⇒ 一个都不禁用 = 全部可用）
+  loadEffortDiskCache(); // ZB-57：档位探测结果的磁盘缓存（解决"每次重启都要等 2 分钟"；fail-open）
 
   return {
     workRoot,
@@ -3346,6 +3466,9 @@ export function createDispatcher(options = {}) {
     /* ZB-52：顺序派发（面板入口 = 开关 + 每引擎一份模型顺序；顺序即派发次序） */
     getSequential,
     setSequential,
+    /* ZB-58：**逐模型开关**（用户要求：关掉的模型不出现在面板选项里、也不参与顺序派发） */
+    getModelSwitches,
+    setModelSwitch,
     /* ZB-44：引擎自检/展示用（只读；不参与调度决策）。面板与 CLI 想知道「OpenCode 执行器配到哪了」
      * 时不必再各自推断路径 —— 与 startJob 实际 spawn 的是**同一个值**。 */
     engines: [...ENGINES],

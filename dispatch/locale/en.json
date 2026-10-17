@@ -222,6 +222,9 @@
     "seqUseNone": "Not active yet: pick \"Sequential dispatch\" in Model to try this list",
     "seqLoading": "Loading channels and models…",
     "seqSaving": "Saving…",
-    "seqSortCol": "Order"
+    "seqSortCol": "Order",
+    "modelSwitchCol": "Available",
+    "modelDisabledTag": "Off",
+    "modelAvailCount": "{n}/{total} available"
   }
 }
