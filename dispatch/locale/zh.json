@@ -45,6 +45,12 @@
     "thinkLow": "低强度",
     "thinkHigh": "高强度",
     "thinkMax": "最高强度",
+    "thinkNone": "无思考",
+    "thinkMinimal": "最小强度",
+    "thinkMedium": "中等强度",
+    "thinkXhigh": "极高强度",
+    "thinkAuto": "自动",
+    "thinkUltracode": "极限强度",
     "thinkingFollow": "跟随通道",
     "dispatchThinkingHint": "跟随通道=按通道设置的思考强度派发（在「通道」分区设置）；具体档位=本条派发严格生效（仅新建会话）",
     "chanThinkingHint": "通道默认思考强度：Agent决定=由派发方 Agent 按任务自行改传具体档位；具体档位=给派发 Agent 的硬性规定（未显式指定的派发一律按它执行，仅新建会话生效）",
@@ -212,6 +218,9 @@
     "seqUseMain": "主通道正在使用此顺序",
     "seqUseFallback": "降级目标正在使用此顺序",
     "seqUseBoth": "主通道与降级目标都在使用此顺序",
-    "seqUseNone": "当前未生效：把通道的「模型」选成「顺序派发」后才按此列表尝试"
+    "seqUseNone": "当前未生效：把通道的「模型」选成「顺序派发」后才按此列表尝试",
+    "seqLoading": "正在加载通道与模型…",
+    "seqSaving": "保存中…",
+    "seqSortCol": "排序"
   }
 }

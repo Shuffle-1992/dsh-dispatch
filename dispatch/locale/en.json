@@ -45,6 +45,12 @@
     "thinkLow": "Low effort",
     "thinkHigh": "High effort",
     "thinkMax": "Max effort",
+    "thinkNone": "None",
+    "thinkMinimal": "Minimal",
+    "thinkMedium": "Medium",
+    "thinkXhigh": "Extra high",
+    "thinkAuto": "Auto",
+    "thinkUltracode": "Ultracode",
     "thinkingFollow": "Follow channel",
     "dispatchThinkingHint": "Follow channel = dispatch with the channel's thinking setting (set in the Channels section); a concrete level is enforced for this dispatch (new sessions only)",
     "chanThinkingHint": "Channel default thinking: Agent decides = the dispatching agent picks a concrete level per task; a concrete level is a hard rule for dispatched agents (dispatches without an explicit level follow it; new sessions only)",
@@ -212,6 +218,9 @@
     "seqUseMain": "The main channel is using this list",
     "seqUseFallback": "The fallback target is using this list",
     "seqUseBoth": "Both the main channel and the fallback target use this list",
-    "seqUseNone": "Not active yet: pick \"Sequential dispatch\" in Model to try this list"
+    "seqUseNone": "Not active yet: pick \"Sequential dispatch\" in Model to try this list",
+    "seqLoading": "Loading channels and models…",
+    "seqSaving": "Saving…",
+    "seqSortCol": "Order"
   }
 }

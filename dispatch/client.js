@@ -438,6 +438,9 @@ window.__ModuleLoader__.load({
         mode: '模式', timeout: '超时(分)', bench: '--memory-bench',
         thinking: '思考强度', thinkingAgent: 'Agent决定（按任务判断）', thinkingAgentShort: 'Agent决定',
         thinkDisabled: '关闭思考', thinkEnabled: '开启思考', thinkLow: '低强度', thinkHigh: '高强度', thinkMax: '最高强度',
+        /* ZB-55：三引擎实测 11 档 —— 下方 6 个补齐（原先掉回英文原文 none/minimal/medium/xhigh …） */
+        thinkNone: '无思考', thinkMinimal: '最小强度', thinkMedium: '中等强度', thinkXhigh: '极高强度',
+        thinkAuto: '自动', thinkUltracode: '极限强度',
         thinkingFollow: '跟随通道', dispatchThinkingHint: '跟随通道=按通道设置的思考强度派发（在「通道」分区设置）；具体档位=本条派发严格生效（仅新建会话）',
         chanThinkingHint: '通道默认思考强度：Agent决定=由派发方 Agent 按任务自行改传具体档位；具体档位=给派发 Agent 的硬性规定（未显式指定的派发一律按它执行，仅新建会话生效）',
         thinkingHint: 'Agent决定=由派发方按任务判断并改传具体档位；具体档位严格生效（仅新建会话；--resume 沿用原会话档位）',
@@ -515,6 +518,8 @@ window.__ModuleLoader__.load({
         seqUseFallback: '降级目标正在使用此顺序',
         seqUseBoth: '主通道与降级目标都在使用此顺序',
         seqUseNone: '当前未生效：把通道的「模型」选成「顺序派发」后才按此列表尝试',
+        /* ZB-55：加载态 / 保存反馈 / 表头列名（卡片与浮窗共用） */
+        seqLoading: '正在加载通道与模型…', seqSaving: '保存中…', seqSortCol: '排序',
         paused: '已暂停', pQuota: '额度耗尽', pEntitled: '未开通', pSigning: '需签名', pConfig: '配置错误', pUnknown: '未知原因',
         lockWait: '排队等待', timedOut: '超时终止',
         timedOutRunner: 'runner 超时（exit 124，--timeout-min 到点）', timedOutWatchdog: '看门狗强制终止（timeoutMin+120s 宽限后未退出）',
@@ -545,6 +550,9 @@ window.__ModuleLoader__.load({
         mode: 'Mode', timeout: 'Timeout (min)', bench: '--memory-bench',
         thinking: 'Thinking', thinkingAgent: 'Agent decides (per task)', thinkingAgentShort: 'Agent decides',
         thinkDisabled: 'Thinking off', thinkEnabled: 'Thinking on', thinkLow: 'Low effort', thinkHigh: 'High effort', thinkMax: 'Max effort',
+        /* ZB-55: three engines actually report 11 levels — these 6 used to fall back to the raw id. */
+        thinkNone: 'None', thinkMinimal: 'Minimal', thinkMedium: 'Medium', thinkXhigh: 'Extra high',
+        thinkAuto: 'Auto', thinkUltracode: 'Ultracode',
         thinkingFollow: 'Follow channel', dispatchThinkingHint: "Follow channel = dispatch with the channel's thinking setting (set in the Channels section); a concrete level is enforced for this dispatch (new sessions only)",
         chanThinkingHint: 'Channel default thinking: Agent decides = the dispatching agent picks a concrete level per task; a concrete level is a hard rule for dispatched agents (dispatches without an explicit level follow it; new sessions only)',
         thinkingHint: 'Agent decides = the dispatching agent picks a concrete level per task; a concrete level is enforced (new sessions only; --resume keeps the session level)',
@@ -617,6 +625,8 @@ window.__ModuleLoader__.load({
         seqUseFallback: 'The fallback target is using this list',
         seqUseBoth: 'Both the main channel and the fallback target use this list',
         seqUseNone: 'Not active yet: pick "Sequential dispatch" in Model to try this list',
+        /* ZB-55: loading state / saving feedback / table column labels (shared by card + panel). */
+        seqLoading: 'Loading channels and models…', seqSaving: 'Saving…', seqSortCol: 'Order',
         paused: 'Paused', pQuota: 'Quota exhausted', pEntitled: 'Not entitled', pSigning: 'Signing required', pConfig: 'Config error', pUnknown: 'Unknown',
         lockWait: 'Queue wait', timedOut: 'Timed out',
         timedOutRunner: 'runner timeout (exit 124, --timeout-min elapsed)', timedOutWatchdog: 'watchdog kill (still running after timeoutMin+120s grace)',
@@ -2041,7 +2051,13 @@ window.__ModuleLoader__.load({
     const pauseLabel = (r) => t(PAUSE_LABEL_KEY[r] ?? 'pUnknown');
     /* ZB-29e（用户要求）：思考强度档位**中文显示** —— 值与传输一律用原始字符串（disabled/enabled/
      * low/high/max），只在显示层映射中文标签；未知档位（上游新增）原样显示，绝不隐藏、不猜语义。 */
-    const THINKING_LABEL_KEY = { disabled: 'thinkDisabled', enabled: 'thinkEnabled', low: 'thinkLow', high: 'thinkHigh', max: 'thinkMax' };
+    const THINKING_LABEL_KEY = { disabled: 'thinkDisabled', enabled: 'thinkEnabled', low: 'thinkLow', high: 'thinkHigh', max: 'thinkMax',
+      /* ZB-55：三引擎实测 11 档 —— 上面 5 个之外再补 6 个（未映射的会掉回英文原文 none/minimal/medium/xhigh）。
+       * ⚠️ 第一行必须保持 `{ disabled: 'thinkDisabled'` 这个**字面形状**（thinking-level.test.mjs 钉住）；
+       * 仍然保留"未映射就显示原值"的兜底（`|| lv`，诚实降级，上游新增档位不会空白）。 */
+      none: 'thinkNone', minimal: 'thinkMinimal', medium: 'thinkMedium', xhigh: 'thinkXhigh',
+      auto: 'thinkAuto', ultracode: 'thinkUltracode',
+    };
     const thinkingLabel = (lv) => (lv == null || lv === '' ? '' : t(THINKING_LABEL_KEY[lv] ?? '') || lv);
     /* ZB-30：降级目标归一 / 形状 helper 已**上移**到 `demoWire()` 之前
      * （见那里的注释：demo 的 fallbackGet/fallbackSet 会引用它们，留在原处是 latent TDZ）。 */
@@ -2542,67 +2558,92 @@ window.__ModuleLoader__.load({
     };
     /** 渲染顺序列表块（无块时返回 null ⇒ 调用方那一行什么都不渲染）。
      *  · 默认（浮窗）：提示行用**完整** `seqHint`（浮窗空间足够，也把"主/降级两链"讲清）；
-     *  · 配置卡：传 `hint`（一行短句）+ `hintTitle`（完整说明进 tooltip）—— 见 DispatchConfigCard。 */
-    function SeqBlocksView({ blocks, offline, busy, hint, hintTitle }) {
+     *  · 配置卡：传 `hint`（一行短句）+ `hintTitle`（完整说明进 tooltip）—— 见 DispatchConfigCard。
+     *  · `busy`：有写在途 ⇒ **禁掉该块全部交互**（下拉 + ↑↓），防连点；
+     *    `saving`：显示「保存中…」指示（只有配置卡传 —— 浮窗的 busy 是降级开关在用，不该显示"保存中"）。
+     *  · ZB-55 布局：**表格式**（区块头 + 列头 `#/模型/档位/排序` + 定宽列 + 细分隔线）——
+     *    原先「尝试顺序」浮在列表左侧中间、序号/模型间距过大、右侧控件挤在一起且行高不齐。
+     *    窄容器（440px）靠"序号 22px + 档位 104px + 排序 56px 定宽、模型列 flex 自适应 + 省略号"不换行错乱。 */
+    function SeqBlocksView({ blocks, offline, busy, saving, hint, hintTitle }) {
       if (!blocks || !blocks.length) return null;
+      const row = { display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0' };
+      const idxW = { flex: '0 0 22px', textAlign: 'right' };
+      const nameW = { flex: '1 1 auto', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+      const lvW = { flex: '0 0 104px', padding: '1px 6px' };
+      const sortW = { flex: '0 0 56px', display: 'flex', justifyContent: 'center', gap: '4px' };
+      const btnW = { flex: '0 0 24px', padding: '1px 0', textAlign: 'center', lineHeight: '16px' };
       return h('div', { className: 'dsp-stack', 'data-dsp-sequential': 'list' },
         h('div', { className: 'dsp-note', role: 'status', title: hintTitle ?? (offline ? t('seqOfflineHint') : undefined) },
           hint ?? t('seqHint')),
         blocks.map((b) => h('div', {
           className: 'dsp-stack', key: b.owner, 'data-dsp-seq-block': b.owner,
         },
-          h('div', { className: 'dsp-note', role: 'status', title: t('seqOrderLabel') },
+          /* 区块头：标题在**列表上方** + 右对齐徽标（引擎 · 条数）+ 保存中指示 */
+          h('div', { className: 'dsp-field', title: t('seqOrderLabel') },
+            h('span', { className: 'dsp-field-k' }, t('seqOrderLabel')),
+            h('span', { className: 'dsp-spring' }),
+            saving ? h('span', { className: 'dsp-dim', role: 'status', 'data-dsp-seq-saving': '1' }, t('seqSaving')) : null,
             h('span', { className: 'dsp-badge' },
               `${b.owner === 'fallback' ? `${t('fallbackTitle')} → ` : ''}${b.engine ? engLabel(b.engine) : '-'} · ${b.list.length}`)),
           !b.engine || !b.list.length
             ? h('div', { className: 'dsp-note', role: 'status' }, t('seqEmpty'))
-            : h('div', { className: 'dsp-field' },
-              h('span', { className: 'dsp-field-k' }, t('seqOrderLabel')),
-              h('span', { className: 'dsp-field-v', style: { display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '0' } },
-                b.list.map((m, i) => {
-                  /* ZB-52b：该行模型的档位下拉选项（取不到档位声明 ⇒ 只有「默认」，不瞎列）。 */
-                  const lvList = b.levelsOf(m);
-                  const curLv = b.levelOf(m);
-                  /* 存值不在当前档位集里（探测表变化 / 该模型档位暂时没探测到）⇒ 显式列出并标注，
-                   * 否则 <select value> 命不中 option 会显示首项「默认」，与真实存值不符（ZB-31 同类坑）。 */
-                  const lvStale = curLv != null && !lvList.includes(curLv);
-                  const lvAria = `${t('seqLevelLabel')}：${b.labelOf(m)}`;
-                  return h('div', {
-                    key: m, 'data-dsp-seq-item': m, 'data-dsp-seq-owner': b.owner,
-                    style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0' },
+            : h('div', { className: 'dsp-stack', style: { minWidth: '0' } },
+              /* 列头：`#` / 模型 / 档位 / 排序（次级文字色 + 略小字号） */
+              h('div', {
+                style: {
+                  ...row, color: T.text2, fontSize: '11px', lineHeight: '16px',
+                  padding: '0 0 3px', borderBottom: `1px solid ${T.border}`,
+                },
+              },
+                h('span', { style: idxW }, '#'),
+                h('span', { style: nameW }, t('model')),
+                h('span', { style: { flex: lvW.flex } }, t('seqLevelLabel')),
+                h('span', { style: { flex: sortW.flex, textAlign: 'center' } }, t('seqSortCol'))),
+              b.list.map((m, i) => {
+                /* ZB-52b：该行模型的档位下拉选项（取不到档位声明 ⇒ 只有「默认」，不瞎列）。 */
+                const lvList = b.levelsOf(m);
+                const curLv = b.levelOf(m);
+                /* 存值不在当前档位集里（探测表变化 / 该模型档位暂时没探测到）⇒ 显式列出并标注，
+                 * 否则 <select value> 命不中 option 会显示首项「默认」，与真实存值不符（ZB-31 同类坑）。 */
+                const lvStale = curLv != null && !lvList.includes(curLv);
+                const lvAria = `${t('seqLevelLabel')}：${b.labelOf(m)}`;
+                return h('div', {
+                  key: m, 'data-dsp-seq-item': m, 'data-dsp-seq-owner': b.owner,
+                  style: { ...row, minHeight: '26px', borderBottom: `1px solid ${T.border}` },
+                },
+                  h('span', { className: 'dsp-dim', style: idxW }, `${i + 1}`),
+                  h('span', {
+                    className: 'dsp-note',
+                    style: { ...nameW, fontFamily: T.mono },  // 等宽字体利于读模型 id
+                    title: b.stale.includes(m) ? `${m}${t('seqUnavailable')}` : b.labelOf(m),
+                  }, b.stale.includes(m) ? `${b.labelOf(m)}${t('seqUnavailable')}` : b.labelOf(m)),
+                  /* 逐模型档位下拉：value = 原始档位字符串（'' = 引擎默认）；label = 中文标签。 */
+                  h('select', {
+                    className: 'dsp-select', 'data-dsp-seq-level': m,
+                    value: curLv ?? '',
+                    disabled: busy,
+                    title: lvAria, 'aria-label': lvAria,
+                    style: lvW,
+                    onChange: (e) => b.setLevel(m, e.target.value),
                   },
-                    h('span', { className: 'dsp-note', style: { flex: '0 0 18px' } }, `${i + 1}.`),
-                    h('span', {
-                      className: 'dsp-note',
-                      style: { flex: '1', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-                      title: b.stale.includes(m) ? `${m}${t('seqUnavailable')}` : b.labelOf(m),
-                    }, b.stale.includes(m) ? `${b.labelOf(m)}${t('seqUnavailable')}` : b.labelOf(m)),
-                    /* 逐模型档位下拉：value = 原始档位字符串（'' = 引擎默认）；label = 中文标签。 */
-                    h('select', {
-                      className: 'dsp-select', 'data-dsp-seq-level': m,
-                      value: curLv ?? '',
-                      disabled: busy,
-                      title: lvAria, 'aria-label': lvAria,
-                      style: { flex: '0 0 auto', maxWidth: '108px', padding: '1px 6px' },
-                      onChange: (e) => b.setLevel(m, e.target.value),
-                    },
-                      h('option', { key: '__default', value: '' }, t('seqLevelDefault')),
-                      lvStale ? h('option', { key: '__stale', value: curLv }, `${thinkingLabel(curLv)}（${t('thinkingStale')}）`) : null,
-                      lvList.map((lv) => h('option', { key: lv, value: lv }, thinkingLabel(lv)))),
-                    /* ↑↓ 按钮（用户要求：上移/下移即可，不引拖拽库）。首/末项各自禁用对应方向。 */
+                    h('option', { key: '__default', value: '' }, t('seqLevelDefault')),
+                    lvStale ? h('option', { key: '__stale', value: curLv }, `${thinkingLabel(curLv)}（${t('thinkingStale')}）`) : null,
+                    lvList.map((lv) => h('option', { key: lv, value: lv }, thinkingLabel(lv)))),
+                  /* ↑↓ 两个方形小按钮（不用拖拽库）。首/末项各自禁用对应方向；保存中整块禁用。 */
+                  h('span', { style: sortW },
                     h('button', {
-                      className: 'dsp-btn2', type: 'button', style: { padding: '2px 8px' },
-                      disabled: i === 0, title: t('seqUp'),
+                      className: 'dsp-btn2', type: 'button', style: btnW,
+                      disabled: busy || i === 0, title: t('seqUp'),
                       'aria-label': `${t('seqUp')}：${b.labelOf(m)}`,
                       onClick: () => b.move(i, -1),
                     }, '↑'),
                     h('button', {
-                      className: 'dsp-btn2', type: 'button', style: { padding: '2px 8px' },
-                      disabled: i === b.list.length - 1, title: t('seqDown'),
+                      className: 'dsp-btn2', type: 'button', style: btnW,
+                      disabled: busy || i === b.list.length - 1, title: t('seqDown'),
                       'aria-label': `${t('seqDown')}：${b.labelOf(m)}`,
                       onClick: () => b.move(i, 1),
-                    }, '↓'));
-                }))))));
+                    }, '↓')));
+              })))));
     }
 
     /* 通道分区：切换器（provider+model+思考强度，不可用项置灰带原因）+ 自动降级开关。
@@ -4057,6 +4098,12 @@ window.__ModuleLoader__.load({
     function DispatchConfigCard() {
       const { conn, channels, channelGet, fallbackGet, sequentialGet, sequentialSet } = useWire();
       const [channelsInfo, setChannelsInfo] = useState({ channels: [], warnings: [] });
+      /* ZB-55：**区分"还在加载"与"真的没有模型"** —— 首帧通道清单还没到时，
+       * 旧实现会显示「该引擎当前没有可选模型」= **谎报**。现在用三态：
+       *   'loading'（还没拿到）→ 卡片显示加载指示、不渲染引擎按钮/列表；
+       *   'ready'（拿到了，可能确实是空表）→ 才渲染；'error'（拉取失败）→ 只显示可读错误。
+       * ⚠️ 不伪造延迟：数据一到就渲染（切引擎是本地 state ⇒ 瞬时）。 */
+      const [chansState, setChansState] = useState('loading');
       const [channel, setChannelState] = useState({ provider: 'plan', model: 'GLM-5.3-Flash' });
       const [fallback, setFallbackState] = useState({ enabled: false, chain: [], targets: [], target: null });
       const [sequential, setSequentialState] = useState({
@@ -4064,15 +4111,17 @@ window.__ModuleLoader__.load({
         levels: { zcode: [], opencode: [], qoder: [] },
         sequentialCount: 0,
       });
-      const [busy, setBusy] = useState(false);
+      const [saving, setSaving] = useState(false);
+      /* 防连点：在途时**同步**拦截（React state 更新是异步的，光靠 `saving` 拦不住双击）。 */
+      const savingRef = useRef(false);
       const [err, setErr] = useState(null);
       useEffect(() => {
         let alive = true;
         Promise.resolve(channels()).then((r) => {
           if (!alive) return;
-          if (r && r.ok) setChannelsInfo({ channels: r.channels ?? [], warnings: r.warnings ?? [] });
-          else setErr(String((r && r.error) || 'channels() 未返回 ok'));
-        }).catch((e) => { if (alive) setErr(String(e?.message ?? e)); });
+          if (r && r.ok) { setChannelsInfo({ channels: r.channels ?? [], warnings: r.warnings ?? [] }); setChansState('ready'); }
+          else { setErr(String((r && r.error) || 'channels() 未返回 ok')); setChansState('error'); }
+        }).catch((e) => { if (alive) { setErr(String(e?.message ?? e)); setChansState('error'); } });
         Promise.resolve(channelGet()).then((r) => {
           if (alive && r && r.ok && r.channel && r.channel.provider) setChannelState(r.channel);
         }).catch(() => { /* 保持初值（离线下由上面的提示说明原因） */ });
@@ -4086,13 +4135,21 @@ window.__ModuleLoader__.load({
         }).catch(() => { /* 同上 */ });
         return () => { alive = false; };
       }, [channels, channelGet, fallbackGet, sequentialGet]);
-      /** 写入顺序列表：与浮窗同一套 patch（`{order}` 单引擎）；失败只显示可读错误，不抛。 */
+      /** 写入顺序列表：与浮窗同一套 patch（`{order}` 单引擎）；失败只显示可读错误，不抛。
+       *  ⚠️ 防连点：`savingRef` 同步拦截在途期间的重复写入（双击/连点不会发第二次）。
+       *  保存期间 `saving=true` ⇒ 该块下拉与 ↑↓ 全部禁用 + 区块头显示「保存中…」（不整卡闪）。 */
       const onSet = useCallback((patch) => {
-        setBusy(true);
+        if (savingRef.current) return;
+        savingRef.current = true;
+        setSaving(true);
+        setErr(null);
         Promise.resolve(sequentialSet(patch)).then((r) => {
-          if (r && r.ok) { setSequentialState(normSeqShape(r)); setErr(null); }
+          if (r && r.ok) setSequentialState(normSeqShape(r));
           else setErr(String((r && r.error) || '顺序设置写入失败'));
-        }).catch((e) => setErr(String(e?.message ?? e))).finally(() => setBusy(false));
+        }).catch((e) => setErr(String(e?.message ?? e))).finally(() => {
+          savingRef.current = false;
+          setSaving(false);
+        });
       }, [sequentialSet]);
       /** 用户手动选中的编辑引擎（null = 还没选 ⇒ 用默认推导）。 */
       const [pickedEng, setPickedEng] = useState(null);
@@ -4104,7 +4161,30 @@ window.__ModuleLoader__.load({
       /* 选中的引擎**始终**渲染它的顺序列表（哪怕当前没被任何链使用 —— 否则就是"先开了才有东西配"的鸡生蛋）。 */
       const block = makeEngineSeqBlock({ channels: chans, engine: activeEng, sequential, onSet });
       const offline = conn === 'offline';
-      const noChannels = chans.length === 0;
+      /* 该引擎"没有模型"的**诚实原因**（探针未返回 / 执行器未配置等，来自 core 的 warnings）——
+       * 有原因就显示原因，而不是干巴巴一句"没有可选模型"（也不能谎称"还在加载"）。 */
+      const engineWarn = (channelsInfo.warnings ?? [])
+        .find((w) => String(w).toLowerCase().includes(String(activeEng).toLowerCase())) ?? null;
+      const cardStyle = { ...DSP_CSS_VARS, padding: '10px 12px', border: `1px solid ${T.border}`, borderRadius: '8px' };
+      /* ③ 数据未就绪（wire 还在 connecting / channels 还没回来）⇒ **加载中**，不渲染引擎按钮与列表。
+       * 用户原话「完全加载完成才显示」；也绝不把"还没到"显示成"没有模型"（那是谎报）。 */
+      if (chansState === 'loading' || conn === 'connecting') {
+        return h('div', {
+          className: 'dsp-stack', style: cardStyle,
+          'data-dsp-bundle-config': BUNDLE_CONFIG_KEY, 'data-dsp-seq-state': 'loading',
+        },
+          h('div', { className: 'dsp-field' },
+            h(StatusDot, { state: 'running' }),
+            h('span', { className: 'dsp-note', style: { marginLeft: '6px' } }, t('seqLoading'))));
+      }
+      /* 拉取失败 ⇒ 只显示可读错误（不猜引擎、不显示空列表） */
+      if (chansState === 'error') {
+        return h('div', {
+          className: 'dsp-stack', style: cardStyle,
+          'data-dsp-bundle-config': BUNDLE_CONFIG_KEY, 'data-dsp-seq-state': 'error',
+        },
+          h('div', { className: 'dsp-feedback dsp-err', role: 'status' }, `${t('chanLoadFail')}: ${err ?? '-'}`));
+      }
       /* 状态行：这个顺序**现在生效吗**（主通道用它 / 降级目标用它 / 都没用）—— 一行，用户要求。 */
       const usageKey = usage.main && usage.fallback ? 'seqUseBoth'
         : usage.main ? 'seqUseMain'
@@ -4112,8 +4192,8 @@ window.__ModuleLoader__.load({
       const usageState = usage.main && usage.fallback ? 'both' : usage.main ? 'main' : usage.fallback ? 'fallback' : 'none';
       return h('div', {
         className: 'dsp-stack',
-        style: { ...DSP_CSS_VARS, padding: '10px 12px', border: `1px solid ${T.border}`, borderRadius: '8px' },
-        'data-dsp-bundle-config': BUNDLE_CONFIG_KEY,
+        style: cardStyle,
+        'data-dsp-bundle-config': BUNDLE_CONFIG_KEY, 'data-dsp-seq-state': 'ready',
       },
         /* ① 引擎选择：ZCode / OpenCode / Qoder（小切换控件，沿用 dsp-btn2 + 主题令牌高亮） */
         h('div', { className: 'dsp-field' },
@@ -4131,14 +4211,19 @@ window.__ModuleLoader__.load({
             }, engLabel(eng))))),
         /* ② 状态行：该引擎当前是否正在被顺序派发（主 / 降级 / 都没用） */
         h('div', { className: 'dsp-note', role: 'status', 'data-dsp-seq-usage': usageState }, t(usageKey)),
-        /* ③ 一行关键信息（完整说明进 tooltip `seqHint`；卡片不再被 ~300 字占满） + 该引擎的顺序列表 */
+        /* ③ 一行关键信息（完整说明进 tooltip `seqHint`；卡片不再被 ~300 字占满） + 该引擎的顺序列表
+         * `saving` ⇒ 区块头显示「保存中…」且整块交互禁用（不整卡闪）。 */
         h(SeqBlocksView, {
-          blocks: [block], offline, busy,
+          blocks: [block], offline, busy: saving, saving,
           hint: t('seqHintCard'), hintTitle: t('seqHint'),
         }),
+        /* 该引擎确实没有模型时，**带上 core 给的原因**（探测未返回 / 执行器未配置…），比一句空态诚实 */
+        (!block.list.length && engineWarn)
+          ? h('div', { className: 'dsp-note', role: 'status' }, String(engineWarn).replace(/^\[info\]\s*/, ''))
+          : null,
         /* 未就绪 / 空清单：说清原因（而不是让用户对着空卡片猜）—— 复用既有文案键 */
-        offline || noChannels
-          ? h('div', { className: 'dsp-note', role: 'status' }, offline ? t('chanOfflineHint') : t('chanLoading'))
+        offline
+          ? h('div', { className: 'dsp-note', role: 'status' }, t('chanOfflineHint'))
           : null,
         err
           ? h('div', { className: 'dsp-feedback dsp-err', role: 'status' }, `${t('chanLoadFail')}: ${err}`)
