@@ -3854,12 +3854,13 @@ window.__ModuleLoader__.load({
                     : h('span', { className: 'dsp-dim' }, `｜ ${t('jobLastBeat')} ${job.lastProgressAgoSec ?? '?'}s`))
                   : null,
                 /* paused 的原因（"额度耗尽/未开通/需签名/配置错误"）—— 没有心跳的行也放左侧这一组。 */
-                paused ? h('span', { className: 'dsp-badge s-paused', title: job.pauseDetail ?? '' }, `${t('paused')}：${pauseLabel(job.pauseReason)}`) : null),
-              /* 血缘徽标：**右侧**（用户要求"第三行右侧是接续"；N 跳同族，一起放这里）。 */
-              lineage
+                paused ? h('span', { className: 'dsp-badge s-paused', title: job.pauseDetail ?? '' }, `${t('paused')}：${pauseLabel(job.pauseReason)}`) : null,
+                /* ZB-70f（用户要求）：**只有「接续自 X」右对齐**，其余第三行内容（含「N 跳」）一律左对齐。 */
+                (job.hopCount ?? 0) > 0 ? h('span', { className: 'dsp-badge' }, `${job.hopCount} ${t('hop')}`) : null),
+              /* 右对齐的只有父任务来源。 */
+              job.parentJobId
                 ? h('span', { className: 'dsp-job-right' },
-                  job.parentJobId ? h('span', { className: 'dsp-badge', title: job.parentJobId }, `${t('parentFrom')} ${shortId(job.parentJobId)}`) : null,
-                  (job.hopCount ?? 0) > 0 ? h('span', { className: 'dsp-badge' }, `${job.hopCount} ${t('hop')}`) : null)
+                  h('span', { className: 'dsp-badge', title: job.parentJobId }, `${t('parentFrom')} ${shortId(job.parentJobId)}`))
                 : null,
             )
             : null,

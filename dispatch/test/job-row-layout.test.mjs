@@ -248,7 +248,10 @@ console.log('\nB. 页脚「清除所有」：只在非「进行中」出现');
   const doneRow3Right = findAll(doneRow3, (n) => cls(n) === 'dsp-job-right');
   ok(doneRow3Right.length === 1, `B14 第 3 行有右对齐组（实际 ${doneRow3Right.length}）`);
   const r3text = text(doneRow3Right[0]);
-  ok(/接续自/.test(r3text) && /2 跳/.test(r3text), `B15 右组 = 接续自 + N 跳（实际「${r3text}」）`);
+  /* ZB-70f（用户要求）：**只有「接续自 X」右对齐**；「N 跳」等其余第三行内容一律左对齐。 */
+  ok(/接续自/.test(r3text) && !/2 跳/.test(r3text), `B15 右组**只有**接续自（实际「${r3text}」）`);
+  const r3left = text(findAll(doneRow3, (n) => cls(n) === 'dsp-job-left')[0]);
+  ok(/2 跳/.test(r3left), `B15b 「N 跳」在左侧组（左对齐，实际「${r3left}」）`);
   ok(!/接续自/.test(text(doneLine1)), 'B16 第一行没有血缘徽标（没被挤回去）');
 }
 
