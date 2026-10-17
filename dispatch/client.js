@@ -36,11 +36,17 @@ window.__ModuleLoader__.load({
     const { useState, useEffect, useRef, useCallback, useLayoutEffect } = React;
 
     /* ─────────────── 槽位 ───────────────
-     * shell.overlay 已从客户端 bundle 实证存在（详见 refs/dsh-slots.md）：
+     * `shell.overlay` 已从客户端 bundle 实证存在（详见 refs/dsh-slots.md）：
      * 声明于 dsh-client-ui-layout 的 root children 表 { kind:'list', scope:'root' }，
      * 由 AppFrame 渲染进专用 overlayLayer 图层；chat / plugin-manager / workspace
-     * 三个官方包共 6 处先例都注册在此（list 型 → 注册必须带 id，order 参与排序）。 */
-    const SLOT = 'shell.overlay';
+     * 三个官方包共 6 处先例都注册在此（list 型 → 注册必须带 id，order 参与排序）。
+     *
+     * ZB-60（兼容性加固）：它现在是**主入口的备用槽位** —— 只有会话标题行槽位（HEADER_SLOT）
+     * 在 DSH 升级后改名/删除、注册不上时才启用（右下角浮层入口）。
+     * ⚠️ 绝不与主入口**同时**注册（ZB-27 已否决"两份 UI 让人分不清哪个才是派发台"）。 */
+    const FALLBACK_SLOT = 'shell.overlay';
+    /** 主槽位"始终未声明"的宽限：正常启动是毫秒级同步就绪；只有升级改名才会等到 2s 后降级。 */
+    const SLOT_GRACE_MS = 2000;
     /* ─────────────── ZB-24：会话标题行入口 ───────────────
      * 用户要求（2026-10-05）：「把派发台改成与子智能体一样的位置，在那一行显示 DSH 派发台，
      * 点击弹出面板」—— 即**别只靠右下角悬浮窗**，要在会话标题行（「对话|轨迹」那一行的右侧）
@@ -382,6 +388,16 @@ window.__ModuleLoader__.load({
       /* ZB-27z：**基础字号**（原浮窗时代的 .dsp-root{font-size:12px} 在重构中被丢掉，导致进程行等
        * 未显式设字号的元素继承应用根部 ~14px、整体偏大）。取官方弹层主行的 12px/17px 作为基准。 */
       '.dsp-menu{position:absolute;top:calc(100% + 5px);left:0;z-index:100;font-size:12px;line-height:17px;box-sizing:border-box;display:flex;flex-direction:column;gap:1px;width:min(var(--dsp-w,' + WIDTH.def + 'px),calc(100vw - 32px));max-height:min(480px,calc(100vh - 140px));margin:0;padding:3px;overflow:auto;border:0;border-radius:var(--dsw-radius-lg,12px);background:var(--dsw-specific-menu,' + T.bg + ');backdrop-filter:var(--dsw-menu-backdrop-filter,none);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent,' + T.shadow + ');text-align:left;}',
+      /* ── ZB-60：**降级备用入口**（右下角浮层，仅当会话头槽位不可用时才注册）──
+       * 它不是"第二份 UI"：主入口注册成功时这条路径永不启用。形态要点：
+       *   · 右下角固定定位 + 胶囊外观（主入口是透明文字按钮，浮层若也透明会看不见）；
+       *   · 弹窗**向上**展开并右对齐 —— 否则会掉出视口底部（`.dsp-menu` 默认是 top:calc(100%+5px)/left:0）。
+       * 全部颜色走主题令牌（明暗两套自适应），与主入口同一纪律。
+       * ⚠️ 这三条**必须排在 `.dsp-menu` 规则之后**：header-entry.test 用"第一条含 `dsp-menu{` 的规则"
+       *    作为官方同值基准（B24~B30），放在前面会误抢匹配。 */
+      '.dsp-entry-float{position:fixed;right:16px;bottom:16px;z-index:1000;padding:2px 6px;border-radius:999px;background:' + T.bg + ' !important;border:1px solid ' + T.border + ' !important;box-shadow:' + T.shadow + ' !important;}',
+      '.dsp-entry-float:hover{border-color:' + T.text3 + ' !important;}',
+      '.dsp-entry-float .dsp-menu{top:auto;bottom:calc(100% + 6px);left:auto;right:0;}',
       '.dsp-panelHead{display:flex;align-items:center;gap:8px;padding:6px 8px 5px;border-bottom:.5px solid var(--dsw-alias-border-l1,' + T.border + ');}',
       '.dsp-panelTitle{flex:1;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:' + T.text + ';}',
       /* 行内小图标按钮（**仍在使用**：JobRow 的终止 / 重跑 / 续接 / 关闭）。ZB-27 清理浮窗样式时
@@ -3999,7 +4015,19 @@ window.__ModuleLoader__.load({
      *   ② 关闭方式与系统一致：点外部 / Esc / 再点入口；弹窗贴右对齐（本入口在标题行右端）；
      *   ③ 主题令牌只用 T.*（带 --dsw-alias-* 回退）—— 这枚入口不在 .dsp-menu 子树内，
      *      拿不到 --dsp-* 自定义属性。 */
-    function HeaderEntry() {
+    /** 主入口（会话标题行）：语义/行为完全不变，仅把实现体抽到共享的 `EntryImpl`（同一套开合与样式逻辑）。
+     *  ⚠️ 保持 `function HeaderEntry()` 这个**字面形状** —— header-entry.test D1 用 `indexOf` 定位入口实现体。 */
+    function HeaderEntry() { return h(EntryImpl, { variant: 'header' }); }
+    /** ZB-60 备用入口（右下角浮层）：**仅当**会话头槽位不可用时才注册（降级链见 apply）。
+     *  与主入口**互斥**（同一时刻只会注册一个），绝不是"两份 UI"。 */
+    function HeaderOverlayEntry() { return h(EntryImpl, { variant: 'overlay' }); }
+    /** 入口实现体：`variant` 决定是会话头入口还是右下角浮层入口（样式与悬浮语义按 variant 分支）。 */
+    function EntryImpl({ variant = 'header' }) {
+      /* ZB-60：`variant` 只有两种取值，**不是两个入口实例**：
+       *   · 'header'  —— 主路径：会话标题行入口（默认，行为与既有完全一致）；
+       *   · 'overlay' —— 仅当主槽位不可用时的**降级备份**：右下角浮层入口（CSS `.dsp-entry-float`）。
+       * 两者**互斥**（同一时刻只会注册一个），绝不会同时出现两份 UI。 */
+      const isFloat = variant === 'overlay';
       const [open, setOpen] = useState(false);
       /* ZB-27i：悬停/聚焦态用 React 状态表达（颜色改走内联兜底，见下面的 style）。 */
       const [hover, setHover] = useState(false);
@@ -4019,11 +4047,15 @@ window.__ModuleLoader__.load({
         if (closeTimer.current != null) { clearTimeout(closeTimer.current); closeTimer.current = null; }
       };
       const scheduleOpen = () => {
+        /* ZB-60：浮层入口（variant='overlay'）**不做悬浮展开** —— 鼠标路过右下角就弹面板很扰民；
+         * 它只响应点击（打开）/ 点外部 / Esc / 窗口失焦（关闭）。主路径行为完全不变。 */
+        if (isFloat) return;
         clearTimers();
         if (open) return;
         openTimer.current = setTimeout(() => { openTimer.current = null; setOpen(true); }, 150);
       };
       const scheduleClose = () => {
+        if (isFloat) return; // 浮层入口没有"悬浮展开"，也就没有"离开即关"（关闭走点击外部/Esc/失焦）
         clearTimers();
         closeTimer.current = setTimeout(() => { closeTimer.current = null; setOpen(false); setHover(false); }, 120);
       };
@@ -4069,6 +4101,9 @@ window.__ModuleLoader__.load({
       const [menuShift, setMenuShift] = useState(0);
       useEffect(() => {
         if (!open) return;
+        /* 浮层入口的弹窗由 CSS **右对齐、向上展开**（`.dsp-entry-float .dsp-menu`），
+         * 不做标题行那种"靠近右缘就往左挪"的测量（否则 marginLeft 在 right:0 下会反着推）。 */
+        if (isFloat) return;
         try {
           const el = rootRef.current;
           if (!el || typeof el.getBoundingClientRect !== 'function' || typeof window === 'undefined') return;
@@ -4076,17 +4111,20 @@ window.__ModuleLoader__.load({
           const over = (r.left + WIDTH.def + 16) - (window.innerWidth || 0);
           setMenuShift(over > 0 ? -Math.ceil(over) : 0);
         } catch { /* 测量失败则不动（CSS 的 max-width 仍会收敛） */ }
-      }, [open]);
+      }, [open, isFloat]);
 
       /* ZB-27l：**悬浮展开 / 离开即关**的挂点放在外层容器上 ——
        * 弹窗是容器的子节点，所以"从入口移进弹窗"不会触发 mouseleave（指针仍在子树内）；
        * 只有真正离开「入口 + 弹窗」整体才关。焦点同理（onBlur 的 relatedTarget 仍在子树内则忽略）。 */
       return h('div', {
-        className: 'dsp-entry',
+        className: 'dsp-entry' + (isFloat ? ' dsp-entry-float' : ''),
+        'data-dsp-entry': variant,
         ref: rootRef,
         /* ZB-27n：容器**只管开合、不设 hover** —— 面板是容器的子节点，指针从外面移到**面板**上时
          * 容器的 onMouseEnter 同样会触发；若在这里 setHover(true)，指针明明在面板上、入口的字却亮了
-         * （用户截图 1 的现象）。hover 只由按钮自身的 enter/leave 驱动，才等价于官方 .trigger:hover。 */
+         * （用户截图 1 的现象）。hover 只由按钮自身的 enter/leave 驱动，才等价于官方 .trigger:hover。
+         * ZB-60：浮层入口的"不悬浮展开"由 scheduleOpen/scheduleClose 内部的 isFloat 守卫实现
+         * （保持这段字面形状不变：header-entry.test 的 B32b/C8b 钉住它）。 */
         onMouseEnter: scheduleOpen,
         onMouseLeave: () => { setHover(false); scheduleClose(); },
         onFocus: scheduleOpen,
@@ -4647,8 +4685,105 @@ window.__ModuleLoader__.load({
            * ZB-27o（用户要求「把派发台移到子智能体后面」）：order 10 → **-25**，插到
            * 子智能体目录(-30) 与智能体团队(-20) 之间 ⇒ 排布变为
            *   5 个子智能体 | DSH 派发台 | 智能体团队 | 创造模式 |（自带）后台任务(20) */
-          ctx.slots.inject(HEADER_SLOT, () => ctx.slots.register({ name: HEADER_SLOT, id: 'dispatch', order: -25 },
-            () => h(HeaderEntry)));
+          /* ── ZB-60：入口注册的「主 → 备」**降级链**（兼容性加固，不是双 UI）──
+           * 背景：`conversation.session.header.actions` 是派发台**唯一入口**，原先没有降级路径 ——
+           * DSH 升级若把槽位改名/删除，注册会被静默挂起（`inject` 对未声明槽位是"等待"而非报错），
+           * 整个面板就**彻底不可达**（比配置卡消失严重得多）。
+           * 判定与顺序（严格"主优先、备兜底、不并存"）：
+           *   ① 先按原样注册主槽位（行为完全不变，优先用它）；
+           *   ② 主槽位 `inject` / `register` **抛错** ⇒ 立即退到 `shell.overlay`；
+           *   ③ 主槽位**始终未声明**（inject 回调一直不跑 = 槽位不存在/改名）⇒ 宽限 SLOT_GRACE_MS
+           *      后仍无回调就退到 `shell.overlay`；正常启动是毫秒级就绪，不会走到这里；
+           *   ④ 两条都失败 ⇒ 只 `console.warn`（与配置卡同一纪律：UI 挂不上**绝不影响插件加载**）；
+           *   ⑤ 若备用已启用、主槽位**事后**就绪 ⇒ 撤回备用，只保留主入口（绝不双份 UI）。
+           * ⚠️ 降级**必须可观测**：warn 写明实际生效的槽位 —— 否则升级后我们会以为"入口还在"，
+           *    其实它已经跑到右下角去了。`entryMode` 记录实际生效值（诊断/探针用）。
+           * ⚠️ header-entry.test 的 F2 依赖下面这行**字面** `ctx.slots.inject(HEADER_SLOT` 且位于
+           *    ensureStyle() 之后 —— 保持这一形状，别抽成模块级 helper。 */
+          let entryMode = 'none';      // 'header' | 'overlay' | 'none'（实际生效的入口槽位）
+          let graceTimer = null;
+          let fallbackDispose = null;  // 备用注册的撤销函数（主槽位"迟到"时用来撤回，避免双 UI）
+          const slotWarn = (msg, detail) => { try { console.warn(`[dispatch] ${msg}`, detail ?? ''); } catch { /* ignore */ } };
+          const clearGrace = () => {
+            if (graceTimer != null) { try { clearTimeout(graceTimer); } catch { /* ignore */ } graceTimer = null; }
+          };
+          /** 注册**备用浮层入口**（幂等：主入口已生效或备用已启用时不动）。 */
+          const registerFallbackEntry = (reason) => {
+            if (entryMode !== 'none') return false;
+            try {
+              ctx.slots.inject(FALLBACK_SLOT, () => {
+                /* 主入口若已在此期间就绪 ⇒ 不再注册备用（防双 UI）。 */
+                if (entryMode === 'header') return undefined;
+                const dispose = ctx.slots.register({ name: FALLBACK_SLOT, id: 'dispatch', order: 20 },
+                  () => h(HeaderOverlayEntry));
+                fallbackDispose = typeof dispose === 'function' ? dispose : null;
+                return dispose;
+              });
+              entryMode = 'overlay';
+              slotWarn(`会话头槽位 ${HEADER_SLOT} 不可用（${reason}）⇒ 已降级到 ${FALLBACK_SLOT} 浮层入口（右下角；面板仍可用）。请检查 DSH 升级后该槽位是否改名/删除`);
+              return true;
+            } catch (e) {
+              entryMode = 'none';
+              slotWarn(`会话头槽位不可用且备用槽位 ${FALLBACK_SLOT} 也不可用 —— 派发台入口无法注册（插件仍加载；可用 Agent 工具 / CLI 派发入口）`, (e && e.message) || e);
+              return false;
+            }
+          };
+          /* ① + ②：主槽位（注册失败立刻降级；callback 内自己兜住，避免延迟注册时异常逃逸成未捕获错误） */
+          try {
+            ctx.slots.inject(HEADER_SLOT, () => {
+              try {
+                const dispose = ctx.slots.register({ name: HEADER_SLOT, id: 'dispatch', order: -25 },
+                  () => h(HeaderEntry));
+                entryMode = 'header';
+                clearGrace();
+                /* ⑤ 主槽位"迟到"：备用已启用 ⇒ 撤回备用（只保留会话头入口）。 */
+                if (fallbackDispose) {
+                  try { fallbackDispose(); } catch { /* ignore */ }
+                  fallbackDispose = null;
+                  slotWarn(`主槽位 ${HEADER_SLOT} 事后就绪 ⇒ 已撤回 ${FALLBACK_SLOT} 浮层入口（避免两份 UI）`);
+                }
+                return typeof dispose === 'function' ? dispose : undefined;
+              } catch (e) {
+                slotWarn(`会话头槽位 ${HEADER_SLOT} 注册抛错`, (e && e.message) || e);
+                registerFallbackEntry('register 抛错');
+                return undefined;
+              }
+            });
+          } catch (e) {
+            slotWarn(`会话头槽位 ${HEADER_SLOT} inject 抛错`, (e && e.message) || e);
+            registerFallbackEntry('inject 抛错');
+          }
+          /* ③ 主槽位"未声明"兜底：`inject` 对未声明槽位是**静默等待**（不抛错）——
+           * 用 `spec(key)`（槽位声明表的只读查询，renderer 的公共 API）能看出"现在还没声明"，
+           * 但**不能**据此立刻降级：本插件的 apply 可能早于 conversation 包提交声明，
+           * 立刻降级会在**正常启动**时误报"已降级"（随后又被迟到的主槽位撤回）—— 噪音且吓人。
+           * 故统一走**宽限**：正常启动毫秒级就绪、定时器随即被清掉；只有升级改名才会走到超时降级。
+           * 超时后再查一次声明表，把"为什么判定不可用"写进 warn（可观测）。 */
+          if (entryMode === 'none') {
+            let specQuery = null;
+            try { specQuery = typeof ctx.slots.spec === 'function' ? (k) => ctx.slots.spec(k) : null; } catch { specQuery = null; }
+            const safeSpec = (k) => { try { return specQuery ? specQuery(k) : undefined; } catch { return undefined; } };
+            const mainSpec = specQuery ? safeSpec(HEADER_SLOT) : undefined;
+            if (mainSpec !== undefined) {
+              /* 声明表里已有主槽位 ⇒ inject 回调必然已跑/即将跑，不降级。 */
+            } else {
+              try {
+                graceTimer = setTimeout(() => {
+                  graceTimer = null;
+                  if (entryMode !== 'none') return;
+                  const stillMissing = safeSpec(HEADER_SLOT) === undefined;
+                  const fbDeclared = safeSpec(FALLBACK_SLOT) !== undefined;
+                  registerFallbackEntry(stillMissing && fbDeclared
+                    ? `等待 ${SLOT_GRACE_MS}ms 仍未声明（声明表里没有该槽位，疑似升级后改名/删除）`
+                    : `等待 ${SLOT_GRACE_MS}ms 仍未声明（槽位不存在或改名）`);
+                }, SLOT_GRACE_MS);
+                /* 插件卸载时清掉宽限定时器（注册失败/未就绪只留痕，不阻塞加载）。 */
+                try {
+                  if (typeof ctx.effect === 'function') ctx.effect(() => () => clearGrace(), 'dispatch.slot-grace');
+                } catch { /* effect 不可用 ⇒ 定时器最多空跑一次 */ }
+              } catch { /* 无 setTimeout（极简桩）：没有宽限能力，主槽位 inject 仍会补注册 */ }
+            }
+          }
           /* ZB-53（用户真机反馈「插件详情页没有配置区」）：在 **bundle 自己的配置槽位**注册一张配置卡。
            * 槽位契约：`plugins.bundle.config`（keyed / scope: root），按**包名**派发
            * ⇒ key 必须是 `dsh-dispatch`；priority 与本地参照插件（dsh-connect-zcode）一致取 30。

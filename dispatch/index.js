@@ -196,6 +196,17 @@ function dshToolsCandidates() {
   }
   out.push({ source: 'abs:D:/DeepSeek/resources/app.asar', path: join('D:/DeepSeek/resources/app.asar', ...DSH_TOOLS_REL) });
   out.push({ source: 'abs:D:/DeepSeek/resources/app.asar.unpacked', path: join('D:/DeepSeek/resources/app.asar.unpacked', ...DSH_TOOLS_REL) });
+  /* ZB-60（兼容性加固，DSH 0.2.1 更新前）：上面所有候选都假设 asar 内多一层 `dsh/` 目录
+   * （实测 `app.asar/dsh/node_modules/@deepseek-ai/dsh-tools/lib/index.js`）。
+   * 若新版把 asar 结构重排（去掉或多一层），这条链会**全部落空** ⇒ agent 的 `dispatch` 工具不注册。
+   * 故补两个**不带 `dsh/` 前缀**的同构候选 —— 排在已有候选**之后**，
+   * 正常情况行为完全不变（前面已命中），只在结构变化时提供一条生路。 */
+  const res2 = typeof process.resourcesPath === 'string' ? process.resourcesPath : '';
+  if (res2) {
+    const rel2 = DSH_TOOLS_REL.slice(1); // 去掉首段 'dsh'
+    out.push({ source: 'resourcesPath/app.asar(无 dsh 层)', path: join(res2, 'app.asar', ...rel2) });
+    out.push({ source: 'resourcesPath/app.asar.unpacked(无 dsh 层)', path: join(res2, 'app.asar.unpacked', ...rel2) });
+  }
   return out;
 }
 
