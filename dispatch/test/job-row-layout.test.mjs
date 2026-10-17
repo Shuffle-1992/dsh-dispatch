@@ -196,6 +196,13 @@ console.log('\nA. 进程行 = 三行布局');
   ok(/\.dsp-job-model\{[^}]*text-overflow:ellipsis/.test(css), 'A20 模型徽标 CSS 用省略号压缩（完整名走 title）');
   ok(/\.dsp-job-line3 \.dsp-job-right\{[^}]*margin-left:auto/.test(css),
     'A21 第三行的右组靠 margin-left:auto 推到行尾（"接续"右对齐）');
+  /* ★ 这次回归的根因：第三行**允许折行**时，心跳文字一长就把右侧的「接续」折到**下一行行首**，
+   * 看起来像"接续在左边"。所以必须钉死：第三行 nowrap + 左侧组可压缩。 */
+  ok(/\.dsp-job-line3\{[^}]*flex-wrap:nowrap/.test(css), 'A22 ★ 第三行禁止折行（否则接续会被折成"行首"= 看着像左对齐）');
+  ok(/\.dsp-job-left\{[^}]*min-width:0/.test(css) && /\.dsp-job-left>\*\{[^}]*text-overflow:ellipsis/.test(css),
+    'A23 左侧组可压缩（心跳超长用省略号让位给右侧接续）');
+  ok(findAll(lines[2], (n) => cls(n) === 'dsp-job-left').length === 1, 'A24 第三行有左侧组（.dsp-job-left）');
+  ok(text(findAll(lines[2], (n) => cls(n) === 'dsp-job-left')[0]).includes('最近心跳'), 'A25 左侧组里是心跳');
   /* 行 3：只有心跳（上下文已按用户要求移到第一行右侧）。 */
   const t3 = text(lines[2]);
   ok(/最近心跳 12s/.test(t3), `A16 第 3 行含心跳（实际「${t3}」）`);

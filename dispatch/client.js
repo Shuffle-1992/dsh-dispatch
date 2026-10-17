@@ -205,8 +205,14 @@ window.__ModuleLoader__.load({
       '.dsp-job-line2{justify-content:flex-start;flex-wrap:nowrap;overflow:hidden;}',
       '.dsp-job-line3{justify-content:flex-start;}',
       '.dsp-job-right{display:flex;align-items:center;gap:8px;flex:0 0 auto;}',
-      /* 第三行的右侧组靠 auto 外边距推到行尾（第一行靠 .dsp-job-tag 的 margin-right:auto）。 */
-      '.dsp-job-line3 .dsp-job-right{margin-left:auto;}',
+      /* 第三行：**左心跳 / 右接续**。
+       * ⚠️ 关键：这一行**必须不折行** —— 心跳文字很长（"当前：step-finish · read · … ｜ 最近心跳 12s"），
+       * 一旦允许 wrap，右侧的「接续自 X / N 跳」会被折到**下一行的行首**，看起来就像"接续在左边"。
+       * 现在：左侧组可压缩（省略号），右侧组固定，`margin-left:auto` 把它顶到行尾。 */
+      '.dsp-job-line3{flex-wrap:nowrap;}',
+      '.dsp-job-left{display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0;overflow:hidden;}',
+      '.dsp-job-left>*{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
+      '.dsp-job-line3 .dsp-job-right{margin-left:auto;flex:0 0 auto;}',
       /* 模型名：可压缩 + 省略号；完整名在 title（用户要求「压缩模型名称的显示，鼠标悬浮显示完整模型名称」）。 */
       '.dsp-job-model{flex:0 1 auto;min-width:52px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
       /* 列表页脚：左侧「还有 N 条更早 / 收起」，右侧「清除所有」（仅非「进行中」页签出现）。 */
@@ -3822,29 +3828,32 @@ window.__ModuleLoader__.load({
             /* ↑ 第二行到此为止：只放用户指定的五项（引擎 / 模型 / 思考 / 权限 / 文件锁）。
              * paused 与血缘徽标已移到第三行 —— 否则第二行一挤，文件锁就被折到下一行（用户截图反馈）。 */
           ),
-          /* ZB-70c（用户要求）：第三行 = 左「心跳 / 暂停原因」，**右「接续自 X + N 跳」**。
+          /* ZB-70c（用户要求）：第三行 = **左侧心跳** + **右侧接续**（血缘徽标）。
            * 只在真有内容时渲染（运行中 / paused / 有血缘），不留空行占位。 */
           showRow3
             ? h('div', { className: 'dsp-job-line dsp-job-line3' },
-              /* ZB-40（用户要求「能看出进程确实在工作还是可能卡住」）：显示**当前阶段/最近工具/心跳**，
-               * 超过 150s 无心跳 → 红色「可能卡住」徽标。数据来自 runner 每 10s 的 progress 心跳行。 */
-              hasBeat
-                ? h('span', { className: 'dsp-dim', style: job.stalled ? { color: T.danger } : undefined },
-                  `${t('jobCurrent')}${job.progress
-                    ? `${job.progress.stage ?? '?'}` +
-                      `${job.progress.lastTool ? ` · ${job.progress.lastTool}` : ''}` +
-                      `${Number.isFinite(job.progress.chars) && job.progress.chars > 0 ? ` · ${job.progress.chars} 字` : ''}` +
-                      `${Number.isFinite(job.progress.tools) && job.progress.tools > 0 ? ` · 工具 ${job.progress.tools} 次` : ''}`
-                    : '—（尚无心跳）'}`)
-                : null,
-              hasBeat
-                ? (job.stalled
-                  ? h('span', { className: 'dsp-badge', title: t('jobStalledHint'), style: { color: T.danger } }, t('jobStalled'))
-                  : h('span', { className: 'dsp-dim' }, `｜ ${t('jobLastBeat')} ${job.lastProgressAgoSec ?? '?'}s`))
-                : null,
-              /* paused 的原因（"额度耗尽/未开通/需签名/配置错误"）—— 没有心跳的行也放这里，左对齐。 */
-              paused ? h('span', { className: 'dsp-badge s-paused', title: job.pauseDetail ?? '' }, `${t('paused')}：${pauseLabel(job.pauseReason)}`) : null,
-              /* 血缘徽标：右对齐（用户要求"接续的移到第三行右侧"；N 跳同族，一起搬过来免得再挤第二行）。 */
+              /* ⚠️ 左半边包成一组：这样"心跳"与"暂停原因"共享同一个可压缩槽位，
+               * 右侧的血缘组才能稳定贴到行尾（不折行、不被挤下去）。 */
+              h('span', { className: 'dsp-job-left' },
+                /* ZB-40（用户要求「能看出进程确实在工作还是可能卡住」）：显示**当前阶段/最近工具/心跳**，
+                 * 超过 150s 无心跳 → 红色「可能卡住」徽标。数据来自 runner 每 10s 的 progress 心跳行。 */
+                hasBeat
+                  ? h('span', { className: 'dsp-dim', style: job.stalled ? { color: T.danger } : undefined },
+                    `${t('jobCurrent')}${job.progress
+                      ? `${job.progress.stage ?? '?'}` +
+                        `${job.progress.lastTool ? ` · ${job.progress.lastTool}` : ''}` +
+                        `${Number.isFinite(job.progress.chars) && job.progress.chars > 0 ? ` · ${job.progress.chars} 字` : ''}` +
+                        `${Number.isFinite(job.progress.tools) && job.progress.tools > 0 ? ` · 工具 ${job.progress.tools} 次` : ''}`
+                      : '—（尚无心跳）'}`)
+                  : null,
+                hasBeat
+                  ? (job.stalled
+                    ? h('span', { className: 'dsp-badge', title: t('jobStalledHint'), style: { color: T.danger } }, t('jobStalled'))
+                    : h('span', { className: 'dsp-dim' }, `｜ ${t('jobLastBeat')} ${job.lastProgressAgoSec ?? '?'}s`))
+                  : null,
+                /* paused 的原因（"额度耗尽/未开通/需签名/配置错误"）—— 没有心跳的行也放左侧这一组。 */
+                paused ? h('span', { className: 'dsp-badge s-paused', title: job.pauseDetail ?? '' }, `${t('paused')}：${pauseLabel(job.pauseReason)}`) : null),
+              /* 血缘徽标：**右侧**（用户要求"第三行右侧是接续"；N 跳同族，一起放这里）。 */
               lineage
                 ? h('span', { className: 'dsp-job-right' },
                   job.parentJobId ? h('span', { className: 'dsp-badge', title: job.parentJobId }, `${t('parentFrom')} ${shortId(job.parentJobId)}`) : null,
