@@ -39,7 +39,7 @@ import { dirname, join } from 'node:path';
 /* ZB-25：终态/落地集合**只从 core 取**（core 是状态机的所有者）。原先本文件与 notify.mjs
  * 各自字面量复制一份同样的集合，已构成重复定义。 */
 import { SETTLED_STATES, TERMINAL_STATES } from './core/dispatch-core.mjs';
-import { aggregate, fetchPlanQuota } from './core/quota.mjs';
+import { aggregate, fetchPlanQuota, recentRateLimited } from './core/quota.mjs';
 import { GIFT_CHANNEL_RE, formatGiftQuota, readGiftQuota } from './core/gift-quota.mjs';
 
 /* ─────────────── Z12：派发总开关（跨进程唯一真值，契约：宿主仓库 collab/PROTOCOL.md §7）───────────────
@@ -151,7 +151,11 @@ const trunc = (s, n = 200) => {
  * 不再就地字面量复制（原先 notify.mjs 里那份与它逐元素相同，属重复定义）。 */
 export const DISMISSABLE = SETTLED_STATES;
 const dismissedByFile = new Map(); // dismissed.json 绝对路径 → Set<jobId>（多个 createActionHandler 实例按路径共享同一集合）
-const dismissedFileOf = (dispatcher) => join(dirname(dispatcher.jobsFile), 'dismissed.json');
+/* task-11（M2）：状态文件路径**问 core 要**（`dispatcher.statePath`），不再自己 `dirname(jobsFile)` 反推。
+ * 保留 dirname 兜底只为**测试桩/旧 core**（没有 statePath 的假 dispatcher，如 list-compact 的桩）。 */
+const dismissedFileOf = (dispatcher) => (typeof dispatcher.statePath === 'function'
+  ? dispatcher.statePath('dismissed.json')
+  : join(dirname(dispatcher.jobsFile), 'dismissed.json'));
 function dismissedSet(dispatcher) {
   const file = dismissedFileOf(dispatcher);
   let set = dismissedByFile.get(file);
@@ -362,31 +366,11 @@ export function attachGiftQuota(channels, ledgerPath) {
 
 /* ── ZB-37：**哪些通道刚撞过额度**（真机事故：`plan` 显示 enabled=true，实际 Coding Plan 5 小时
  * 窗口已满、一撞就 429；agent 无从判断，只能撞了才知道）。
- * 数据来源 = 台账（runner 识别到 429/限额时写 `rateLimited:true`），取最近 5 小时（与 Coding Plan
- * 滚动窗口同尺度）。只做**提示**、不擅自改可用性（enabled 仍以 runner 清单为准）。
- * provider 归一：台账里可能是 `plan:bigmodel-coding-plan` / `builtin:bigmodel-coding-plan`，
- * 通道 id 可能是 `plan`（别名）/`builtin:bigmodel-coding-plan`。 */
-export function recentQuotaExhausted(ledgerPath, nowMs = Date.now(), windowMs = 5 * 3600 * 1000) {
-  if (!ledgerPath || !existsSync(ledgerPath)) return {};
-  const out = {};
-  let lines;
-  try {
-    lines = readFileSync(ledgerPath, 'utf8').split('\n');
-  } catch {
-    return {};
-  }
-  for (const line of lines.slice(-500)) {
-    if (!line.trim()) continue;
-    let row;
-    try { row = JSON.parse(line); } catch { continue; }
-    const at = Date.parse(row.at ?? '');
-    if (!Number.isFinite(at) || nowMs - at > windowMs) continue;
-    if (row.rateLimited !== true && row.rateLimited !== 1) continue;
-    const p = typeof row.provider === 'string' && row.provider !== '' ? row.provider : '(unknown)';
-    out[p.replace(/^plan:/, '')] = { at: row.at, retryAfterSec: row.retryAfterSec ?? null };
-  }
-  return out;
-}
+ * task-11（M3）：解析**已下沉到 core/quota.mjs**（`recentRateLimited` —— 台账的读写归台账模块），
+ * 这里只保留**别名导出**（既有调用方与 channel-health 的 import 名不变）。
+ * 引用级同一性由 test/host-decouple.test.mjs 钉住 ⇒ 不可能再出现第二份实现。
+ * 语义回顾：只做**提示**、不擅自改可用性（enabled 仍以 runner 清单为准）。 */
+export const recentQuotaExhausted = recentRateLimited;
 
 /** 通道是否命中「刚撞过额度」（见 recentQuotaExhausted 的归一规则）。 */
 export function matchQuotaExhausted(channel, exhausted) {
@@ -418,27 +402,23 @@ function fallbackTargetProviders(dispatcher) {
 }
 
 /**
- * ZB-39（用户报告：「通道我设置的是免费额度，派发却先走付费 5 小时窗口、撞顶后才回退」）：
- * 调用方**显式指定**的通道「最近撞过额度」（一启动必然 429）时，**改派到用户选定的可用通道** ——
- * 候选顺序 = 默认通道（面板 / `action=channel` 选定）→ 降级链首个可用目标 → 可用的免费额度通道。
- * 只处理"注定失败"这一种情况：候选顺序 = 默认通道 → 降级链首个可用目标 → 可用的免费额度通道；
- * 若这些候选都不可用（或就是被指定的那条），则**不改派**（仅由 dispatchQuotaHint 给提示）。
- * @returns {null | {from: string, to: string, name: string}}
+ * task-11（P0-1）：guard 与 hint 的**共享上下文** —— "读台账 → 拉通道清单 → 读默认通道"只做一次。
+ *
+ * 为什么必须合并（真机代价）：`createActionHandler` 的 dispatch 分支原先把两者各调一次，
+ * 而 core 的 `listChannels()` **每次都会 spawn 探测**（zcode `--list-providers` + opencode
+ * `--list-models/--version`），且 core 侧没有缓存（缓存只存在于 `createRemoteFace` 的 channelsCache）
+ * ⇒ **命中限流时一次工具派发要探测两轮**，调用方被阻塞数十秒。合并后：命中限流 ≤1 次、未命中 0 次（早退）。
+ * @returns {null | {exhausted:object, channels:Array, defaultProvider:string, requested:string}}
  */
-export async function applyExhaustedChannelGuard(dispatcher, spec, config = {}) {
+async function quotaContext(dispatcher, spec, config) {
   const exhausted = recentQuotaExhausted(config.ledgerPath);
-  if (Object.keys(exhausted).length === 0) return null;
+  if (Object.keys(exhausted).length === 0) return null; // 无近期限流 ⇒ 一次探测都不做
   let channels;
   try {
     channels = (await dispatcher.listChannels())?.channels ?? [];
   } catch {
     return null;
   }
-  const chOf = (id) => channels.find((c) => c.id === id || c.aliasOf === id) ?? { id, name: id, enabled: false };
-  const usable = (id) => {
-    const c = chOf(id);
-    return c.enabled === true && !matchQuotaExhausted(c, exhausted);
-  };
   let defaultProvider = '';
   try {
     defaultProvider = (await dispatcher.getChannel())?.provider ?? '';
@@ -446,7 +426,28 @@ export async function applyExhaustedChannelGuard(dispatcher, spec, config = {}) 
     defaultProvider = '';
   }
   const requested = typeof spec?.provider === 'string' && spec.provider !== '' ? spec.provider : defaultProvider;
+  return { exhausted, channels, defaultProvider, requested };
+}
+
+/** 通道查找（按 id 或别名）；找不到给"不可用"占位（与改前逐字同义）。 */
+const channelOf = (channels, id) => channels.find((c) => c.id === id || c.aliasOf === id) ?? { id, name: id, enabled: false };
+
+/**
+ * ZB-39（用户报告：「通道我设置的是免费额度，派发却先走付费 5 小时窗口、撞顶后才回退」）：
+ * 调用方**显式指定**的通道「最近撞过额度」（一启动必然 429）时，**改派到用户选定的可用通道** ——
+ * 候选顺序 = 默认通道（面板 / `action=channel` 选定）→ 降级链首个可用目标 → 可用的免费额度通道。
+ * 只处理"注定失败"这一种情况；候选都不可用（或就是被指定的那条）则**不改派**（仅由 hint 给提示）。
+ * 纯计算（不探测）：上下文由 `quotaContext` 提供。
+ * @returns {null | {from: string, to: string, name: string}}
+ */
+function redirectFrom(dispatcher, ctx) {
+  const { exhausted, channels, defaultProvider, requested } = ctx;
   if (!requested) return null;
+  const chOf = (id) => channelOf(channels, id);
+  const usable = (id) => {
+    const c = chOf(id);
+    return c.enabled === true && !matchQuotaExhausted(c, exhausted);
+  };
   if (!matchQuotaExhausted(chOf(requested), exhausted)) return null; // 目标没撞顶 ⇒ 不动
   const candidates = [
     defaultProvider,
@@ -460,23 +461,11 @@ export async function applyExhaustedChannelGuard(dispatcher, spec, config = {}) 
   return null;
 }
 
-export async function dispatchQuotaHint(dispatcher, spec, config = {}) {
-  const exhausted = recentQuotaExhausted(config.ledgerPath);
-  if (Object.keys(exhausted).length === 0) return null;
-  let channels;
-  try {
-    channels = (await dispatcher.listChannels())?.channels ?? [];
-  } catch {
-    return null;
-  }
+/** ZB-38 提示判定（纯计算，不探测）：目标通道"最近撞过额度"时给 warning + suggestedProvider。 */
+function hintFrom(ctx, spec) {
+  const { exhausted, channels } = ctx;
   let target = typeof spec?.provider === 'string' && spec.provider !== '' ? spec.provider : '';
-  if (target === '') {
-    try {
-      target = (await dispatcher.getChannel())?.provider ?? '';
-    } catch {
-      target = '';
-    }
-  }
+  if (target === '') target = ctx.defaultProvider;
   if (target === '') return null;
   const targetCh = channels.find((c) => c.id === target || c.aliasOf === target) ?? { id: target, name: target };
   const hit = matchQuotaExhausted(targetCh, exhausted);
@@ -490,6 +479,31 @@ export async function dispatchQuotaHint(dispatcher, spec, config = {}) {
       '，或先 action=fallback 开降级链再 retry。',
     ...(alt ? { suggestedProvider: alt.id } : {}),
   };
+}
+
+/**
+ * ZB-38 + ZB-39 的**单次入口**（task-11 P0-1）：一次 `listChannels()` 同时算出"是否改派"与"是否提示"。
+ * 提示在**改派之后的目标**上判定（与改前语义一致：改派成功 ⇒ 提示自然为 null）。
+ * @returns {{redirect: object|null, hint: object|null, defaultProvider: string}}
+ */
+export async function applyQuotaPolicy(dispatcher, spec, config = {}) {
+  const ctx = await quotaContext(dispatcher, spec, config);
+  if (!ctx) return { redirect: null, hint: null, defaultProvider: '' };
+  const redirect = redirectFrom(dispatcher, ctx);
+  const hint = hintFrom(ctx, redirect ? { ...spec, provider: redirect.to } : spec);
+  return { redirect, hint, defaultProvider: ctx.defaultProvider };
+}
+
+/** ZB-39 改派（导出保留：channel-health 直接 import；行为与改前一致）。 */
+export async function applyExhaustedChannelGuard(dispatcher, spec, config = {}) {
+  const ctx = await quotaContext(dispatcher, spec, config);
+  return ctx ? redirectFrom(dispatcher, ctx) : null;
+}
+
+/** ZB-38 提示（导出保留：channel-health 直接 import；行为与改前一致）。 */
+export async function dispatchQuotaHint(dispatcher, spec, config = {}) {
+  const ctx = await quotaContext(dispatcher, spec, config);
+  return ctx ? hintFrom(ctx, spec) : null;
 }
 
 /** 只取额度字段（`action=quota` 用）。 */
@@ -537,27 +551,22 @@ export function createActionHandler(dispatcher, config = {}) {
           if (p.thinking != null && String(p.thinking).trim() !== '') spec.reasoningLevel = String(p.thinking).trim();
           if (p.timeoutMin != null && p.timeoutMin !== '') spec.timeoutMin = Number(p.timeoutMin);
           if (p.memoryBench != null) spec.memoryBench = Boolean(p.memoryBench);
-          /* ZB-39：显式指定的通道"注定失败"（最近撞过额度）⇒ **改派到用户选定的可用通道**
-           * （默认通道 → 降级链 → 免费额度通道），并在返回里说明改派事实。 */
-          const guard = await applyExhaustedChannelGuard(dispatcher, spec, config);
-          if (guard) spec.provider = guard.to;
-          let defaultProvider = '';
-          try { defaultProvider = (await dispatcher.getChannel())?.provider ?? ''; } catch { defaultProvider = ''; }
+          /* ZB-39 + ZB-38（task-11 P0-1）：改派与提示**共用一次探测** —— 改前这里先
+           * `applyExhaustedChannelGuard` 再 `dispatchQuotaHint`，各自 `listChannels()` 一次
+           * （core 每次都会 spawn 探测）⇒ 命中限流时一次工具派发探测两轮。现在合成一次。 */
+          const policy = await applyQuotaPolicy(dispatcher, spec, config);
+          if (policy.redirect) spec.provider = policy.redirect.to;
           const job = dispatcher.dispatch(spec); // 参数不合法时 core 抛 TypeError，走 catch 返回 error
-          /* ZB-38（真机事故：agent 派到付费通道 → 一启动就 429 暂停，只能靠撞了才知道）：
-           * 目标通道「最近撞过额度」时**在派发结果里立刻提示**，并给出建议通道 —— 让调用方
-           * 有机会马上重派到可用通道，而不是等 paused。提示不阻塞派发（job 照常建）。 */
-          const hint = await dispatchQuotaHint(dispatcher, spec, config);
           return {
             ok: true,
             job: slimJob(job),
-            ...(guard
+            ...(policy.redirect
               ? {
-                redirectedFrom: guard.from,
-                warning: `显式指定的通道「${guard.from}」最近撞过额度（一启动必然 429）：已改派到${guard.to === defaultProvider ? `你选定的默认通道「${guard.to}」` : `可用的替代通道「${guard.to}」`}（${guard.name}）。若确认原通道窗口已重置，可 action=channels 复核后再指定。`,
+                redirectedFrom: policy.redirect.from,
+                warning: `显式指定的通道「${policy.redirect.from}」最近撞过额度（一启动必然 429）：已改派到${policy.redirect.to === policy.defaultProvider ? `你选定的默认通道「${policy.redirect.to}」` : `可用的替代通道「${policy.redirect.to}」`}（${policy.redirect.name}）。若确认原通道窗口已重置，可 action=channels 复核后再指定。`,
               }
               : {}),
-            ...(hint ?? {}),
+            ...(policy.hint ?? {}),
           };
         }
         case 'list': {
@@ -581,7 +590,11 @@ export function createActionHandler(dispatcher, config = {}) {
             jobs: page.map(full ? slimJob : briefJob),
             ...(omitted > 0
               ? {
-                note: `已省略 ${omitted} 条更早的 job（共 ${all.length} 条，本次只回前 ${limit} 条）：取更多用 action=list limit=<n>（上限 ${LIST_LIMIT_MAX}）；要完整字段（含派发原文）加 full=true；单条输出用 action=tail id=<jobId>。`,
+                /* ⚠️ 别在这里**裸推荐** `full=true`（2026-10-17 审计 P2）：实测 60 条 brief 文本 ≈24.8 KB，
+                 * 而 60 条 `full` 文本 ≈135 KB（96 条时 212 KB）—— 模型照"要完整字段就加 full"做，
+                 * 会**再次**拿到被宿主 spill 从中间截断的结果，正好抵消 ZB-61 的意义。
+                 * 所以必须同时给出**代价**与**安全用法**（full 配小 limit）。 */
+                note: `已省略 ${omitted} 条更早的 job（共 ${all.length} 条，本次只回前 ${limit} 条）：取更多用 action=list limit=<n>（上限 ${LIST_LIMIT_MAX}${all.length > LIST_LIMIT_MAX ? `，但总数 ${all.length} 超过上限、无法一次取全，请用 action=tail 逐条看` : ''}）；要完整字段（含派发原文）用 full=true **并配小 limit**（如 full=true limit=10）—— 不配 limit 的全量 full 可能上百 KB，会被宿主**从中间截断**；单条输出用 action=tail id=<jobId>。`,
               }
               : {}),
           };
@@ -658,7 +671,10 @@ export function createActionHandler(dispatcher, config = {}) {
         case 'tail': {
           const id = p.id ?? p.jobId;
           if (!id) return { ok: false, error: 'tail 需要参数 id' };
-          const n = Math.min(200, Math.max(1, Number(p.n) || TAIL_DEFAULT_LINES));
+          /* n 的规整：**只有正数才算值**（早期 `Math.max(1, Number(n) || 30)` 会让 `n=-5` 变成 1 行 ——
+           * 负数在 `||` 下是真值，于是"传了个负数"被当成"只要 1 行"，与直觉相反；审计 P3）。 */
+          const rawN = Number(p.n);
+          const n = Number.isFinite(rawN) && rawN > 0 ? Math.min(200, Math.floor(rawN)) : TAIL_DEFAULT_LINES;
           const lines = dispatcher.tail(id, n);
           return lines == null ? { ok: false, error: `找不到 job：${id}` } : { ok: true, id, lines };
         }
@@ -1092,7 +1108,23 @@ const FACE_METHOD_TABLE = [
   /* ZB-52：顺序派发（面板入口）。`sequentialSet({order})` 按引擎合并；**没有 enabled**。 */
   ['sequentialGet', [], 'sequentialGet(): Promise<{order, levels, sequentialCount}>', '{order:{zcode:[],opencode:[],qoder:[]}, levels:{…}, sequentialCount}（无 enabled：模型为空即顺序派发）', []],
   ['sequentialSet', ['patch'], 'sequentialSet(patch): Promise<{order, levels, sequentialCount}|{ok:false, error}>', '{order, levels, sequentialCount}（patch={order}；传 enabled 抛 TypeError）', ['patch']],
+  /* task-11（P0-3）：这两行的元数据**此前缺失** —— 方法只加进了 REMOTE_METHODS，元数据表漏了，
+   * 于是 TYPERT 描述符里没有它们的 codec（registry 路径认不出这两个方法）。
+   * 现在两表由 REMOTE_METHODS 单源驱动 + 本表只供元数据，漂移由 test/host-decouple 钉死。 */
+  ['modelSwitchesGet', [], 'modelSwitchesGet(): Promise<{disabled, userDisabledCount}>', '{disabled:[路由id…], userDisabledCount}（关掉的模型不出现在面板选项、不参与顺序派发）', []],
+  ['modelSwitchSet', ['patch'], 'modelSwitchSet(patch): Promise<{disabled, userDisabledCount}|{ok:false, error}>', '{disabled, userDisabledCount}（patch={route, enabled} 翻单个，或 {disabled:[…]} 整体替换）', ['patch']],
 ];
+
+/**
+ * 方法元数据索引（task-11 P0-3）：`REMOTE_METHODS` 是**唯一源**（成员集与顺序由它决定），
+ * `FACE_METHOD_TABLE` 只提供参数/签名/可选参数等元数据。
+ * 缺元数据时给最小兜底而**不抛**——本模块在**加载期**执行，抛错会让整个插件不激活；
+ * 漂移改由 test/host-decouple.test.mjs 的"两表方法集完全相等"断言在测试期钉死。
+ */
+const FACE_METHOD_BY_NAME = new Map(FACE_METHOD_TABLE.map((row) => [row[0], row]));
+const faceMethodRow = (method) =>
+  FACE_METHOD_BY_NAME.get(method)
+  ?? [method, [], `${method}(): Promise<unknown>`, '（元数据缺失：见 test/host-decouple.test.mjs）', []];
 
 /**
  * 透传 codec 工厂产物：face 的边界契约就是「JSON 可序列化」——宿主网关 strict 解码
@@ -1123,21 +1155,27 @@ export const TYPERT = {
   generator: 'hand-written (Z8)：无 typert 生成器与 zod 依赖；strict codec 用透传校验器，字段形态对齐官方产物',
   service: FACE_NAME,
   schemas: [],
-  invocations: FACE_METHOD_TABLE.map(([method, parameters, , resultNote, optionals]) => ({
-    id: `dsh-dispatch#${FACE_NAME}/${method}`,
-    service: FACE_NAME,
-    namespace: FACE_NAME,
-    method,
-    invocation: { kind: 'direct' },
-    parameters: parameters.map((name) => ({
-      name,
-      wire: name,
-      source: 'json',
-      ...(optionals.includes(name) ? { acceptsUndefined: true } : {}),
-      codec: strictCodec(method, name),
-    })),
-    result: strictCodec(method, 'result'),
-  })),
+  /* task-11（P0-3）：invocations 由 **REMOTE_METHODS（唯一源）**驱动，元数据按名查表 ——
+   * 这样"加了方法忘了加描述符"在结构上不可能（改前是两份手工表，已漂移 17 vs 19）。
+   * 原实现解构出的第 4 项 `resultNote` 从未被使用，一并去掉。 */
+  invocations: REMOTE_METHODS.map((method) => {
+    const [, parameters, , , optionals] = faceMethodRow(method);
+    return {
+      id: `dsh-dispatch#${FACE_NAME}/${method}`,
+      service: FACE_NAME,
+      namespace: FACE_NAME,
+      method,
+      invocation: { kind: 'direct' },
+      parameters: parameters.map((name) => ({
+        name,
+        wire: name,
+        source: 'json',
+        ...(optionals.includes(name) ? { acceptsUndefined: true } : {}),
+        codec: strictCodec(method, name),
+      })),
+      result: strictCodec(method, 'result'),
+    };
+  }),
   model: {
     services: [
       {
@@ -1146,11 +1184,14 @@ export const TYPERT = {
         tags: [],
         key: FACE_NAME,
         exportName: 'createRemoteFace',
-        members: FACE_METHOD_TABLE.map(([method, parameters, signature]) => ({
-          kind: 'method',
-          name: method,
-          signature,
-        })),
+        members: REMOTE_METHODS.map((method) => {
+          const [, , signature] = faceMethodRow(method);
+          return {
+            kind: 'method',
+            name: method,
+            signature,
+          };
+        }),
         types: [],
       },
     ],

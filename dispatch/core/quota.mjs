@@ -144,6 +144,47 @@ function readLedger(p) {
   return readFileSync(p, 'utf8');
 }
 
+/* ---------- 近期限流（task-11 M3）：台账里"刚撞过额度"的通道 ---------- */
+
+/**
+ * 从台账取**最近撞过额度**的通道 —— runner 识别到 429/限额时写 `rateLimited:true` + `retryAfterSec`
+ * （见 collab-kit/zcode-run.mjs 的 detectRateLimit 落账）。数据来源是台账，故解析归**台账模块**所有。
+ *
+ * 判据（**逐条保留**自原 wire 层实现，行为不变）：
+ *   · 只看最后 500 行（长台账不做全量扫描）；
+ *   · `at` 必须可解析且在窗口内（默认 5 小时 —— 与 Coding Plan 滚动窗口同尺度）；
+ *   · 只认 `rateLimited === true | 1`；空行/坏行跳过（不抛）；
+ *   · provider 归一：去掉 `plan:` 前缀（台账里可能是 `plan:bigmodel-coding-plan`，而通道 id 是
+ *     `builtin:bigmodel-coding-plan` 或别名 `plan`）。
+ * 文件不存在/不可读 ⇒ `{}`（绝不抛）。
+ *
+ * @param {string} ledgerPath dispatch-runs.jsonl
+ * @param {number} [nowMs] 注入的当前时刻（测试用）
+ * @param {number} [windowMs] 回看窗口（默认 5h）
+ * @returns {Record<string, {at: string, retryAfterSec: number|null}>} 归一后的 provider → 命中信息
+ */
+export function recentRateLimited(ledgerPath, nowMs = Date.now(), windowMs = 5 * 60 * 60 * 1000) {
+  if (!ledgerPath || !existsSync(ledgerPath)) return {};
+  const out = {};
+  let lines;
+  try {
+    lines = readFileSync(ledgerPath, 'utf8').split('\n');
+  } catch {
+    return {};
+  }
+  for (const line of lines.slice(-500)) {
+    if (!line.trim()) continue;
+    let row;
+    try { row = JSON.parse(line); } catch { continue; }
+    const at = Date.parse(row.at ?? '');
+    if (!Number.isFinite(at) || nowMs - at > windowMs) continue;
+    if (row.rateLimited !== true && row.rateLimited !== 1) continue;
+    const p = typeof row.provider === 'string' && row.provider !== '' ? row.provider : '(unknown)';
+    out[p.replace(/^plan:/, '')] = { at: row.at, retryAfterSec: row.retryAfterSec ?? null };
+  }
+  return out;
+}
+
 /* ---------- fetchPlanQuota：app-server usage/stats 适配（Z3） ---------- */
 
 const PLAN_DEFAULT = 'bigmodel-coding-plan';

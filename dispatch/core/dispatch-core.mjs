@@ -625,6 +625,10 @@ export function createDispatcher(options = {}) {
   const dirState = join(workRoot, 'state');
   const dirLogs = join(workRoot, 'logs');
   const jobsFile = join(dirState, 'jobs.json');
+  /* task-11（M2）：**状态目录的唯一所有者是 core** —— 其它层（wire / notify）要落自己的状态文件
+   * （dismissed.json / wake-stats.json）时只准经这里取名，不许自己 `dirname(jobsFile)` 反推。
+   * 反推的后果：core 换布局（或路径语义变化）时，消费者会静默写到错位置。 */
+  const statePath = (name) => join(dirname(jobsFile), String(name));
   const repoLockPath = options.repoLockPath ? resolve(options.repoLockPath) : join(dirLocks, 'repo.lock');
   /* ZB-16：memory 锁已删除（用户要求）。保留只读的 legacy 路径常量，仅用于启动时清理历史遗留的
    * memory.lock 文件 —— 否则升级后那个文件会永远躺在 locks/ 里、且被旧版快照当成"有人持锁"。 */
@@ -3037,8 +3041,13 @@ export function createDispatcher(options = {}) {
    *  {raw:true} 返回 jobs 里的真实对象——retry 的簿记必须写在存储态上；默认仍返回 get() 克隆，
    *  防外部调用方改坏内部态。 */
   function dispatchRaw(spec, { raw = false } = {}) {
+    /* task-11（F8）：**校验必须发生在引擎规整之前** —— `effEngineSpec()` 会把 `spec.engine`
+     * 覆写成 `resolveEngineOf()` 的结果（非法值会被兜成默认引擎 zcode），
+     * 于是"显式 engine 必须是合法值"这条校验在规整后就永远不可能命中（非法值被静默接受）。
+     * 顺序改成 validate → normalize 后，**一次派发只校验一次**（改前 dispatch 里还有一次前置校验，
+     * 那是为了看见原始 engine 才加的重复调用）。 */
+    validateSpec(spec);
     const effSpec = effEngineSpec(spec);
-    validateSpec(effSpec);
     const id = nextId();
     const job = {
       id,
@@ -3113,9 +3122,11 @@ export function createDispatcher(options = {}) {
    *  Agent 的规定（'agent'=Agent决定：执行器按默认规则解析成实际档；具体档位=硬性规定）。
    *  放在 core 层 ⇒ 工具/CLI/面板三条入口统一生效。
    *  ZB-44：**引擎在补完通道默认值之后才判**（默认通道本身可能就是 opencode 通道），
-   *  规整与校验统一在 dispatchRaw 里做（同一段逻辑，不复制）。 */
+   *  规整与校验统一在 dispatchRaw 里做（同一段逻辑，不复制）。
+   *  task-11（F8）：这里**不再**预先 validateSpec —— 校验只在 dispatchRaw 里做一次，且发生在
+   *  引擎规整之前（详见 dispatchRaw 内注释）。补默认值只可能让"有效引擎"更明确（如默认通道是
+   *  opencode 通道），那种情况仍会被 dispatchRaw 里的同一次校验拦下。 */
   function dispatch(spec) {
-    validateSpec(spec);
     const effSpec = { ...spec };
     if (effSpec.provider == null && channel.provider) effSpec.provider = channel.provider;
     if (effSpec.reasoningLevel == null && channel.reasoningLevel) effSpec.reasoningLevel = channel.reasoningLevel;
@@ -3331,9 +3342,13 @@ export function createDispatcher(options = {}) {
   }
 
   function list() {
-    const order = { running: 0, queued: 1, paused: 2 }; // paused 紧随活动项，提醒用户接续
+    /* 排序契约（tool 描述与 README 都这么写）：**running → queued → paused → 终态**，同秩内按 queuedAt 倒序。
+     * ⚠️ 早前是 `order[state] ?? 2` —— 于是 paused 与终态**同秩**，只要存在更新的已完成 job，
+     * paused 就会被排到它下面（与注释/文档相反；2026-10-17 审计 P3）。现在终态显式降到 3。 */
+    const order = { running: 0, queued: 1, paused: 2 };
+    const rank = (state) => order[state] ?? 3;
     return [...jobs.values()]
-      .sort((a, b) => (order[a.state] ?? 2) - (order[b.state] ?? 2) || String(b.queuedAt).localeCompare(String(a.queuedAt)))
+      .sort((a, b) => rank(a.state) - rank(b.state) || String(b.queuedAt).localeCompare(String(a.queuedAt)))
       .map(serialize);
   }
 
@@ -3442,6 +3457,7 @@ export function createDispatcher(options = {}) {
   return {
     workRoot,
     jobsFile,
+    statePath, // task-11（M2）：状态目录内文件名的**唯一**取名入口（wire/notify 不许自己 dirname(jobsFile)）
     lockPaths: { repo: repoLockPath }, // ZB-16：memory 已删除
     fileLockDir: join(dirLocks, FILE_LOCK_DIR), // ZB-08
     dispatch,
