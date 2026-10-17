@@ -200,9 +200,15 @@ window.__ModuleLoader__.load({
        *   行2 = 引擎 + 模型 + 思考 + 权限 + 文件锁（**全部左对齐**，原先这里是 line2 右对齐）；
        *   行3 = 心跳/上下文（左对齐，11px 次要色）。 */
       '.dsp-job-line .dsp-job-tag{margin-right:auto;}',
-      '.dsp-job-line2{justify-content:flex-start;}',
+      /* ZB-70c（用户要求）：第二行**不许折行**（"整仓库锁"曾被挤到下一行）——
+       * 模型徽标可压缩（省略号 + title 悬浮看全名），其余徽标固定宽度 ⇒ 文件锁永远留在第二行。 */
+      '.dsp-job-line2{justify-content:flex-start;flex-wrap:nowrap;overflow:hidden;}',
       '.dsp-job-line3{justify-content:flex-start;}',
       '.dsp-job-right{display:flex;align-items:center;gap:8px;flex:0 0 auto;}',
+      /* 第三行的右侧组靠 auto 外边距推到行尾（第一行靠 .dsp-job-tag 的 margin-right:auto）。 */
+      '.dsp-job-line3 .dsp-job-right{margin-left:auto;}',
+      /* 模型名：可压缩 + 省略号；完整名在 title（用户要求「压缩模型名称的显示，鼠标悬浮显示完整模型名称」）。 */
+      '.dsp-job-model{flex:0 1 auto;min-width:52px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
       /* 列表页脚：左侧「还有 N 条更早 / 收起」，右侧「清除所有」（仅非「进行中」页签出现）。 */
       '.dsp-jobs-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}',
       '.dsp-jobs-foot-l{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}',
@@ -939,6 +945,16 @@ window.__ModuleLoader__.load({
       if (lock === 'none') return { kind: 'none', label: '不取锁', files: [], detail: '明确不取锁（调用方确认无竞写关系）' };
       return { kind: 'legacy', label: lock, files: declared, detail: `未知锁形态：${lock}` };
     }
+    /* ZB-70c（用户要求）：模型名「显示值 + 完整值」两套。
+     * 显示：去掉 `opencode/`、`qoder/` 这类**引擎前缀**（引擎徽标紧挨在左边，前缀纯冗余），
+     *       剩下的部分超长由 CSS 省略号截断（.dsp-job-model）；
+     * 完整：放 title，鼠标悬浮即可看到原值（不因压缩而丢信息）。 */
+    const modelText = (model) => {
+      const s = model == null || model === '' ? '—' : String(model);
+      const m = s.match(/^([A-Za-z]+)\//);
+      return m && KNOWN_ENGINES.includes(m[1].toLowerCase()) ? s.slice(m[0].length) : s;
+    };
+    const modelTitle = (job) => (job && job.model != null && job.model !== '' ? String(job.model) : '—');
     /* ZB-14（用户要求）：上下文占用由「90%」改为**绝对值**「180.9k / 200k」——
      * 百分比只说明"快满了"，绝对值才能一眼看出还剩多少 token 可用。
      * 精度取舍：k 档保留 **1 位小数**，且**截断而非四舍五入** ——
@@ -3725,6 +3741,11 @@ window.__ModuleLoader__.load({
       const spec = job.spec ?? {};
       const kindField = spec.kind === 'task' ? 'task' : spec.kind === 'target' ? 'target' : 'prompt';
       const KIND_KEY = { prompt: 'kindPrompt', task: 'kindTask', target: 'kindTarget' };
+      /* ZB-70c：第三行的三段内容（心跳 / 暂停原因 / 血缘）各自由条件决定，先算好再渲染 ——
+       * 这样"第三行到底该不该出现"只有一个判据，不会因为某个片段变 null 而留一行空白。 */
+      const hasBeat = job.state === 'running' && (job.progress || job.stalled);
+      const lineage = !!(job.parentJobId || (job.hopCount ?? 0) > 0);
+      const showRow3 = hasBeat || paused || lineage;
       const detailBody = spec.body ?? spec[kindField]; // live=slimJob 的 body；demo=body+kind 同名字段
       const kvRow = (k, v) => (v == null || v === '' ? null : h('div', { className: 'dsp-kv' },
         h('span', { className: 'dsp-kv-k' }, k), h('span', { className: 'dsp-kv-v' }, String(v))));
@@ -3775,7 +3796,9 @@ window.__ModuleLoader__.load({
               const e = jobEngineOf(job);
               return h('span', { className: 'dsp-badge', title: `${t('engBadge')}：${engLabel(e)}` }, engLabel(e));
             })(),
-            h('span', { className: 'dsp-badge' }, job.model ?? '—'),
+            /* ZB-70c：模型徽标**可压缩**（省略号）+ 悬浮看全名；显示时去掉 `opencode/` 这类引擎前缀
+             * （前面紧邻的引擎徽标已经说明了厂商）—— 这正是让"文件锁"留在第二行的关键。 */
+            h('span', { className: 'dsp-badge dsp-job-model', title: modelTitle(job) }, modelText(job.model)),
             /* ZB-29：思考强度徽标紧跟模型——显示**实际生效档位**（含 Agent决定档的解析结果）；
              * 无法确定（旧 runner / --resume / 模型未声明）时隐藏，不伪造。 */
             (() => {
@@ -3795,29 +3818,38 @@ window.__ModuleLoader__.load({
                 className: `dsp-badge dsp-lock-${lk.kind}`,
                 title: lk.detail || t('lockHeld'),
               }, lk.label);
-            })(),
-            /* 以下三个是「状态/血缘」补充徽标（用户指定的五项之后）—— 仍然左对齐、同一行。
-             * paused 不放进第一行右侧：右侧固定给「时间 + 退出」（ZB-70 的布局约定）。 */
-            paused ? h('span', { className: 'dsp-badge s-paused', title: job.pauseDetail ?? '' }, `${t('paused')}：${pauseLabel(job.pauseReason)}`) : null,
-            job.parentJobId ? h('span', { className: 'dsp-badge', title: job.parentJobId }, `${t('parentFrom')} ${shortId(job.parentJobId)}`) : null,
-            (job.hopCount ?? 0) > 0 ? h('span', { className: 'dsp-badge' }, `${job.hopCount} ${t('hop')}`) : null,
+            })()
+            /* ↑ 第二行到此为止：只放用户指定的五项（引擎 / 模型 / 思考 / 权限 / 文件锁）。
+             * paused 与血缘徽标已移到第三行 —— 否则第二行一挤，文件锁就被折到下一行（用户截图反馈）。 */
           ),
-          /* ZB-70b（用户要求）：上下文用量已移到**第一行右侧（时间左边）**，本行只留心跳；
-           * 非运行中的行没有心跳 ⇒ 整行不渲染（不留空行占位）。 */
-          job.state === 'running' && (job.progress || job.stalled)
+          /* ZB-70c（用户要求）：第三行 = 左「心跳 / 暂停原因」，**右「接续自 X + N 跳」**。
+           * 只在真有内容时渲染（运行中 / paused / 有血缘），不留空行占位。 */
+          showRow3
             ? h('div', { className: 'dsp-job-line dsp-job-line3' },
               /* ZB-40（用户要求「能看出进程确实在工作还是可能卡住」）：显示**当前阶段/最近工具/心跳**，
                * 超过 150s 无心跳 → 红色「可能卡住」徽标。数据来自 runner 每 10s 的 progress 心跳行。 */
-              h('span', { className: 'dsp-dim', style: job.stalled ? { color: T.danger } : undefined },
-                `${t('jobCurrent')}${job.progress
-                  ? `${job.progress.stage ?? '?'}` +
-                    `${job.progress.lastTool ? ` · ${job.progress.lastTool}` : ''}` +
-                    `${Number.isFinite(job.progress.chars) && job.progress.chars > 0 ? ` · ${job.progress.chars} 字` : ''}` +
-                    `${Number.isFinite(job.progress.tools) && job.progress.tools > 0 ? ` · 工具 ${job.progress.tools} 次` : ''}`
-                  : '—（尚无心跳）'}`),
-              job.stalled
-                ? h('span', { className: 'dsp-badge', title: t('jobStalledHint'), style: { color: T.danger } }, t('jobStalled'))
-                : h('span', { className: 'dsp-dim' }, `｜ ${t('jobLastBeat')} ${job.lastProgressAgoSec ?? '?'}s`),
+              hasBeat
+                ? h('span', { className: 'dsp-dim', style: job.stalled ? { color: T.danger } : undefined },
+                  `${t('jobCurrent')}${job.progress
+                    ? `${job.progress.stage ?? '?'}` +
+                      `${job.progress.lastTool ? ` · ${job.progress.lastTool}` : ''}` +
+                      `${Number.isFinite(job.progress.chars) && job.progress.chars > 0 ? ` · ${job.progress.chars} 字` : ''}` +
+                      `${Number.isFinite(job.progress.tools) && job.progress.tools > 0 ? ` · 工具 ${job.progress.tools} 次` : ''}`
+                    : '—（尚无心跳）'}`)
+                : null,
+              hasBeat
+                ? (job.stalled
+                  ? h('span', { className: 'dsp-badge', title: t('jobStalledHint'), style: { color: T.danger } }, t('jobStalled'))
+                  : h('span', { className: 'dsp-dim' }, `｜ ${t('jobLastBeat')} ${job.lastProgressAgoSec ?? '?'}s`))
+                : null,
+              /* paused 的原因（"额度耗尽/未开通/需签名/配置错误"）—— 没有心跳的行也放这里，左对齐。 */
+              paused ? h('span', { className: 'dsp-badge s-paused', title: job.pauseDetail ?? '' }, `${t('paused')}：${pauseLabel(job.pauseReason)}`) : null,
+              /* 血缘徽标：右对齐（用户要求"接续的移到第三行右侧"；N 跳同族，一起搬过来免得再挤第二行）。 */
+              lineage
+                ? h('span', { className: 'dsp-job-right' },
+                  job.parentJobId ? h('span', { className: 'dsp-badge', title: job.parentJobId }, `${t('parentFrom')} ${shortId(job.parentJobId)}`) : null,
+                  (job.hopCount ?? 0) > 0 ? h('span', { className: 'dsp-badge' }, `${job.hopCount} ${t('hop')}`) : null)
+                : null,
             )
             : null,
         ),

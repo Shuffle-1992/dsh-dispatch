@@ -35,14 +35,17 @@ globalThis.localStorage = {
 const baseJob = (o) => Object.assign({
   id: 'j-' + o.tag, tag: o.tag, state: o.state, kind: 'prompt', queuedAt: '2026-10-17T10:00:00.000Z',
   elapsedSec: 125, exitCode: null, engine: 'opencode', model: 'opencode/glm-5.3-flash-free',
-  reasoningLevel: 'high', spec: { kind: 'prompt', body: 'x', engine: 'opencode', lock: 'repo' },
+  /* lockKindOf 读的是 job.lock（'repo' / 'file:…' / 'none'），thinkingShown 读 spec.reasoningLevel
+   * 或 reasoningLevelApplied —— 夹具必须按这两个真实判据给值，否则徽标天然隐藏、断言就成了空转。 */
+  lock: 'repo', spec: { kind: 'prompt', body: 'x', engine: 'opencode', lock: 'repo', reasoningLevel: 'high' },
   contextUsed: 83000, contextWindow: 200000, autoApproved: true, lockPaths: { 'a.js': true }, tailCount: 3,
   progress: null, stalled: false, lastProgressAgoSec: null, hopCount: 0, parentJobId: null,
 }, o);
 const JOBS = [
   baseJob({ tag: 'run-1', state: 'running', progress: { stage: 'step-finish', lastTool: 'read', chars: 120, tools: 7 }, lastProgressAgoSec: 12 }),
-  baseJob({ tag: 'done-1', state: 'done', exitCode: 0 }),
-  baseJob({ tag: 'paused-1', state: 'paused' }),
+  /* 血缘徽标（接续自 / N 跳）走这里：用户要求它们显示在**第三行右侧**。 */
+  baseJob({ tag: 'done-1', state: 'done', exitCode: 0, parentJobId: 'j-parent-9', hopCount: 2 }),
+  baseJob({ tag: 'paused-1', state: 'paused', pauseReason: 'quota-exhausted' }),
 ];
 const dismissCalls = [];
 const EXT = {
@@ -176,13 +179,23 @@ console.log('\nA. 进程行 = 三行布局');
   ok(right.length === 1, `A8 第 1 行有右对齐组（实际 ${right.length} 个）`);
   ok(/0时02分05秒/.test(text(right[0])), `A9 右组包含时间（实际「${text(right[0])}」）`);
   ok(!/退出/.test(text(lines[0])) || true, 'A10 运行中的行没有退出码时右组不显示「退出」（无 exitCode）');
-  /* 行 2：引擎 + 模型（真实夹具里 thinking/thinkingLevels 拿不到、锁形状不对 ⇒ 那两项天然隐藏；
-   * 这里断言**顺序**与"都在同一行、左对齐"，不伪造缺失字段）。 */
+  /* 行 2：**恰好五项**（引擎/模型/思考/权限/文件锁），且不许折叠 —— 文件锁必须留在这一行。 */
   const badges = findAll(lines[1], (n) => cls(n).includes('dsp-badge'));
-  ok(badges.length >= 2, `A11 第 2 行有徽标（实际 ${badges.length} 个：${badges.map(text).join(' | ')}）`);
+  ok(badges.length === 5, `A11 第 2 行恰好 5 个徽标（实际 ${badges.length} 个：${badges.map(text).join(' | ')}）`);
   ok(text(badges[0]) === 'OpenCode', `A12 第 2 行第 1 个徽标 = 引擎（实际「${text(badges[0])}」）`);
-  ok(/glm-5\.3-flash-free/.test(text(badges[1])), `A13 第 2 行第 2 个徽标 = 模型（实际「${text(badges[1])}」）`);
-  ok(!cls(lines[0]).includes('line2') && !cls(lines[1]).includes('line3'), 'A14 三行的类名互不串（第1行不带 line2）');
+  ok(text(badges[1]) === 'glm-5.3-flash-free', `A13 模型徽标**去掉引擎前缀**后显示（实际「${text(badges[1])}」）`);
+  ok(cls(badges[1]).includes('dsp-job-model'), 'A13b 模型徽标带 dsp-job-model（可压缩 + 省略号）');
+  ok(badges[1].props.title === 'opencode/glm-5.3-flash-free', `A13c 模型徽标 title = 完整名（悬浮可见，实际「${badges[1].props.title}」）`);
+  ok(text(badges[2]) === '高强度', `A13d 第 3 个徽标 = 思考强度（实际「${text(badges[2])}」）`);
+  ok(text(badges[3]) === '已放行权限', `A13e 第 4 个徽标 = 权限（实际「${text(badges[3])}」）`);
+  ok(text(badges[4]) === '整仓库锁', `A13f ★ 第 5 个徽标 = 文件锁，且留在第 2 行（实际「${text(badges[4])}」）`);
+  ok(!badges.some((b) => text(b).includes('接续自') || text(b).includes('跳')), 'A18 第 2 行不含血缘徽标（已移到第三行）');
+  /* 压缩/不折行是 CSS 保证的 —— 从注入的样式表里断言（否则"写了类名但样式没上"查不出来）。 */
+  const css = head.children.map((c) => String((c && c.textContent) || '')).join('\n');
+  ok(/\.dsp-job-line2\{[^}]*flex-wrap:nowrap/.test(css), 'A19 第二行 CSS 明确禁止折行（.dsp-job-line2{flex-wrap:nowrap}）');
+  ok(/\.dsp-job-model\{[^}]*text-overflow:ellipsis/.test(css), 'A20 模型徽标 CSS 用省略号压缩（完整名走 title）');
+  ok(/\.dsp-job-line3 \.dsp-job-right\{[^}]*margin-left:auto/.test(css),
+    'A21 第三行的右组靠 margin-left:auto 推到行尾（"接续"右对齐）');
   /* 行 3：只有心跳（上下文已按用户要求移到第一行右侧）。 */
   const t3 = text(lines[2]);
   ok(/最近心跳 12s/.test(t3), `A16 第 3 行含心跳（实际「${t3}」）`);
@@ -214,15 +227,35 @@ console.log('\nB. 页脚「清除所有」：只在非「进行中」出现');
   const doneRow = rows(tree)[0];
   const doneLine1 = text(linesOf(doneRow)[0]);
   ok(/退出 0/.test(doneLine1), `B11 终态行的第 1 行右组含「退出 0」（实际「${doneLine1}」）`);
-  ok(linesOf(doneRow).length === 2, `B12 终态行只有两行（没有心跳行，实际 ${linesOf(doneRow).length}）`);
   const doneRight = text(findAll(linesOf(doneRow)[0], (n) => cls(n) === 'dsp-job-right')[0]);
   ok(/83\.0k \/ 200\.0k/.test(doneRight) && /退出 0/.test(doneRight),
     `B13 终态行右组 = 上下文 + 时间 + 退出（实际「${doneRight}」）`);
+  /* 血缘徽标：第三行**右侧**（用户要求"接续的移到第三行右侧右对齐"）。 */
+  const doneLines = linesOf(doneRow);
+  ok(doneLines.length === 3, `B12 有血缘的终态行 = 三行（第3行专放血缘，实际 ${doneLines.length}）`);
+  const doneRow3 = doneLines[2];
+  const doneRow3Right = findAll(doneRow3, (n) => cls(n) === 'dsp-job-right');
+  ok(doneRow3Right.length === 1, `B14 第 3 行有右对齐组（实际 ${doneRow3Right.length}）`);
+  const r3text = text(doneRow3Right[0]);
+  ok(/接续自/.test(r3text) && /2 跳/.test(r3text), `B15 右组 = 接续自 + N 跳（实际「${r3text}」）`);
+  ok(!/接续自/.test(text(doneLine1)), 'B16 第一行没有血缘徽标（没被挤回去）');
+}
+
+/* ===== B2. paused 行的第三行：左对齐的暂停原因（没有心跳） ===== */
+{
+  goTab(1);
+  const row = rows(tree)[0];
+  const ls = linesOf(row);
+  ok(ls.length === 3, `B17 paused 行 = 三行（第3行放暂停原因，实际 ${ls.length}）`);
+  const t3 = text(ls[2]);
+  ok(/暂停/.test(t3), `B18 第 3 行含暂停原因（实际「${t3}」）`);
+  ok(findAll(ls[2], (n) => cls(n) === 'dsp-job-right').length === 0, 'B19 paused 行没有血缘 ⇒ 第 3 行无右对齐组');
 }
 
 /* ===== C. 点击「清除所有」= 清除当前页签的全部进程 ===== */
 console.log('\nC. 清除行为');
 {
+  goTab(3); /* B2 段停在了「需处理」tab ⇒ 这里先回到「已完成」再点清除 */
   const n0 = dismissCalls.length;
   clearBtns(tree)[0].props.onClick();
   await new Promise((r) => setTimeout(r, 80));
