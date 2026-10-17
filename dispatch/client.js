@@ -275,13 +275,33 @@ window.__ModuleLoader__.load({
        * 不改 flex 宽度，所以列宽仍由 .dsp-seq-idx/.dsp-seq-lv/.dsp-seq-sort-col 决定。 */
       '.dsp-seq-head{display:flex;align-items:center;gap:6px;padding:0 0 3px;border-bottom:1px solid ' + T.border + ';min-width:0;}',
       '.dsp-seq-head > *{font-family:inherit;font-size:11px;line-height:16px;color:' + T.text3 + ';overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
-      /* ZB-58：逐模型「可用」开关列。列宽类**由列头与行共用**（与其它列同一套口径 ⇒ 严格同线）；
-       * 开关沿用 `dsp-switch dsp-toggle` + `dsp-dot` 的视觉语言（点 = 可用，灰点 = 已关闭）。 */
+      /* ⚠️ ZB-59（真机实测抓到的**亚像素**漂移）：下拉带 `padding:0 6px + border:1px`（共 14px 盒外扩），
+       * 而列头的「档位」格子原本是裸 span —— Chromium 算 flex 收缩份额时按**内容盒**基准参与
+       * （实测：下拉的缩放基准是 96-14=82，列头是 96）⇒ 窄容器里两侧收缩量不同，列边界差 0.7px。
+       * 修法：给**列头那一格**补上与下拉**完全相同**的盒外扩（同样的 padding + 1px 透明边框，border-box），
+       * 于是两侧基准一致、收缩量逐像素相同；顺带让「档位」文字与下拉文字**同一条内缩基线**（7px）。
+       * ⚠️ 只作用于 `.dsp-seq-head` 内（(0,2,0)）：绝不下沉到行里的下拉，免得把它的边框刷成透明。 */
+      '.dsp-seq-head .dsp-seq-lv{padding:0 6px;border:1px solid transparent;box-sizing:border-box;}',
+      /* ── ZB-59（用户：「开关不行，参考 DSH 项目下面的开关样式」＝面板底部那个 iOS 风格滑块）──
+       * 旧的逐模型开关复用了 `.dsp-switch`/`.dsp-dot`（那是"带指示灯的按钮"语言）⇒ 看着不像开关。
+       * 这里按 DSH 的滑块观感实现，**只用主题令牌 ⇒ 明/暗两套自动成立**（宿主对下表令牌按主题给两套值）：
+       *   · ON  ：轨道 = label-primary（浅色主题下是深色、深色主题下是浅色）+ 旋钮 = bg-base
+       *            （与轨道相反 ⇒ 两套主题下旋钮永远可见，正是"深色主题 ON = 浅轨+深钮 / 浅色主题自动反转"）
+       *   · OFF ：轨道 = border-l2（弱）+ 旋钮 = bg-layer-2
+       *   · 焦点环 = brand-primary。
+       * 每个令牌都带**同族回退链**（宿主缺某个令牌时不会掉成透明/黑块）；
+       * `rgba(0,0,0,.25)` 是**唯一**字面值，且只作投影（明暗两套都成立）——
+       * verify-plugin 的字面色检查只拦 `#hex`，这是项目既有可接受形式（同 T.shadow 的写法）。 */
+      '.dsp-sw-ui{position:relative;display:inline-flex;align-items:center;flex:0 0 auto;width:34px;height:20px;padding:0;border:none;border-radius:999px;box-sizing:border-box;background:' + T.border + ';cursor:pointer;transition:background .16s ease;-webkit-appearance:none;appearance:none;}',
+      '.dsp-sw-ui:disabled{opacity:.45;cursor:default;}',
+      '.dsp-sw-ui[aria-checked="true"]{background:' + T.text + ';}',
+      '.dsp-sw-ui .dsp-sw-knob{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-bg-base, var(--dsw-alias-bg-layer-1, inherit));box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .16s ease;pointer-events:none;}',
+      '.dsp-sw-ui[aria-checked="true"] .dsp-sw-knob{transform:translateX(14px);}',
+      '.dsp-sw-ui:focus-visible{outline:2px solid var(--dsw-alias-brand-primary, var(--dsw-alias-button-primary-fill, currentColor));outline-offset:2px;}',
+      /* 列宽类**由列头与行共用**（与其它列同一套口径 ⇒ 严格同线）。
+       * ⚠️ 必须排在 `.dsp-sw-ui` **之后**：同特异性、后写者胜 —— 让行内开关也按列宽（34px，可缩到 26px）
+       * 而不是 `.dsp-sw-ui` 的 `flex:0 0 auto`，否则窄容器里开关不缩、与列头错位。 */
       '.dsp-seq-sw-col{flex:0 1 34px;min-width:26px;}',
-      'button.dsp-seq-sw{flex:0 1 34px;min-width:26px;height:22px;box-sizing:border-box;padding:0 4px;gap:4px;border-radius:999px;font-size:11px;line-height:20px;color:' + T.text2 + ';}',
-      'button.dsp-seq-sw[aria-pressed="false"]{opacity:.72;color:' + T.text3 + ';}',
-      'button.dsp-seq-sw:hover:not(:disabled){background:' + T.hover + ';color:' + T.text + ';}',
-      'button.dsp-seq-sw:disabled{opacity:.45;cursor:default;}',
       /* 已关闭行：序号/模型名降不透明度（开关仍可点回 ⇒ 不给整行 disabled）。 */
       '.dsp-seq-row.dsp-seq-row-off .dsp-seq-idx,.dsp-seq-row.dsp-seq-row-off .dsp-seq-name{opacity:.55;}',
       '.dsp-seq-off{color:' + T.text3 + ';font-family:inherit;}',
@@ -2843,19 +2863,20 @@ window.__ModuleLoader__.load({
                       'aria-label': `${t('seqDown')}：${b.labelOf(m)}`,
                       onClick: () => b.move(i, 1),
                     }, '↓')),
-                  /* ZB-58：逐模型「可用」开关（关掉 ⇒ 不出现在「模型」下拉、不参与顺序派发链；
-                   * 顺序列表本身不动，仍显示在此以便随时重开）。视觉语言 = dsp-switch/dsp-toggle + dsp-dot。 */
+                  /* ZB-59：逐模型「可用」= **DSH 风格滑块开关**（`role="switch"` + `aria-checked` + 旋钮 span）。
+                   * 关掉 ⇒ 不出现在「模型」下拉、不参与顺序派发链；顺序列表本身不动，仍显示在此以便随时重开。
+                   * 视觉：轨道/旋钮全部走主题令牌（明暗两套自动反转），不再用 `.dsp-dot`（那是"指示灯按钮"语言）。 */
                   h('button', {
-                    className: 'dsp-switch dsp-toggle dsp-seq-sw', type: 'button',
+                    className: 'dsp-sw-ui dsp-seq-sw-col', type: 'button', role: 'switch',
                     'data-dsp-model-toggle': b.routeOf(m),
                     'data-dsp-model-enabled': off ? '0' : '1',
-                    'aria-pressed': !off,
+                    'aria-checked': !off,
                     disabled: busy || offline,
                     title: `${b.labelOf(m)}：${off ? t('modelDisabledTag') : t('modelSwitchCol')}`,
                     'aria-label': `${b.labelOf(m)}：${off ? t('modelDisabledTag') : t('modelSwitchCol')}`,
                     onClick: () => b.setEnabled(m, off),
                   },
-                    h('span', { className: 'dsp-dot', style: { background: off ? T.text3 : T.stDone } })));
+                    h('span', { className: 'dsp-sw-knob' })));
               })))));
     }
 
