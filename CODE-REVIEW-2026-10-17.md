@@ -124,18 +124,25 @@
 | 主机→客户端语义漂移（无 cross-check 的组） | 3 | **0**（`cross-check.test.mjs` 三条 + F1 方法面反射） |
 | 假保护断言 | 1（`header-entry` A3 恒绿） | **0**（改为会真红的结构断言） |
 
-### 4.1 最终验收（本文件定稿时实测）
+### 4.1 最终验收（重启后实测，本条为定稿）
 
 ```
-node %TEMP%\dispatch-suite.mjs  →  SUMMARY: 56/56 passed（墙钟 123.1s，比改前 131.8s 更快）
-node tools/accept-021.mjs       →  16 通过 / 1 失败
-                                   （唯一失败项 = "宿主文件比信标新" ⇒ 等用户统一重启，符合预期）
+node tools/accept-021.mjs      →  17 通过 / 0 失败
+node %TEMP%\dispatch-suite.mjs →  SUMMARY: 56/56 passed（墙钟 123.1s，比改前 131.8s 更快）
 ```
 
-活体已核对（当前运行的 0.2.1 实例）：`dispatch action=list limit=5` 返回 `shape:"brief"` / `total:63` / `counts` / `note`；
-`tool.call.toolview` 的 occupants 含 `key:"dispatch", active:true`；`wake-stats.json` 为
-`{delivered:1, inject:1, insertAcked:1, lostWakes:0, unconfirmed:0}`（ZB-62 对账链路闭环）。
-**唯一未生效的是最后 3 个小修**（note 文案 / tail 负数 / list 排序，改在 `wire.host.mjs` + `core`，需一次重启）。
+重启后逐项活体核对（DSH 0.2.1-rc.2，插件被重组合替换后跑的确是磁盘上的最新代码）：
+
+| 验收项 | 证据 |
+|---|---|
+| ZB-61 紧凑 list | `dispatch action=list limit=3` → `shape:"brief"` / `total:64` / `counts` / `note` |
+| 省略提示**新文案**（P2 修复） | note 原文含「`full=true` **并配小 limit**（如 `full=true limit=10`）—— 不配 limit 的全量 full 可能上百 KB，会被宿主**从中间截断**」 |
+| P0-2 引擎标签 | qoder 任务落地通知原文：`（kind=prompt, engine=qoder, tag=post-restart-accept, exit=0）` —— 修复前此处写的是 `zcode job` |
+| ZB-62 对账闭环 | `wake-stats.json` = `{delivered:1, inject:1, insertAcked:1, lostWakes:0, unconfirmed:0}` |
+| `tail n=-5`（P3 修复） | `n=-5` 回 **15 行**（默认上限内全部）、`n=1` 回 1 行 —— 修复前负数会被夹成 1 行 |
+| ZB-63 卡片槽位 | `tool.call.toolview` occupants 含 `key:"dispatch", active:true`（卡片渲染见会话内 `dispatch` 调用） |
+| 排序（paused 先于终态） | 现场无 paused job；由 `wire-e2e-gaps.test.mjs` 对**真 core `list()`** 断言覆盖 |
+| 卡片排版观感 | **只能人眼**（DSH GUI 拒绝自动化浏览器访问） |
 
 ---
 
