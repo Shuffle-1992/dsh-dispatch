@@ -183,11 +183,16 @@ console.log('\nA. 进程行 = 三行布局');
   ok(text(badges[0]) === 'OpenCode', `A12 第 2 行第 1 个徽标 = 引擎（实际「${text(badges[0])}」）`);
   ok(/glm-5\.3-flash-free/.test(text(badges[1])), `A13 第 2 行第 2 个徽标 = 模型（实际「${text(badges[1])}」）`);
   ok(!cls(lines[0]).includes('line2') && !cls(lines[1]).includes('line3'), 'A14 三行的类名互不串（第1行不带 line2）');
-  /* 行 3：上下文 + 运行中的心跳，全部左对齐（无 .dsp-job-right）。 */
+  /* 行 3：只有心跳（上下文已按用户要求移到第一行右侧）。 */
   const t3 = text(lines[2]);
-  ok(/83\.0k \/ 200\.0k/.test(t3), `A15 第 3 行含上下文用量（实际「${t3}」）`);
   ok(/最近心跳 12s/.test(t3), `A16 第 3 行含心跳（实际「${t3}」）`);
+  ok(!/83\.0k/.test(t3), `A15c 第 3 行不再显示上下文（已移到第一行）`);
   ok(findAll(lines[2], (n) => cls(n) === 'dsp-job-right').length === 0, 'A17 第 3 行没有右对齐组（心跳左对齐）');
+  /* 上下文在**时间左边**（用户要求："83.0k / 200.0k 移到时间左侧"）。 */
+  const rightText = text(right[0]);
+  ok(/83\.0k \/ 200\.0k/.test(rightText), `A15 第 1 行右侧组含上下文用量（实际「${rightText}」）`);
+  ok(rightText.indexOf('83.0k') >= 0 && rightText.indexOf('83.0k') < rightText.indexOf('0时02分05秒'),
+    `A15b 上下文在**时间左边**（实际「${rightText}」）`);
 }
 
 /* ===== B. 「清除所有」出现条件 ===== */
@@ -209,6 +214,10 @@ console.log('\nB. 页脚「清除所有」：只在非「进行中」出现');
   const doneRow = rows(tree)[0];
   const doneLine1 = text(linesOf(doneRow)[0]);
   ok(/退出 0/.test(doneLine1), `B11 终态行的第 1 行右组含「退出 0」（实际「${doneLine1}」）`);
+  ok(linesOf(doneRow).length === 2, `B12 终态行只有两行（没有心跳行，实际 ${linesOf(doneRow).length}）`);
+  const doneRight = text(findAll(linesOf(doneRow)[0], (n) => cls(n) === 'dsp-job-right')[0]);
+  ok(/83\.0k \/ 200\.0k/.test(doneRight) && /退出 0/.test(doneRight),
+    `B13 终态行右组 = 上下文 + 时间 + 退出（实际「${doneRight}」）`);
 }
 
 /* ===== C. 点击「清除所有」= 清除当前页签的全部进程 ===== */

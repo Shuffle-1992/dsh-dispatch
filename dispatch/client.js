@@ -3756,6 +3756,9 @@ window.__ModuleLoader__.load({
             h(StatusDot, { state: job.state }),
             h('span', { className: 'dsp-job-tag', title: job.id }, job.tag ?? shortId(job.id)),
             h('span', { className: 'dsp-job-right' },
+              /* ZB-70b（用户要求）：上下文用量放在**时间左边**（第一行右侧组内），
+               * 不再占第三行 —— 第三行只留给会逐秒变化的心跳。 */
+              h('span', { className: 'dsp-dim', title: `${job.contextUsed ?? '—'} / ${job.contextWindow ?? '—'} tokens` }, ctxLabel(job)),
               h('span', { className: 'dsp-dim' }, fmtSec(job.elapsedSec)),
               job.exitCode != null ? h('span', { className: 'dsp-dim' }, `${t('exit')} ${job.exitCode}`) : null,
             ),
@@ -3799,27 +3802,24 @@ window.__ModuleLoader__.load({
             job.parentJobId ? h('span', { className: 'dsp-badge', title: job.parentJobId }, `${t('parentFrom')} ${shortId(job.parentJobId)}`) : null,
             (job.hopCount ?? 0) > 0 ? h('span', { className: 'dsp-badge' }, `${job.hopCount} ${t('hop')}`) : null,
           ),
-          h('div', { className: 'dsp-job-line dsp-job-line3' },
-            h('span', { className: 'dsp-dim', title: `${job.contextUsed ?? '—'} / ${job.contextWindow ?? '—'} tokens` }, ctxLabel(job)),
-            /* ZB-40（用户要求「能看出进程确实在工作还是可能卡住」）：运行中显示**当前阶段/最近工具/心跳**，
-             * 超过 150s 无心跳 → 红色「可能卡住」徽标。数据来自 runner 每 10s 的 progress 心跳行。
-             * ZB-70：整块从"行头第三行（独立 div）"改挂到 `.dsp-job-line3` 里（左对齐、与上下文同一行）。 */
-            job.state === 'running' && (job.progress || job.stalled)
-              ? h('span', { className: 'dsp-dim', style: job.stalled ? { color: T.danger } : undefined },
+          /* ZB-70b（用户要求）：上下文用量已移到**第一行右侧（时间左边）**，本行只留心跳；
+           * 非运行中的行没有心跳 ⇒ 整行不渲染（不留空行占位）。 */
+          job.state === 'running' && (job.progress || job.stalled)
+            ? h('div', { className: 'dsp-job-line dsp-job-line3' },
+              /* ZB-40（用户要求「能看出进程确实在工作还是可能卡住」）：显示**当前阶段/最近工具/心跳**，
+               * 超过 150s 无心跳 → 红色「可能卡住」徽标。数据来自 runner 每 10s 的 progress 心跳行。 */
+              h('span', { className: 'dsp-dim', style: job.stalled ? { color: T.danger } : undefined },
                 `${t('jobCurrent')}${job.progress
                   ? `${job.progress.stage ?? '?'}` +
                     `${job.progress.lastTool ? ` · ${job.progress.lastTool}` : ''}` +
                     `${Number.isFinite(job.progress.chars) && job.progress.chars > 0 ? ` · ${job.progress.chars} 字` : ''}` +
                     `${Number.isFinite(job.progress.tools) && job.progress.tools > 0 ? ` · 工具 ${job.progress.tools} 次` : ''}`
-                  : '—（尚无心跳）'}`)
-              : null,
-            job.state === 'running' && job.stalled
-              ? h('span', { className: 'dsp-badge', title: t('jobStalledHint'), style: { color: T.danger } }, t('jobStalled'))
-              : null,
-            job.state === 'running' && (job.progress || job.stalled) && !job.stalled
-              ? h('span', { className: 'dsp-dim' }, `｜ ${t('jobLastBeat')} ${job.lastProgressAgoSec ?? '?'}s`)
-              : null,
-          ),
+                  : '—（尚无心跳）'}`),
+              job.stalled
+                ? h('span', { className: 'dsp-badge', title: t('jobStalledHint'), style: { color: T.danger } }, t('jobStalled'))
+                : h('span', { className: 'dsp-dim' }, `｜ ${t('jobLastBeat')} ${job.lastProgressAgoSec ?? '?'}s`),
+            )
+            : null,
         ),
         /* 反馈行移到动作区之外：关闭按钮现在在行头，终态行没有动作区，失败反馈仍需可见。 */
         retryFb ? h('div', { className: 'dsp-note', role: 'status' }, retryFb) : null,
