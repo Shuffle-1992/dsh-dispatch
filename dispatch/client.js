@@ -195,9 +195,19 @@ window.__ModuleLoader__.load({
       '.dsp-job{display:flex;flex-direction:column;gap:8px;border:1px solid ' + T.border + ';border-radius:6px;padding:7px 9px;}',
       '.dsp-job-head{display:flex;flex-direction:column;align-items:stretch;gap:2px;min-height:24px;}',
       '.dsp-job-line{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap;}',
-      /* ZB-29b（用户要求）：进程名左对齐（margin-right:auto 把右侧徽标群推到行尾）；下行整体右对齐。 */
+      /* ZB-70（用户要求）：行头改**三行** ——
+       *   行1 = 状态灯 + 进程名（左）… 时间 + 退出（右）：`margin-right:auto` 把右组推到行尾；
+       *   行2 = 引擎 + 模型 + 思考 + 权限 + 文件锁（**全部左对齐**，原先这里是 line2 右对齐）；
+       *   行3 = 心跳/上下文（左对齐，11px 次要色）。 */
       '.dsp-job-line .dsp-job-tag{margin-right:auto;}',
-      '.dsp-job-line2{justify-content:flex-end;}',
+      '.dsp-job-line2{justify-content:flex-start;}',
+      '.dsp-job-line3{justify-content:flex-start;}',
+      '.dsp-job-right{display:flex;align-items:center;gap:8px;flex:0 0 auto;}',
+      /* 列表页脚：左侧「还有 N 条更早 / 收起」，右侧「清除所有」（仅非「进行中」页签出现）。 */
+      '.dsp-jobs-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}',
+      '.dsp-jobs-foot-l{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}',
+      '.dsp-clear{margin-left:auto;}',
+      '.dsp-jobs-foot .dsp-note{margin:0;}',
       /* ZB-29b（用户要求）：进程名**尽可能显示完整** —— 去掉 110px 截断上限；
        * 空间实在不够（名字超过整行宽）才 ellipsis 兜底（右侧徽标会先折行让位）。 */
       '.dsp-job-tag{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;min-width:0;max-width:100%;}',
@@ -557,6 +567,10 @@ window.__ModuleLoader__.load({
         closeJob: '关闭', cwd: '工作目录', createdAt: '创建于', sessionId: '会话',
         grpActive: '进行中', grpPaused: '需处理', grpFailed: '异常', grpDone: '已完成', grpOther: '其他',
         jobMore: '还有', jobMoreN: '条更早的', jobCollapse: '收起',
+        /* ZB-70：页脚「清除所有」——只清**当前页签**（进行中不可清：宿主拒绝 running/queued）。
+         * 文案里刻意写"清除"而不是"删除"：语义是从列表移除（落盘 dismissed.json），不是删记录。 */
+        jobClearAll: '清除所有', jobClearHint: '清除本页签内所有进程（从列表移除并落盘 dismissed.json；进行中的不在此列，需先终止）',
+        jobClearing: '清除中…', jobCleared: '已清除', jobClearN: '条',
         rerun: '重跑', rerunTitle: '同会话重发原提示词（--resume；无 sessionId 则交接重跑）',
         continueBtn: '续接', continueTitle: '在同一会话里发一条新指令（--resume + 新提示词）',
         continueNoSession: '该任务没有 sessionId，无法续接（可先用「重跑」交接重跑）',
@@ -686,6 +700,9 @@ window.__ModuleLoader__.load({
         closeJob: 'Close', cwd: 'Workdir', createdAt: 'Created', sessionId: 'Session',
         grpActive: 'Running', grpPaused: 'Needs action', grpFailed: 'Failed', grpDone: 'Completed', grpOther: 'Other',
         jobMore: 'Show', jobMoreN: 'older', jobCollapse: 'Collapse',
+        /* ZB-70: footer "clear all" — clears only the CURRENT tab (running/queued are rejected host-side). */
+        jobClearAll: 'Clear all', jobClearHint: 'Clear every job in this tab (removed from the list and persisted to dismissed.json; running jobs cannot be cleared)',
+        jobClearing: 'Clearing…', jobCleared: 'Cleared', jobClearN: 'jobs',
         rerun: 'Rerun', rerunTitle: 'Re-send the original prompt in the same session (--resume; without a sessionId it hands off)',
         continueBtn: 'Continue', continueTitle: 'Send a NEW instruction into the same session (--resume + new prompt)',
         continueNoSession: 'This task has no sessionId, so it cannot be continued (use Rerun to hand off instead)',
@@ -3729,12 +3746,21 @@ window.__ModuleLoader__.load({
             setOpen(!open);
           },
         },
-          /* ZB-29b（用户要求）：行头改**两行布局** ——
-           * 上行 = 状态灯 + 进程名 + 模型 + 思考强度 + （paused/接续/跳数徽标）+ 文件锁；
-           * 下行 = 时间 + 上下文 + 退出。两行各自 flex、可换行，行头整体仍是一键开合（role=button 不变）。 */
+          /* ZB-70（用户要求）：行头改**三行布局** ——
+           *   行1 = 状态灯 + 进程名（左）…… 时间 + 退出（**右对齐**，由 .dsp-job-right 承载）；
+           *   行2 = 引擎 + 模型 + 思考强度 + 权限 + 文件锁（**全部左对齐**；paused/血缘徽标随后）；
+           *   行3 = 心跳（运行中）/ 上下文（其它）—— 左对齐。
+           * 为什么这样分：扫第一行回答"谁、跑了多久、成没成"，扫第二行回答"哪个引擎/模型、受什么限制"，
+           * 只有第三行才是逐秒变化的心跳 —— 心跳单独成行后不再把静态徽标挤到右侧。 */
           h('div', { className: 'dsp-job-line' },
             h(StatusDot, { state: job.state }),
             h('span', { className: 'dsp-job-tag', title: job.id }, job.tag ?? shortId(job.id)),
+            h('span', { className: 'dsp-job-right' },
+              h('span', { className: 'dsp-dim' }, fmtSec(job.elapsedSec)),
+              job.exitCode != null ? h('span', { className: 'dsp-dim' }, `${t('exit')} ${job.exitCode}`) : null,
+            ),
+          ),
+          h('div', { className: 'dsp-job-line dsp-job-line2' },
             /* 引擎徽标（一眼看出这个进程是哪个引擎跑的）。
              * 判据顺序与 core 一致：job.engine（core 落库）→ spec.engine → provider 形态 → 默认 zcode。
              * 旧记录（改造前落盘的 job 没有这些字段）显示为 ZCode —— 与事实相符，不伪造成新形态。
@@ -3755,11 +3781,8 @@ window.__ModuleLoader__.load({
                 className: 'dsp-badge', title: `${t('thinking')}：${thinkingLabel(shown)}（${shown}）`,
               }, thinkingLabel(shown)) : null;
             })(),
-            paused ? h('span', { className: 'dsp-badge s-paused', title: job.pauseDetail ?? '' }, `${t('paused')}：${pauseLabel(job.pauseReason)}`) : null,
             /* 权限放行必须**可见**（可审计）：auto 默认关，只有显式指定才有；有就必须在进程行上看得到。 */
             (job.autoApproved || (job.spec && job.spec.auto)) ? h('span', { className: 'dsp-badge', title: t('autoApprovedHint') }, t('autoApproved')) : null,
-            job.parentJobId ? h('span', { className: 'dsp-badge', title: job.parentJobId }, `${t('parentFrom')} ${shortId(job.parentJobId)}`) : null,
-            (job.hopCount ?? 0) > 0 ? h('span', { className: 'dsp-badge' }, `${job.hopCount} ${t('hop')}`) : null,
             /* ZB-18：锁徽标区分「整仓库锁」/「文件锁 N」/「不取锁」；tooltip 给出细节与文件列表。
              * 旧版本记录（含 memory）如实显示为旧形态，不伪装成新模型。 */
             (() => {
@@ -3770,28 +3793,33 @@ window.__ModuleLoader__.load({
                 title: lk.detail || t('lockHeld'),
               }, lk.label);
             })(),
+            /* 以下三个是「状态/血缘」补充徽标（用户指定的五项之后）—— 仍然左对齐、同一行。
+             * paused 不放进第一行右侧：右侧固定给「时间 + 退出」（ZB-70 的布局约定）。 */
+            paused ? h('span', { className: 'dsp-badge s-paused', title: job.pauseDetail ?? '' }, `${t('paused')}：${pauseLabel(job.pauseReason)}`) : null,
+            job.parentJobId ? h('span', { className: 'dsp-badge', title: job.parentJobId }, `${t('parentFrom')} ${shortId(job.parentJobId)}`) : null,
+            (job.hopCount ?? 0) > 0 ? h('span', { className: 'dsp-badge' }, `${job.hopCount} ${t('hop')}`) : null,
           ),
-          h('div', { className: 'dsp-job-line dsp-job-line2' },
-            h('span', { className: 'dsp-dim' }, fmtSec(job.elapsedSec)),
+          h('div', { className: 'dsp-job-line dsp-job-line3' },
             h('span', { className: 'dsp-dim', title: `${job.contextUsed ?? '—'} / ${job.contextWindow ?? '—'} tokens` }, ctxLabel(job)),
-            job.exitCode != null ? h('span', { className: 'dsp-dim' }, `${t('exit')} ${job.exitCode}`) : null,
-          ),
-          /* ZB-40（用户要求「能看出进程确实在工作还是可能卡住」）：运行中显示**当前阶段/最近工具/心跳**，
-           * 超过 150s 无心跳 → 红色「可能卡住」徽标。数据来自 runner 每 10s 的 progress 心跳行。 */
-          job.state === 'running' && (job.progress || job.stalled)
-            ? h('div', { className: 'dsp-dim', style: { fontSize: '11px', marginTop: '2px' } },
-              h('span', { style: job.stalled ? { color: T.danger } : undefined },
+            /* ZB-40（用户要求「能看出进程确实在工作还是可能卡住」）：运行中显示**当前阶段/最近工具/心跳**，
+             * 超过 150s 无心跳 → 红色「可能卡住」徽标。数据来自 runner 每 10s 的 progress 心跳行。
+             * ZB-70：整块从"行头第三行（独立 div）"改挂到 `.dsp-job-line3` 里（左对齐、与上下文同一行）。 */
+            job.state === 'running' && (job.progress || job.stalled)
+              ? h('span', { className: 'dsp-dim', style: job.stalled ? { color: T.danger } : undefined },
                 `${t('jobCurrent')}${job.progress
                   ? `${job.progress.stage ?? '?'}` +
                     `${job.progress.lastTool ? ` · ${job.progress.lastTool}` : ''}` +
                     `${Number.isFinite(job.progress.chars) && job.progress.chars > 0 ? ` · ${job.progress.chars} 字` : ''}` +
                     `${Number.isFinite(job.progress.tools) && job.progress.tools > 0 ? ` · 工具 ${job.progress.tools} 次` : ''}`
-                  : '—（尚无心跳）'}`),
-              job.stalled
-                ? h('span', { className: 'dsp-badge', title: t('jobStalledHint'), style: { color: T.danger } }, ` ${t('jobStalled')}`)
-                : h('span', null, ` ｜ ${t('jobLastBeat')} ${job.lastProgressAgoSec ?? '?'}s`),
-            )
-            : null,
+                  : '—（尚无心跳）'}`)
+              : null,
+            job.state === 'running' && job.stalled
+              ? h('span', { className: 'dsp-badge', title: t('jobStalledHint'), style: { color: T.danger } }, t('jobStalled'))
+              : null,
+            job.state === 'running' && (job.progress || job.stalled) && !job.stalled
+              ? h('span', { className: 'dsp-dim' }, `｜ ${t('jobLastBeat')} ${job.lastProgressAgoSec ?? '?'}s`)
+              : null,
+          ),
         ),
         /* 反馈行移到动作区之外：关闭按钮现在在行头，终态行没有动作区，失败反馈仍需可见。 */
         retryFb ? h('div', { className: 'dsp-note', role: 'status' }, retryFb) : null,
@@ -3900,6 +3928,8 @@ window.__ModuleLoader__.load({
        * 无法在初始化时定 tab，故用 null 表示未选择，每次渲染按当前数据推导；
        * 用户点过某个 tab 后就固定用它（即使那个 tab 为空，也如实显示空态，不偷偷跳走）。 */
       const [userTab, setUserTab] = useState(null);
+      /* ZB-70（用户要求）：页脚「清除所有」的进行态与结果（null | {busy:true,n} | {busy:false,ok:n,err}）。 */
+      const [clearFb, setClearFb] = useState(null);
       const jobs = snapshot?.jobs ?? [];
       if (jobs.length === 0) return h('div', { className: 'dsp-empty' }, offline ? t('emptyOffline') : t('noJobs'));
       const claimed = new Set();
@@ -3913,6 +3943,27 @@ window.__ModuleLoader__.load({
       const activeKey = userTab ?? firstNonEmpty;
       const active = tabs.find((g) => g.key === activeKey) ?? tabs[0];
 
+      /* ZB-70：本页签里**可清除**的进程。
+       * 宿主只允许 paused/终态被 dismiss（queued/running 会被可读拒绝），所以这里先用单一源
+       * `DISMISSABLE_STATES` 过滤 —— 与「关闭」按钮用的是同一份状态表，不另写一份。 */
+      const clearable = active.items.filter((j) => DISMISSABLE_STATES.includes(j.state));
+      /** 清除本页签：**顺序**逐个 dismiss（宿主每清一条就重写 dismissed.json，并发写会互相覆盖）。 */
+      const clearAll = async () => {
+        if (clearFb && clearFb.busy) return;
+        if (clearable.length === 0) return;
+        setClearFb({ busy: true, n: clearable.length });
+        let okN = 0;
+        let err = null;
+        for (const j of clearable) {
+          try {
+            const r = await Promise.resolve(onDismiss(j.id));
+            if (r && r.ok) okN += 1;
+            else if (r && r.error) err = r.error;
+          } catch (e) { err = (e && e.message) ?? e; }
+        }
+        setClearFb({ busy: false, ok: okN, err });
+      };
+
       /* 组内**最新在上**：进程上限 1000 条，若不截断面板会变成几百行长列表。
        * 截断只隐藏「更早的」，最新的永远可见；展开按钮写明还有多少条，不静默吞行。 */
       const newestFirst = [...active.items].sort((a, b) => String(b.queuedAt ?? '').localeCompare(String(a.queuedAt ?? '')));
@@ -3925,7 +3976,7 @@ window.__ModuleLoader__.load({
           tabs.map((g) => h('button', {
             key: g.key, role: 'tab', 'aria-selected': g.key === activeKey,
             className: 'dsp-tab' + (g.key === activeKey ? ' dsp-tab-on' : ''),
-            onClick: () => setUserTab(g.key),
+            onClick: () => { setUserTab(g.key); setClearFb(null); },
           },
             h('span', null, t(g.key)),
             h('span', { className: 'dsp-tab-n' }, String(g.items.length))))),
@@ -3933,18 +3984,38 @@ window.__ModuleLoader__.load({
           ? h('div', { className: 'dsp-empty' }, offline ? t('emptyOffline') : t('noJobs'))
           : h('div', { className: 'dsp-group-body' },
             shown.map((j) => h(JobRow, { key: j.id, job: j, onKill, onDismiss, onTail, onRetry, onContinue, channels, refreshKey })),
-            hidden > 0
-              ? h('button', {
-                className: 'dsp-btn2', style: { alignSelf: 'flex-start' },
-                onClick: () => setExpandedGroups((p) => ({ ...p, [active.key]: true })),
-              }, `${t('jobMore')} ${hidden} ${t('jobMoreN')}`)
-              : null,
-            open && newestFirst.length > JOB_GROUP_PREVIEW
-              ? h('button', {
-                className: 'dsp-btn2', style: { alignSelf: 'flex-start' },
-                onClick: () => setExpandedGroups((p) => ({ ...p, [active.key]: false })),
-              }, t('jobCollapse'))
-              : null));
+            /* ZB-70（用户要求）：页脚 —— 左「还有 N 条更早 / 收起」，右「清除所有」。
+             * 只有**非「进行中」**页签才出现（进行中的 job 宿主一律拒绝清除，给按钮等于骗人）。
+             * 清除后不必手动刷新：面板 1s 轮询，snapshot 已按 dismissed 过滤（wire.host.mjs 的快照路径）。 */
+            h('div', { className: 'dsp-jobs-foot' },
+              h('div', { className: 'dsp-jobs-foot-l' },
+                hidden > 0
+                  ? h('button', {
+                    className: 'dsp-btn2',
+                    onClick: () => setExpandedGroups((p) => ({ ...p, [active.key]: true })),
+                  }, `${t('jobMore')} ${hidden} ${t('jobMoreN')}`)
+                  : null,
+                open && newestFirst.length > JOB_GROUP_PREVIEW
+                  ? h('button', {
+                    className: 'dsp-btn2',
+                    onClick: () => setExpandedGroups((p) => ({ ...p, [active.key]: false })),
+                  }, t('jobCollapse'))
+                  : null,
+                clearFb && !clearFb.busy
+                  ? h('span', { className: 'dsp-note', role: 'status' },
+                    clearFb.err
+                      ? `${t('errPrefix')}${clearFb.err}`
+                      : `${t('jobCleared')} ${clearFb.ok} ${t('jobClearN')}`)
+                  : null),
+              activeKey !== 'grpActive' && clearable.length > 0
+                ? h('button', {
+                  className: 'dsp-btn2 dsp-clear',
+                  title: t('jobClearHint'),
+                  'aria-label': `${t('jobClearAll')} ${clearable.length}`,
+                  disabled: !!(clearFb && clearFb.busy),
+                  onClick: clearAll,
+                }, clearFb && clearFb.busy ? `${t('jobClearing')} ${clearable.length}` : t('jobClearAll'))
+                : null)));
     }
 
     function QuotaCards({ quota, planQuota }) {
