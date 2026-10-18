@@ -2,6 +2,58 @@
 
 > 按全局规则维护：遇到踩坑问题登记于此，避免重复踩坑。新条目置顶。
 
+## 2026-10-18 派发测试暴露的四条真坑（8.3 短名 / 假成功 / 换模型 / 403）
+
+### ① Windows 8.3 短名路径会让 Qoder **静默拒绝写文件**（任务却报 done）
+
+现场：用 `C:\Users\ADMINI~1\AppData\Local\Temp\…`（`$env:TEMP` 的展开值，`ADMINI~1` 是 `Administrator`
+的 **8.3 短名**）作 cwd 派 Qoder 写任务。Qoder 的路径安全门直接拒绝：
+
+> This path uses suspicious Windows path syntax that could bypass security checks:
+> `/c/Users/ADMINI~1/…`. Please use a standard path format.
+
+而任务**报 `exit=0` / `done`**（模型写了段解释就 end_turn）—— **文件根本没创建**。
+换成长路径 `C:\Users\Administrator\…` 后一次通过（12.7s 写成 `hello.txt`）。
+
+**为什么难查**：`permissionMode` 完全正常（`accept_edits` → `acceptEdits`，未回落），
+`permission_denials` 为空，所以"权限回落检测"看不见它 —— 拦它的是**另一条独立的安全门**。
+
+**修法**：core 的 `validateSpec` 对 `cwd` 做**尽力长路径展开**（`realpathSync.native`，
+只对含 `~数字` 段的 Windows 路径动手，失败绝不抛），并落一条 `parseWarnings` 说明。
+**纪律**：脚本里**不要用 `$env:TEMP` 直接当 cwd**；要传路径就用长名（或让插件展开）。
+
+### ② 「零工具调用 + 报成功」= 静默假成功，必须报警
+
+Qoder 结果文件里 `toolCount: 31` 是**引擎可用工具总数**（来自 `init.tools`），**不是本次调用**。
+真机两次任务（一失败一成功）的旧结果文件里都看不出"到底动手没有"。
+
+**修法**：执行器新增 `toolCalls`（本次实际调用的工具名，按次序）；
+并加两条静默失败检测：回答里出现 `denied|blocked|approval|suspicious Windows path|requires confirmation`
+且无 denials ⇒ 报警；**声明要写文件却 `toolCalls=0`** ⇒ 报警。
+（旧检测的关键词表只有 `denied|permission|allow it`，**漏掉了 `Blocked`/`approval`/`suspicious`**。）
+
+### ③ 顺序派发换模型时**根本没换模型**（10 次尝试全打在同一个模型上）
+
+现场：opencode 顺序列表配了 10 个模型，任务失败后连跳 9 次，
+但 **10 次尝试的 `result.json` 里 `model` 全是 `opencode/deepseek-v4.1-flash-free`**。
+
+根因：`retry()` 的"同会话续跑"判据只看「通道相同 + 引擎没变」；顺序派发换模型恰好满足
+（同 provider、同引擎、只换 model）⇒ 落进 resume 分支 ⇒ `delete spec.model`
+（`--resume` 带 `--model` 必失败）把目标模型丢掉。
+**修法**：判据加 `modelChanged`（换模型 ⇒ 必须交接重跑）。
+
+### ④ 上游错误事件不在 stderr ⇒ core 看不见，于是被反复重试
+
+OpenCode 的 403 错误只在 stdout NDJSON 的 `{"type":"error"}` 事件里，**`err.log` 是 0 字节**
+⇒ `classifyPause` 看不到原文 ⇒ 停在 `failed/unknown`（无原因）+ 被当成"换模型再试"反复重试。
+**修法**：执行器把 `error.data.message` + `statusCode` 原文透传到 stderr；
+core 新增暂停原因 `provider-blocked`（`FreeTierError`/`abusive traffic`），
+并加入 `NO_SEQUENTIAL_REASONS`（按 IP 封锁时同引擎换模型必然同样失败 ⇒ 直接交回跨通道降级链）。
+
+**顺带一条环境事实**：本机 Clash Verge 代理出口 `157.254.20.4`（机房 IP）被 OpenCode 风控标记，
+**该 IP 下所有 opencode 免费模型一律 403**（`isRetryable:false`）；换住宅节点或付费通道才可用。
+**与插件无关** —— 手动跑同样的 CLI 命令同样 403。
+
 ## 2026-10-17 全面 review 暴露的三条"隐性坑"（断言/口径/死代码）
 
 1. **假保护断言：用"已改名的旧常量"做反断言 ⇒ 恒绿、零保护，却读起来像在守门。**

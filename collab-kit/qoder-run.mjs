@@ -261,6 +261,10 @@ export function createAggregator() {
   const eventCounts = Object.create(null);
   const texts = [];
   const toolNames = [];
+  /* ZB-72：**本次实际调用**的工具名（按出现次序，允许重复——调用次数本身是信号）。
+   * 与 `toolNames`（init.tools = 引擎**可用**工具清单，恒 31 个）严格区分：
+   * 只有这个能回答"任务到底动手了没有"。 */
+  const toolCalls = [];
   let sessionId = null;
   let model = null;
   let permissionMode = null;
@@ -322,7 +326,7 @@ export function createAggregator() {
         if (!b || typeof b !== 'object') continue;
         if (b.type === 'text' && typeof b.text === 'string') { texts.push(b.text); counters.chars += b.text.length; }
         else if (b.type === 'thinking' && typeof b.thinking === 'string') { counters.chars += 0; } // thinking 不计入正文
-        else if (b.type === 'tool_use' && b.name) { toolNames.push(String(b.name)); counters.tools = toolNames.length; }
+        else if (b.type === 'tool_use' && b.name) { toolNames.push(String(b.name)); toolCalls.push(String(b.name)); counters.tools = toolNames.length; }
       }
       return { type, known: true, assistant: true };
     }
@@ -369,7 +373,7 @@ export function createAggregator() {
       sessionId, model, permissionMode, qoderVersion, protocolVersion,
       totalCredits, contextRatio, durationMs, numTurns, isError, stopReason,
       response: text, responseChars: text.length,
-      toolNames, permissionDenials,
+      toolNames, toolCalls, permissionDenials,
       eventCounts, unknownEvents, unknownEventCount: unknownCount, parseErrorCount: parseErrors,
       warnings,
     };
@@ -583,9 +587,23 @@ async function runOnce(opt, cli) {
   if (fb.warning) process.stderr.write(`${fb.warning}\n`);
   note(`permission-mode-requested=${requestedMode} reported=${s.permissionMode ?? '(unknown)'}${fb.fellBack ? ' FELLBACK' : ''}`);
 
-  /* ---- 答不成答的静默失败检测：无 denial 记录但正文说被拒 ---- */
-  if (!s.isError && (code === 0) && /denied|permission|allow it/i.test(s.response) && (s.permissionDenials ?? []).length === 0) {
-    process.stderr.write(`${PREFIX} 警告：任务报成功但回答里出现"被拒绝"字样，且 permission_denials 为空 —— 这是无头权限被静默拒绝的典型特征（文件可能没改）。建议改用 auto:true 或在 Qoder 里信任该目录。\n`);
+  /* ---- 静默假成功检测（ZB-72：真机两类都实测到了）----
+   *
+   * 共同特征：`exit=0` / 无 `permission_denials`，但**实际什么都没做**。用户看到"任务成功"，
+   * 而工作目录一个文件都没变 —— 这是最危险的一类失败。两类真机原文：
+   *   ① 权限被静默拒绝："It looks like the write was denied…"
+   *   ② **路径语法被拦**："Blocked — I need your approval to proceed" +
+   *      "This path uses suspicious Windows path syntax that could bypass security checks"
+   *      （8.3 短名 `ADMINI~1` 触发；permissionMode 完全正常，所以权限回落检测看不见它）
+   * 故关键词表必须覆盖 ①②（旧表只有 `denied|permission|allow it`，**漏掉了 Blocked/approval/suspicious**）。
+   */
+  const SILENT_FAIL_RE = /denied|permission|allow it|blocked|approval|suspicious Windows path|requires confirmation|outside the workspace/i;
+  if (!s.isError && code === 0 && (s.permissionDenials ?? []).length === 0 && SILENT_FAIL_RE.test(s.response)) {
+    process.stderr.write(`${PREFIX} 警告：任务报成功，但回答里出现"被拒绝/被拦"字样且 permission_denials 为空 —— 这是**静默假成功**的典型特征（文件很可能没改）。排查：① 权限（改用 auto:true 或在 Qoder 里信任该目录）；② **路径语法**（cwd 是否含 Windows 8.3 短名如 ADMINI~1 ⇒ 请用长路径）。\n`);
+  }
+  /* 反向信号：**零工具调用**。声明要写文件的任务却一个工具都没调 ⇒ 几乎必然是静默失败。 */
+  if (!s.isError && code === 0 && (s.toolCalls ?? []).length === 0 && /create|write|edit|file|文件|创建|写入|修改/i.test(String(opt.prompt ?? opt.target ?? ''))) {
+    process.stderr.write(`${PREFIX} 警告：任务报成功，但本次**一次工具都没调用**（toolCalls=0），而提示词里要求创建/修改文件 —— 高度可疑：文件很可能没被创建（真机实测：8.3 短名路径会走到这一步）。\n`);
   }
 
   const elapsed = (Date.now() - started) / 1000;
@@ -614,7 +632,13 @@ async function runOnce(opt, cli) {
       response: s.response, responseChars: s.responseChars,
       usage: { totalCredits: s.totalCredits, contextRatio: s.contextRatio, durationMs: s.durationMs, numTurns: s.numTurns },
       permissionMode: { requested: requestedMode, reported: s.permissionMode, fellBack: fb.fellBack },
-      toolCount: new Set(s.toolNames).size, eventCounts: s.eventCounts,
+      /* ZB-72：`toolCount` 是**引擎可用工具总数**（来自 init.tools，31 个），
+       * 而"本次到底调用了哪些工具"要单独记 —— 后者才是判断"任务是否真的动手"的依据。
+       * 真机教训：路径安全门拦截时，任务报 exit=0/done 但**一个写工具都没调用**，
+       * 旧结果文件里只有 toolCount:31（看起来"工具齐全"）⇒ 静默假成功完全不可见。 */
+      toolCount: new Set(s.toolNames).size,
+      toolCalls: [...new Set(s.toolCalls ?? [])], toolCallCount: (s.toolCalls ?? []).length,
+      eventCounts: s.eventCounts,
       unknownEventCount: s.unknownEventCount, parseErrorCount: s.parseErrorCount, warnings: s.warnings,
     }, null, 2)}\n`, 'utf8');
     note(`result=${rf}`);

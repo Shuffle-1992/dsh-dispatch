@@ -479,27 +479,33 @@ test('⑫ ZB-45 retry：auto 跨 retry 沿用（可被 opts.auto 覆盖）；opt
   assert.ok(jDone.sessionId, '假执行器回了 sessionId（后面 resume 要用）');
   assert.ok(argvOfTag(spawned, 'r1').includes('--cwd'), '原任务带 --cwd');
 
-  /* (1) 同通道 resume：auto 沿用 + cwd 逐字相同 + 绝不带 --model（F2 家族纪律） */
+  /* (1) 同通道 resume：auto 沿用 + cwd 逐字相同 + 绝不带 --model（F2 家族纪律）
+   * ⚠️ ZB-72：`CWD` 是 `mkdtempSync` 造的路径，在 Windows 上常含 8.3 短名（`ADMINI~1`）——
+   * 现在 core 会把 cwd **展开成长路径**再落库（真机事故：短名会让 Qoder 拒绝写文件而任务假成功）。
+   * 所以断言改为「与**原任务落库的 cwd** 逐字相同」（语义不变：续会话必须同一工作目录），
+   * 而不是与传入的原始字符串相同。 */
+  const storedCwd = jDone.spec.cwd;
   const r1 = d.retry(j.id);
   assert.equal(r1.spec.engine, 'opencode');
   assert.equal(r1.spec.resume, jDone.sessionId, '同通道有 sessionId ⇒ resume');
   assert.equal(r1.spec.auto, true, '★ auto 跨 retry 沿用（否则"放行"会在重试后静默失效）');
-  assert.equal(r1.spec.cwd, CWD, '★ 续会话必须带**同一 cwd**（OpenCode 的 session 按工作目录作用域）');
+  assert.equal(r1.spec.cwd, storedCwd, '★ 续会话必须带**同一 cwd**（OpenCode 的 session 按工作目录作用域）');
   assert.equal(r1.parentJobId, j.id);
   await waitTerminal(d, r1.id);
   const r1Args = argvOfTag(spawned, r1.spec.tag);
   assert.equal(r1Args[r1Args.indexOf('--resume') + 1], jDone.sessionId, 'argv 里确实传了 --resume');
   assert.ok(!r1Args.includes('--model'), 'F2 家族纪律：--resume 绝不带 --model');
   assert.ok(r1Args.includes('--auto'), '★ resume 也保持放行级别');
-  assert.equal(r1Args[r1Args.indexOf('--cwd') + 1], CWD, '★ argv 里 --cwd 与原任务逐字相同');
+  assert.equal(r1Args[r1Args.indexOf('--cwd') + 1], storedCwd, '★ argv 里 --cwd 与原任务逐字相同');
 
-  /* (2) 显式 resume 入口（dispatch，不经 retry）也必须保住 cwd */
+  /* (2) 显式 resume 入口（dispatch，不经 retry）也必须保住 cwd
+   * （ZB-72：与 (1) 同理 —— 断言"没丢 cwd"，不钉短名/长名的具体形态。） */
   const jr = d.dispatch({
     kind: 'prompt', prompt: 'continue', lock: 'none', tag: 'explicit-resume',
     provider: 'opencode/deepseek-v4.1-flash-free', resume: 'ses_previous', cwd: CWD,
   });
   const jrSpec = d.get(jr.id).spec;
-  assert.equal(jrSpec.cwd, CWD, '★ 显式 resume 入口不得丢 cwd');
+  assert.ok(jrSpec.cwd && !/~\d/.test(jrSpec.cwd), `★ 显式 resume 入口不得丢 cwd（实际 ${JSON.stringify(jrSpec.cwd)}）`);
   assert.equal(jrSpec.resume, 'ses_previous');
   assert.equal(jrSpec.engine, 'opencode');
   await waitTerminal(d, jr.id);

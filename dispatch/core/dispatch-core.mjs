@@ -525,6 +525,54 @@ function atomicWrite(file, data) {
 }
 
 /* ---------------- 工具 ---------------- */
+
+/** Windows 8.3 短名检测：`ADMINI~1` 这类"**整段**就是短名"的路径段。
+ *  判据刻意收紧（宁可漏展开、不可误改路径）：
+ *    · 段必须**以 `~数字` 结尾**（8.3 短名的固定形态）；
+ *    · 段名（去掉 `~数字`）只能含 `A-Za-z0-9_`，且长度 1-6（8.3 的前半段限制）。
+ *  这样 `dsp-cwd-pure-long-dir`、`my~backup`（不在末尾）、`file~1.txt`（不是整段）都不会命中。 */
+const WIN_SHORTNAME_RE = /(^|[\\/])([A-Za-z0-9_]{1,6})~[0-9]+([\\/]|$)/;
+
+/**
+ * `cwd` 的**尽力长路径规范化**（ZB-72）。
+ *
+ * 真机事故：`C:\Users\ADMINI~1\…`（8.3 短名）作 cwd 派 Qoder 写任务 ⇒ Qoder 的安全门
+ * 以"可疑 Windows 路径语法，可能绕过安全检查"拒绝写入，而任务**报 done**（静默假成功）。
+ *
+ * 策略（安全第一，宁可不动也不抛）：
+ *   · 非 Windows / 不含 `~数字` 段 ⇒ **原样返回**（绝大多数情况，零开销）；
+ *   · 含短名 ⇒ 试 `realpathSync.native`（NTFS 上会把短名解析成长名）；失败就退回 `realpathSync`；
+ *   · 两个都失败（路径不存在 / 无权限）⇒ 保持原样，只在 note 里说明"想展开但没成功"；
+ *   · 展开结果与原文**只差大小写** ⇒ 视为未变化（Windows 大小写不敏感，不必惊动调用方）。
+ *
+ * @returns {{path:string, changed:boolean, note:string|null}}
+ */
+export function normalizeCwdPath(input) {
+  const p = String(input ?? '');
+  if (process.platform !== 'win32' || !p) return { path: p, changed: false, note: null };
+  if (!WIN_SHORTNAME_RE.test(p)) return { path: p, changed: false, note: null };
+  let resolved = null;
+  try { resolved = realpathSync.native(p); } catch { /* 退回下面的非 native 实现 */ }
+  if (!resolved) { try { resolved = realpathSync(p); } catch { resolved = null; } }
+  if (!resolved) {
+    return {
+      path: p,
+      changed: false,
+      note: `cwd 含 Windows 8.3 短名（${p}）但展开失败（路径不存在或无权限）⇒ 已按原样派发；`
+        + '若引擎以"可疑路径语法"拒绝写入，请改用长路径（如 C:\\Users\\<你的用户名>\\…）。',
+    };
+  }
+  /* 大小写差异不算变化（Windows 路径大小写不敏感）。 */
+  const same = resolved.toLowerCase() === p.toLowerCase();
+  if (same) return { path: resolved, changed: false, note: null };
+  return {
+    path: resolved,
+    changed: true,
+    note: `cwd 含 Windows 8.3 短名 ⇒ 已展开为长路径（${p} → ${resolved}）；`
+      + '原因：部分引擎（如 Qoder）会把 8.3 短名当成"可疑路径语法"而拒绝写文件（任务会假成功）。',
+  };
+}
+
 /* ZB-25：状态集合**只在这里定义一份**，并导出给 wire/notify 复用。
  * 此前 wire.host.mjs（DONE/DISMISSABLE）与 notify.mjs（SETTLE_STATES）各自字面量复制，
  * 4 处定义、已实际漂移过（kill(paused)/paused 是否算「落地」各写一遍）。
@@ -534,6 +582,13 @@ export const TERMINAL_STATES = new Set(['done', 'failed', 'killed', 'interrupted
 export const SETTLED_STATES = new Set([...TERMINAL_STATES, 'paused']);
 const KINDS = new Set(['task', 'prompt', 'target']);
 const LOCK_MODES = new Set(['repo', 'none']); // ZB-16：删除 memory；none = 明确不取锁
+
+/** ZB-72：`validateSpec()` 与 `dispatchRaw()` 之间传递"cwd 被改写了、为什么"的**一次性信箱**。
+ *  为什么用模块级数组而不是给 validateSpec 加返回值：validateSpec 是**纯校验**（无返回、抛错即拒绝），
+ *  改签名会牵动所有调用点与既有测试；而这里只是"顺带留痕"，用一次性信箱最小侵入。
+ *  ⚠️ 每次 `dispatchRaw` 都会**取空**它（splice），所以不会跨派发串味；validateSpec 抛错时
+ *  内容自然作废（那次派发已被拒绝，留痕无意义）。 */
+const pendingCwdNotes = [];
 
 /* ==================== ZB-08：细粒度文件锁表 ====================
  *
@@ -3039,6 +3094,25 @@ export function createDispatcher(options = {}) {
       throw new TypeError('dispatch(spec): auto 仅对 engine=opencode / engine=qoder 有意义（它放行引擎未显式拒绝的权限）；zcode 没有等价的放行旗标，请去掉 auto');
     }
     if (spec.timeoutMin != null && !(Number(spec.timeoutMin) > 0)) throw new TypeError('dispatch(spec): timeoutMin 必须为正数');
+    /* ZB-72（2026-10-18 真机实测新增）：`cwd` 的 **Windows 8.3 短名展开**。
+     *
+     * 现场：用 `C:\Users\ADMINI~1\AppData\Local\Temp\…`（`%TEMP%` 的展开值，`ADMINI~1` 是
+     * `Administrator` 的 8.3 短名）作 cwd 派 Qoder 写任务 ⇒ Qoder 的路径安全门直接拒绝：
+     *   "This path uses suspicious Windows path syntax that could bypass security checks"
+     * 而任务**报 exit=0 / done**（模型写了段解释就结束），文件根本没创建 —— **静默假成功**，
+     * 用户完全看不出原因。同一任务换成长路径一次通过（实测 12.7s 写成 hello.txt）。
+     *
+     * 为什么在 core 做而不是执行器：① cwd 是所有引擎共用的入口参数，修一处全受益；
+     * ② `--add-dir <cwd>`（Qoder 的受信任目录声明）用的是**同一个** cwd，短名会让它一起失效；
+     * ③ 锁路径、面板显示、日志也都要用能用的路径。
+     *
+     * 只在 Windows 且路径**确实含 8.3 短名**（形如 `NAME~1`）时才动它，并且**失败绝不抛**
+     * （展开是"尽力而为"的加固：路径不存在/权限不足时保持原样，绝不因此拒绝一次派发）。 */
+    if (spec.cwd != null && String(spec.cwd).trim() !== '') {
+      const r = normalizeCwdPath(String(spec.cwd));
+      if (r.changed) spec.cwd = r.path; // spec 是调用方对象（dispatchRaw 里已规整过一份），就地改写即可
+      if (r.note) pendingCwdNotes.push(r.note);
+    }
     /* ZB-29：思考强度。'agent'（Agent决定，默认）在 core 层就不透传（= 不覆盖，引擎按模型默认档）；
      * 具体档位随模型声明不同（GLM-5 系 disabled|enabled、deepseek-v4 系 disabled|low|high|max，
      * OpenCode 侧叫 variant），core 不写死枚举 —— 执行器按模型声明校验，非法档位 fail-fast（不静默降级）。 */
@@ -3061,6 +3135,8 @@ export function createDispatcher(options = {}) {
      * 顺序改成 validate → normalize 后，**一次派发只校验一次**（改前 dispatch 里还有一次前置校验，
      * 那是为了看见原始 engine 才加的重复调用）。 */
     validateSpec(spec);
+    /* ZB-72：validateSpec 期间收集的 cwd 短名展开说明（就地改写 spec.cwd 后，把"为什么改了"落进 job）。 */
+    const cwdNotes = pendingCwdNotes.splice(0, pendingCwdNotes.length);
     const effSpec = effEngineSpec(spec);
     const id = nextId();
     const job = {
@@ -3091,7 +3167,7 @@ export function createDispatcher(options = {}) {
       captureOut: null,
       captureErr: null,
       tailLines: [],
-      parseWarnings: [],
+      parseWarnings: [...cwdNotes], // ZB-72：cwd 短名展开说明（有则落这里，面板/CLI 可见）
       /* ZB-16/ZB-28：记忆禁令是否已安排注入。
        * ZB-28 起三种 kind 全覆盖：prompt/target 由插件直接拼进内容；
        * task 经 runner `--memory-ban` 由宿主注入（runner 是否确认见 memoryBanRunner 字段）。
