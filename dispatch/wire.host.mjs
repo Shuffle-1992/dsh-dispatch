@@ -945,7 +945,17 @@ export function createRemoteFace(dispatcher, config = {}) {
       if (!next || next.provider == null || next.provider === '') {
         return { ok: false, error: 'setChannel 需要 provider（读当前通道用 channel()）' };
       }
-      return viaAction('channel', { provider: next.provider, model: next.model });
+      /* ⚠️ ZB-73 真机 bug（2026-10-18 用户截图）：**面板改思考强度后立刻跳回「Agent决定」**。
+       * 根因就在这里 —— `createActionHandler` 的 `channel` 分支收 `reasoningLevel`（`p.reasoningLevel ?? p.thinking`），
+       * 而这条 remote 转发**只传了 provider 与 model**，把 `reasoningLevel` 丢了 ⇒
+       * 面板写入看似成功（`ok:true` + 回显），但 core 里存的仍是旧值（通常 'agent'）⇒
+       * 下一次读回 `channel()` 又变回「Agent决定」。同一个参数在两条入口上一个生效一个不生效，
+       * 正是"说了不做"的静默失真 —— 与 wire 里那几处"参数白名单必须成对维护"是同一类坑。 */
+      return viaAction('channel', {
+        provider: next.provider,
+        model: next.model,
+        reasoningLevel: next.reasoningLevel ?? next.thinking ?? null,
+      });
     },
     /**
      * setFallbackChain(list|null)：null/undefined = 清空降级（core.setFallbackChain 语义）。
