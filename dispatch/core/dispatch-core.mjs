@@ -216,12 +216,24 @@ function parseLevelsLine(line, engine) {
  * 防止 quota 组里的宽词（如 balance / 429）抢先用附带提及的行定性。 */
 const PAUSE_SIGNATURES = [
   { reason: 'plan-not-entitled', patterns: [/not_entitled/i, /plan-not-entitled/i] },
+  /* ZB-71（2026-10-18 真机实测新增）：OpenCode 免费模型的**网络级封锁**。
+   * 现场原文：`HTTP 403 · FreeTierError: OpenCode's free models aren't available from your current
+   * network because we've detected abusive traffic from this IP address…`（`isRetryable:false`）。
+   * 为什么必须单独成一类：① 旧代码认不出来 ⇒ 停在 `failed/unknown`，**用户看不到任何可读原因**；
+   * ② 它是**按 IP 生效**的，同引擎的其它免费模型**必然同样失败** ⇒ 在引擎内换模型是白烧时间，
+   * 有意义的是**跨通道**（换到 ZCode/Qoder）。故它进 AUTO_FALLBACK_REASONS，且**不进**顺序派发的延续面。 */
+  { reason: 'provider-blocked', patterns: [/FreeTierError/, /abusive traffic/i, /free models aren't available/i] },
   { reason: 'provider-signing', patterns: [/ClientRequestSigningV4Error/] },
   { reason: 'config-error', patterns: [/Select a model before continuing/i, /CONFIGURATION_ERROR/] },
   { reason: 'quota-exhausted', patterns: [/quota_exceeded/i, /coding_plan_required/i, /rate_limited/i, /insufficient/i, /\b429\b/, /balance/i] },
 ];
-/** 自动降级链只接这三种「换通道可能有意义」的暂停；config-error 属参数错误，unknown 不自动动。 */
-const AUTO_FALLBACK_REASONS = new Set(['quota-exhausted', 'plan-not-entitled', 'provider-signing']);
+/** 自动降级链只接这几种「换通道可能有意义」的暂停；config-error 属参数错误，unknown 不自动动。
+ *  ZB-71：`provider-blocked`（按 IP 封锁免费模型）必须在这里 —— 换通道是唯一有效的动作。 */
+const AUTO_FALLBACK_REASONS = new Set(['quota-exhausted', 'plan-not-entitled', 'provider-signing', 'provider-blocked']);
+/** 这些暂停原因**不在同一引擎内延续**（换模型没用，只会白烧额度/时间）：
+ *  · config-error：参数/配置错，换任何模型都一样；
+ *  · provider-blocked：按 IP 封锁，同引擎的免费模型必然同样失败 ⇒ 直接交回**跨通道**降级链。 */
+const NO_SEQUENTIAL_REASONS = new Set(['config-error', 'provider-blocked']);
 
 /**
  * 从 runner 输出行里识别暂停原因。命中签名 → {reason, detail}（detail=命中的原文一行）；
@@ -1683,9 +1695,11 @@ export function createDispatcher(options = {}) {
     /* 顺序派发的触发面（用户选定「任何失败都延续，除参数错误」）：
      *   · failed（非 0 退出 / spawn 失败 / 无输出）⇒ 延续
      *   · paused ⇒ 延续，**不限暂停原因**（限流 / 额度 / 模型不可用都该换下一个）
-     *   · 唯一例外 `config-error`：参数/配置错，换任何模型都一样 ⇒ 不延续（免得白烧额度）。 */
+     *   · 例外（ZB-71）：`config-error`（参数错，换谁都一样）与 `provider-blocked`
+     *     （按 IP 封锁免费模型，同引擎换模型必然同样失败）⇒ **不在引擎内延续**，
+     *     直接交给跨通道降级链（那才是唯一有效的动作）。 */
     const seqReason = state === 'paused' ? (job.pauseReason ?? '暂停') : `退出码 ${job.exitCode ?? '-'}`;
-    const seqSkipped = state === 'paused' && job.pauseReason === 'config-error';
+    const seqSkipped = state === 'paused' && NO_SEQUENTIAL_REASONS.has(job.pauseReason);
     const seqHandled = seqSkipped ? false : advanceSequential(job, seqReason);
     if (!seqHandled && state === 'paused' && AUTO_FALLBACK_REASONS.has(job.pauseReason)) maybeAutoFallback(job);
   }
@@ -3264,8 +3278,18 @@ export function createDispatcher(options = {}) {
         ? job.pauseReason
         : `manual-retry:${job.state}`;
 
-    /* 同通道 + 有 sessionId + **引擎没变** ⇒ 同会话续跑（`{...job.spec}` 天然带上 auto）。 */
-    if (sameChannel && !engineChanged && job.sessionId) {
+    /* 同通道 + 有 sessionId + **引擎没变** ⇒ 同会话续跑（`{...job.spec}` 天然带上 auto）。
+     *
+     * ⚠️ ZB-71 真机 bug（2026-10-18 实测抓到，症状极隐蔽）：**换模型的意图必须走"交接重跑"**。
+     * 原判据只看了"通道相同 + 引擎没变"，于是**顺序派发换模型**（同引擎、同 provider，只换 model）
+     * 也落进这个分支 ⇒ 下面 `delete spec.model`（`--resume` 带 `--model` 必失败）把目标模型**丢掉**，
+     * 新 job 实际仍在跑**旧模型**。
+     * 实测现场：opencode 顺序列表 10 个模型，一个写任务因 403（FreeTierError，不可重试）失败后
+     * 连跳 9 次，**10 次尝试的 result.json 里 model 全是 `opencode/deepseek-v4.1-flash-free`**
+     * —— 等于把同一个不可重试的错误撞了 10 遍，顺序派发完全失效。
+     * 判据修正：`targetModel != null && targetModel !== job.spec.model` ⇒ **不算同会话续跑**。 */
+    const modelChanged = targetModel != null && targetModel !== (job.spec.model ?? null);
+    if (sameChannel && !engineChanged && !modelChanged && job.sessionId) {
       const spec = { ...job.spec, resume: job.sessionId };
       /* ZB-45：`opts.auto` 显式优先 —— false 表示"这次明确不放行"，true 表示"这次放行"
        * （沿用 job.spec 是缺省行为，只有调用方显式给了 opts.auto 才覆盖）。 */
@@ -3289,7 +3313,7 @@ export function createDispatcher(options = {}) {
       return get(nj.id);
     }
 
-    // 交接重跑：换通道（或原通道无 sessionId 可续）
+    // 交接重跑：换通道、换模型（顺序派发）、或原通道无 sessionId 可续
     const prompt = buildHandoffPrompt(job, { provider: targetProvider ?? origProvider, model: targetModel });
     const spec = {
       kind: 'prompt',
@@ -3504,4 +3528,5 @@ export const __testables = {
   parseProviderTable,
   PAUSE_SIGNATURES,
   AUTO_FALLBACK_REASONS,
+  NO_SEQUENTIAL_REASONS,
 };

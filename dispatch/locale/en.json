@@ -144,6 +144,7 @@
     "pEntitled": "Not entitled",
     "pSigning": "Signing required",
     "pConfig": "Config error",
+    "pBlocked": "Free models blocked",
     "pUnknown": "Unknown",
     "lockWait": "Queue wait",
     "timedOut": "Timed out",

@@ -1088,6 +1088,20 @@ async function runOnce(opt, cli) {
       const tail = rawOut.split(/\r?\n/).filter((l) => l.trim() !== '').slice(-5);
       if (tail.length > 0) process.stderr.write(`${tail.join('\n')}\n`);
     }
+    /* ⚠️ ZB-71（2026-10-18 真机实测）：**错误事件必须单独透传**。
+     * 现场：免费模型被 Cloudflare 判定「abusive traffic」⇒ 上游发 `{"type":"error",…,"statusCode":403,…}`
+     * 事件，err.log 是 **0 字节**（错误只在 stdout NDJSON 里），于是 core 的 classifyPause **看不到原文**
+     * ⇒ 既没有可读的暂停原因、又被顺序派发/降级链当成"可换模型再试"的错误**反复重试**（实测撞了 10 遍）。
+     * 现在把 error 事件的 `error.data.message` 与 statusCode 摘出来单独写一行 stderr（**原文照抄，不改写**），
+     * 让 classifyPause 能认出来。 */
+    const errEv = (summary.unknownEvents ?? []).map((l) => { try { return JSON.parse(l); } catch { return null; } })
+      .filter((e) => e && e.type === 'error');
+    if (errEv.length > 0) {
+      const first = errEv[0];
+      const msg = first?.error?.data?.message ?? first?.error?.message ?? '';
+      const status = first?.error?.data?.statusCode ?? first?.error?.statusCode ?? '';
+      process.stderr.write(`${PREFIX} 上游错误事件：${status ? `HTTP ${status} · ` : ''}${String(msg).replace(/\s+/g, ' ').slice(0, 300)}\n`);
+    }
     if (timedOut) {
       process.stderr.write(`${PREFIX} 超时（${opt.timeoutMin}min）已终止进程树；stderr 尾部见 ${errLog}\n`);
     } else if (!spawnError) {
