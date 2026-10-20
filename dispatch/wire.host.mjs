@@ -64,7 +64,7 @@ export const SWITCH_OFF_ERROR = '派发总开关已关闭（collab/dispatch.swit
  *   · 「未知 action」报错串由它 join 生成（原先手抄一份，ZB-08 加 wait 时漏改 ⇒ 模型
  *     收到的"可用动作"里没有 wait，正好掐掉"派发后等结果"这条正路 —— 已实际漂移过）；
  *   · 新增动作只改这里一处 + 写一个 case。 */
-export const ACTIONS = ['dispatch', 'list', 'kill', 'dismiss', 'tail', 'quota', 'status', 'switch', 'channels', 'channel', 'retry', 'fallback', 'wait'];
+export const ACTIONS = ['dispatch', 'list', 'kill', 'dismiss', 'tail', 'quota', 'status', 'switch', 'channels', 'channel', 'retry', 'fallback', 'split', 'wait'];
 
 const switchCache = new Map(); // 真值文件路径 → { mtimeMs, value }（同 mtime 不重复读盘）
 
@@ -777,6 +777,15 @@ export function createActionHandler(dispatcher, config = {}) {
           }
           return { ok: true, ...dispatcher.getFallbackChain() };
         }
+        /* ZB-82：分流模式（用户要求）—— 主通道将满时自动改派降级通道，用两条通道拿更大并发。
+         * 读：无参 ⇒ 返回当前状态（含"现在能不能分流"的实时判据）。
+         * 写：`enabled`（布尔）/ `minFreeSlots`（1..8，主通道剩余名额低于它就分流）。 */
+        case 'split': {
+          if (p.enabled !== undefined || p.minFreeSlots !== undefined) {
+            dispatcher.setSplitMode({ enabled: p.enabled, minFreeSlots: p.minFreeSlots });
+          }
+          return { ok: true, split: dispatcher.getSplitMode() };
+        }
         default:
           return { ok: false, error: `未知 action：${action}（可用 ${ACTIONS.join('|')}）` };
       }
@@ -938,6 +947,19 @@ export function createRemoteFace(dispatcher, config = {}) {
       if (!dispatcher) throw new Error(NOT_READY);
       return dispatcher.getFallbackChain();
     },
+    /** ZB-82：分流模式 —— 读（无参）/ 写（{enabled?, minFreeSlots?}），与 sequentialGet/Set 同范式
+     *  （直调 core，不经 action 信封）。 */
+    async split(patch) {
+      if (!dispatcher) return { ok: false, error: NOT_READY };
+      try {
+        if (patch && typeof patch === 'object' && (patch.enabled !== undefined || patch.minFreeSlots !== undefined)) {
+          dispatcher.setSplitMode({ enabled: patch.enabled, minFreeSlots: patch.minFreeSlots });
+        }
+        return { ok: true, split: dispatcher.getSplitMode() };
+      } catch (e) {
+        return { ok: false, error: e?.message ?? String(e) };
+      }
+    },
     dispatch: (spec) => viaAction('dispatch', spec && typeof spec === 'object' ? spec : {}),
     kill: (id) => viaAction('kill', { id }),
     dismiss: (id) => viaAction('dismiss', { id }),
@@ -1053,6 +1075,8 @@ export function createRemoteFace(dispatcher, config = {}) {
     channel() { return impl.channel(); }
     /** → { enabled, chain } 当前降级链（出错 reject）。 */
     fallbackChain() { return impl.fallbackChain(); }
+    /** ZB-82：→ { ok:true, split } 分流模式状态（读/写都走这里，见 impl.split）。 */
+    split(patch) { return impl.split(patch); }
     /** dispatch(spec) → { ok:true, job } | { ok:false, error }。 */
     dispatch(spec) { return impl.dispatch(spec); }
     /** kill(id) → { ok:true, job } | { ok:false, error }。 */
@@ -1103,7 +1127,7 @@ export function createRemoteFace(dispatcher, config = {}) {
 }
 
 /** face 方法面（标记/描述符/文档共用这一份表）：[方法名, 参数名数组, 签名, 结果说明]。 */
-const REMOTE_METHODS = ['snapshot', 'dispatch', 'kill', 'dismiss', 'retry', 'tail', 'setChannel', 'setFallbackChain', 'switchGet', 'switchSet', 'quota', 'quotaPlan', 'channels', 'channel', 'fallbackChain', 'sequentialGet', 'sequentialSet', 'modelSwitchesGet', 'modelSwitchSet'];
+const REMOTE_METHODS = ['snapshot', 'dispatch', 'kill', 'dismiss', 'retry', 'tail', 'setChannel', 'setFallbackChain', 'switchGet', 'switchSet', 'quota', 'quotaPlan', 'channels', 'channel', 'fallbackChain', 'split', 'sequentialGet', 'sequentialSet', 'modelSwitchesGet', 'modelSwitchSet'];
 
 const FACE_METHOD_TABLE = [
   ['snapshot', [], 'snapshot(): Promise<snapshot>', '快照数据对象 {generatedAt, counts, locks, queue, jobs[], channels[], workRoot, maxConcurrent}', []],
@@ -1121,6 +1145,8 @@ const FACE_METHOD_TABLE = [
   ['channels', [], 'channels(): Promise<{channels, warnings}>', '{channels, warnings}（5s 缓存）', []],
   ['channel', [], 'channel(): Promise<channel>', '当前通道数据对象', []],
   ['fallbackChain', [], 'fallbackChain(): Promise<{enabled, chain}>', '{enabled, chain}', []],
+  /* ZB-82：分流模式（用户要求）—— 主通道将满时自动改派降级通道，用两条通道拿更大并发。 */
+  ['split', ['patch'], 'split(patch?): Promise<{ok, split}|{ok:false, error}>', '{ok:true, split:{enabled, minFreeSlots, main:{provider,model,engine,limit,running,free}, targets, distinctTargets, active, reason}}（无参=读；patch={enabled?, minFreeSlots?}）', ['patch']],
   /* ZB-52：顺序派发（面板入口）。`sequentialSet({order})` 按引擎合并；**没有 enabled**。 */
   ['sequentialGet', [], 'sequentialGet(): Promise<{order, levels, sequentialCount}>', '{order:{zcode:[],opencode:[],qoder:[]}, levels:{…}, sequentialCount}（无 enabled：模型为空即顺序派发）', []],
   ['sequentialSet', ['patch'], 'sequentialSet(patch): Promise<{order, levels, sequentialCount}|{ok:false, error}>', '{order, levels, sequentialCount}（patch={order}；传 enabled 抛 TypeError）', ['patch']],

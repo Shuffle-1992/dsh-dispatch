@@ -685,6 +685,15 @@ window.__ModuleLoader__.load({
         fallbackTitle: '自动降级', fallbackStateOff: '关', fallbackStateOn: '开',
         fallbackEnableTitle: '自动降级：点击开启/关闭。开启后额度耗尽 / 未开通 / 需签名时会自动交接重跑到下面选定的目标（会消耗下游通道额度）',
         fallbackHint: '选项逻辑与上面「通道」完全一致：模型留空=该通道默认模型；思考强度「Agent决定」=按 ZCode 默认规则解析。仅新建会话生效。',
+        /* ZB-82：分流模式（与「自动降级」并列，但目的不同：降级=容错，分流=提并发）。 */
+        splitTitle: '分流模式', splitStateOff: '关', splitStateOn: '分流中', splitStateIdle: '待命',
+        splitEnableTitle: '开启后：主通道名额将满时，新任务自动改派到降级通道（两条通道名额叠加 ⇒ 更大并发）',
+        splitNeedDistinctHint: '需要先把「自动降级」的目标设成**与主通道不同**的通道（同一通道 = 同一份名额，分流无意义）',
+        splitNoTarget: '无可分流目标', splitActive: '正在分流', splitIdle: '主通道还够用',
+        splitMinFree: '分流提前量', splitMinFreeOne: '满员才分流（默认）', splitMinFreeN: '还剩 {n} 个名额就开始',
+        splitHint: '分流只在「未显式指定通道」时生效（显式指定 ⇒ 尊重你的选择）；被分流的任务带 splitFrom 可核对；目标通道也满 ⇒ 老实排队，不硬塞。',
+        splitMainHint: '主通道实时名额',
+        splitLimit: '上限', splitRunning: '在途', splitFree: '剩余',
         fallbackOfflineHint: '未连接宿主：降级设置存在宿主工作目录，连接后才可读写',
         switchOn: '派发：开', switchOff: '派发：关', switchUnknown: '派发：未知',
         switchTitle: '派发总开关：点击切换（写入 collab/dispatch.switch.json，全部会话生效）',
@@ -812,6 +821,14 @@ window.__ModuleLoader__.load({
         fallbackTitle: 'Auto fallback', fallbackStateOff: 'Off', fallbackStateOn: 'On',
         fallbackEnableTitle: 'Auto fallback: click to enable/disable. When enabled, quota-exhausted / not-entitled / signing-required pauses hand off to the target chosen below (downstream quota is consumed)',
         fallbackHint: 'Same option logic as the Channels section above: empty model = that channel\'s default model; "Agent decides" resolves via ZCode\'s default rule. New sessions only.',
+        splitTitle: 'Split mode', splitStateOff: 'Off', splitStateOn: 'Splitting', splitStateIdle: 'Idle',
+        splitEnableTitle: 'When on: as the main channel nears its limit, new tasks are auto-routed to the fallback channel (the two channels\' slots add up ⇒ more concurrency)',
+        splitNeedDistinctHint: 'Set the Auto-fallback target to a channel **different** from the main one first (same channel = same slots, splitting is pointless)',
+        splitNoTarget: 'No distinct target', splitActive: 'Splitting now', splitIdle: 'Main channel still has room',
+        splitMinFree: 'Split threshold', splitMinFreeOne: 'only when full (default)', splitMinFreeN: 'start when {n} slots remain',
+        splitHint: 'Splitting applies only when no channel was explicitly given (explicit ⇒ your choice is respected); split tasks carry splitFrom for verification; if the target is also full, tasks queue honestly instead of being forced in.',
+        splitMainHint: 'Main channel slots',
+        splitLimit: 'limit', splitRunning: 'in flight', splitFree: 'free',
         fallbackOfflineHint: 'Host not connected: fallback settings live in the host work dir and unlock once connected',
         switchOn: 'Dispatch: on', switchOff: 'Dispatch: off', switchUnknown: 'Dispatch: ?',
         switchTitle: 'Dispatch master switch: click to toggle (writes collab/dispatch.switch.json, effective for all sessions)',
@@ -1077,6 +1094,8 @@ window.__ModuleLoader__.load({
       ['channels', [], []],
       ['channel', [], []],
       ['fallbackChain', [], []],
+      /* ZB-82：分流模式（读/写同一方法）。 */
+      ['split', ['patch'], []],
       /* ZB-52：顺序派发读/写（面板入口）。⚠️ 本表与 host 面 `REMOTE_METHODS`、
        * `wire.client.mjs` 的 descriptors **方法集必须逐字相等** —— 由
        * `test/single-source.test.mjs` ③ 守门（历史上曾漏 dismiss 造成三表漂移）。 */
@@ -1299,6 +1318,14 @@ window.__ModuleLoader__.load({
           return errOf(e);
         }
       };
+      /* ZB-82：分流模式（读/写同一方法；patch 为 `{enabled?, minFreeSlots?}`）。 */
+      const splitSetImpl = async (patch) => {
+        try {
+          return await face.split(patch && typeof patch === 'object' ? patch : {});
+        } catch (e) {
+          return errOf(e);
+        }
+      };
       /* ZB-52：顺序派发写（`{enabled}` 或 `{order}` 单传；另一项由 core 保持不变）。
        * 非对象 patch 归一成 `{}` ⇒ host 侧会把「需要对象」如实报错回来，不静默改配置。 */
       const sequentialSetImpl = async (patch) => {
@@ -1421,6 +1448,9 @@ window.__ModuleLoader__.load({
           }
         },
         fallbackSet: (chain) => fallbackSetImpl(chain),
+        /* ZB-82：分流模式（读/写同一方法，patch = `{enabled?, minFreeSlots?}`）。 */
+        splitGet: () => splitSetImpl({}),
+        splitSet: (patch) => splitSetImpl(patch),
         /* ZB-52：顺序派发读/写。读值经 `normSeqShape` 归一（三引擎键恒在、只留非空字符串）——
          * 与 ext / demo 两条路径**同一形状**，面板不必按数据源分支。 */
         async sequentialGet() {
@@ -1537,6 +1567,9 @@ window.__ModuleLoader__.load({
         retry: (id, opts) => call('retry', { id, ...(opts ?? {}) }),
         fallbackGet: () => call('fallback', {}),
         fallbackSet: (target) => call('fallback', { chain: target ?? null }),
+        /* ZB-82：分流（外部源经 `split` 动作；写把 patch 原样透传）。 */
+        splitGet: () => call('split', {}),
+        splitSet: (patch) => call('split', patch ?? {}),
         /* ZB-52：外部源未提供 `sequential()` 时 call() 返回 {ok:false,error}，UI 自行降级为只读
          * （与 fallback 同范式：读传空对象、写把 patch 原样透传）。 */
         sequentialGet: () => call('sequential', {}),
@@ -1597,6 +1630,9 @@ window.__ModuleLoader__.load({
         channelSet: denied,
         fallbackGet: denied,
         fallbackSet: denied,
+        /* ZB-82：离线无真值可读 ⇒ 分流模式读写一律拒绝（与 fallback 同纪律：不假装成功）。 */
+        splitGet: denied,
+        splitSet: denied,
         // ZB-52：离线无真值可读（浏览器读不到宿主文件），顺序派发读写一律拒绝 ⇒ UI 只读 + 提示走终端
         sequentialGet: denied,
         sequentialSet: denied,
@@ -1647,6 +1683,20 @@ window.__ModuleLoader__.load({
       targets,
       target: targets[0] ?? null,
     });
+    /* ZB-82：分流模式的 demo 状态形状（与 core 的 `getSplitMode()` **同形**——
+     * 面板不按数据源分支；demo 不做真调度，故 main 的 running/free 用固定示例值）。 */
+    const demoSplitShape = (mode, mainProvider, targets) => {
+      const distinct = targets.filter((x) => String(x.provider ?? '') !== String(mainProvider ?? ''));
+      return {
+        enabled: !!mode.enabled,
+        minFreeSlots: mode.minFreeSlots ?? 1,
+        main: { provider: mainProvider ?? null, model: null, engine: 'zcode', limit: 3, running: 1, free: 2 },
+        targets,
+        distinctTargets: distinct,
+        active: !!mode.enabled && distinct.length > 0,
+        reason: !mode.enabled ? 'disabled' : distinct.length === 0 ? 'no-distinct-target' : null,
+      };
+    };
 
     function demoWire() {
       const seed = () => {
@@ -1733,6 +1783,7 @@ window.__ModuleLoader__.load({
       ];
       let demoChannel = { provider: 'plan', model: 'GLM-5.3-Flash' };
       let demoTargets = []; // ZB-30：demo 降级目标（[{provider, model, reasoningLevel}]）
+      let demoSplit = { enabled: false, minFreeSlots: 1 }; // ZB-82：demo 分流模式（纯内存）
       /* ZB-52：demo 顺序派发（纯内存，不写真值文件 —— demo 不该伪装成已落盘）。
        * 形状与 core 的 `getSequential()` 一致（三引擎键恒在，靠 `normSeqShape` 归一）；
        * ZB-52b：`levels` 与 `order` 同序（逐模型档位），demo 也要能演示"设了档位再读回"。
@@ -2007,6 +2058,17 @@ window.__ModuleLoader__.load({
           demoTargets = normTargets(target);
           return { ok: true, ...fallbackShape(demoTargets) };
         },
+        /* ZB-82：分流模式（demo 语义与 core 一致：主通道将满 ⇒ 改派降级通道；同通道 ⇒ 不生效）。
+         * demo 里不做真调度，只回一个**如实**的状态对象（main 取自 demo 默认通道、targets 取自 demoTargets）。 */
+        async splitGet() {
+          return { ok: true, split: demoSplitState(demoTargets) };
+        },
+        async splitSet(patch) {
+          const p = patch && typeof patch === 'object' ? patch : {};
+          if (p.enabled != null) demoSplit.enabled = Boolean(p.enabled);
+          if (p.minFreeSlots != null) demoSplit.minFreeSlots = Math.max(1, Number(p.minFreeSlots) || 1);
+          return { ok: true, split: demoSplitState(demoTargets) };
+        },
         /* ZB-52：顺序派发（demo 语义与 core **逐条一致**：patch **只有 `{order}`**（传 enabled 在 core 会抛
          * TypeError，已废弃）；`order` **按引擎合并**（没传的引擎原样保留），同一引擎内整体替换，未知引擎键丢弃）。
          * ZB-52b：`levels` 与 `order` 同序 —— 该引擎的 order 被替换时 `levels` **一起换**，
@@ -2116,6 +2178,9 @@ window.__ModuleLoader__.load({
       channelSet: async () => ({ ok: false, error: 'wire 不可用' }),
       fallbackGet: async () => ({}),
       fallbackSet: async () => ({ ok: false, error: 'wire 不可用' }),
+      /* ZB-82：分流模式（读给出诚实空形状 = 关；写报错）。 */
+      splitGet: async () => ({ ok: true, split: { enabled: false, minFreeSlots: 1, main: null, targets: [], distinctTargets: [], active: false, reason: 'disabled' } }),
+      splitSet: async () => ({ ok: false, error: 'wire 不可用' }),
       // ZB-52：顺序派发（读给出诚实空形状，写报错）。ZB-52c：无 enabled（模型为空即顺序派发）
       sequentialGet: async () => ({
         order: { zcode: [], opencode: [], qoder: [] },
@@ -2262,6 +2327,7 @@ window.__ModuleLoader__.load({
         dispatch: wire.dispatch, kill: wire.kill, dismiss: wire.dismiss, tail: wire.tail,
         channels: wire.channels, channelGet: wire.channelGet, channelSet: wire.channelSet,
         retry: wire.retry, fallbackGet: wire.fallbackGet, fallbackSet: wire.fallbackSet,
+        splitGet: wire.splitGet, splitSet: wire.splitSet,
         sequentialGet: wire.sequentialGet, sequentialSet: wire.sequentialSet,
         /* ZB-58：逐模型开关（面板「可用」开关 + 「模型」下拉过滤）。 */
         modelSwitchesGet: wire.modelSwitchesGet, modelSwitchSet: wire.modelSwitchSet,
@@ -2969,8 +3035,9 @@ window.__ModuleLoader__.load({
     /* ⚠️ ZB-52：新增的 `sequential` / `onSequentialSet` **追加在 `sw` 之后** ——
      * `frozen-probe.test.mjs` F 段钉住了 `… offline, offlineReason, sw` 这段**参数顺序**
      * （它用"包含"而非全等来防漏传，故插入到中间会误报）。 */
-    function ChannelSection({ channelsInfo, channel, fallback, onSwitch, onFallbackSet, offline, offlineReason, sw, chanError, sequential, onSequentialSet, disabledModels, onToggleModel }) {
+    function ChannelSection({ channelsInfo, channel, fallback, split, onSwitch, onFallbackSet, onSplitSet, offline, offlineReason, sw, chanError, sequential, onSequentialSet, disabledModels, onToggleModel }) {
       const [fbFeedback, setFbFeedback] = useState(null);
+      const [splitFeedback, setSplitFeedback] = useState(null);
       const [busy, setBusy] = useState(false);
       /* ZB-58：逐模型开关的禁用清单（null = 父层还没读到 ⇒ 退回通道上的 `userDisabled` 标记）。
        * 判据统一走模块级 `isModelKeyDisabled` —— 与配置卡列表开关**同一口径**，不会互相矛盾。 */
@@ -3323,6 +3390,32 @@ window.__ModuleLoader__.load({
         });
         setFbFeedback(null);
       };
+      /* ── ZB-82：**分流模式**（用户要求）──
+       * 判据全部来自 core 的 `split` 状态（含实时 `main.free` / `active` / `reason`），
+       * 面板只做显示与写入 —— **不在前端自己算**"该不该分流"（否则两处判据会漂）。 */
+      const splitState = split ?? {};
+      const splitEnabled = !!splitState.enabled;
+      const splitActive = !!splitState.active;
+      const splitMain = splitState.main ?? null;
+      const splitMinFreeSlots = splitState.minFreeSlots ?? 1;
+      /* 可开启的前提：降级链里存在**与主通道不同**的目标（同通道 = 同一份名额 ⇒ 分流无意义）。 */
+      const splitCanEnable = (splitState.distinctTargets ?? []).length > 0;
+      const splitReasonText = splitEnabled
+        ? (splitState.reason === 'no-distinct-target' ? t('splitNoTarget')
+          : splitActive ? t('splitActive') : t('splitIdle'))
+        : null;
+      const setSplit = (patch) => {
+        if (busy) return;
+        setBusy(true);
+        Promise.resolve(onSplitSet(patch))
+          .then((r) => {
+            if (r && r.ok === false) setSplitFeedback({ kind: 'err', text: `${t('errPrefix')}${r.error ?? 'unknown'}` });
+            else setSplitFeedback(null);
+          })
+          .catch((e) => setSplitFeedback({ kind: 'err', text: `${t('errPrefix')}${e?.message ?? e}` }))
+          .finally(() => setBusy(false));
+      };
+      const toggleSplit = () => setSplit({ enabled: !splitEnabled });
       const fbSwitchProvider = (id) => {
         /* ZB-51：与上面 `switchProvider` **同一套判据** —— 必须经折叠清单解析，
          * 否则折叠条目 id（`opencode`/`qoder`）在原始 channels 里找不到 ⇒ **静默选不中**。 */
@@ -3619,6 +3712,40 @@ window.__ModuleLoader__.load({
           h('div', { className: 'dsp-note', role: 'status' }, t('fallbackHint')),
         ) : null,
         fbFeedback ? h('div', { className: `dsp-feedback${fbFeedback.kind === 'err' ? ' dsp-err' : ''}`, role: 'status' }, fbFeedback.text) : null,
+        /* ── ZB-82（用户要求）：**分流模式** ──
+         * 与「自动降级」并列但**目的不同**：降级=主通道**失败**才换（容错）；
+         * 分流=主通道**名额将满**就把新任务摊到降级通道（提并发）。
+         * 只在**降级目标与主通道不同**时才有意义 ⇒ 无可分流目标时开关置灰并说明原因。 */
+        h('div', { className: 'dsp-field' },
+          h('button', {
+            className: 'dsp-switch dsp-toggle', type: 'button',
+            title: splitCanEnable ? t('splitEnableTitle') : t('splitNeedDistinctHint'),
+            disabled: busy || !splitCanEnable,
+            onClick: toggleSplit, 'aria-pressed': splitEnabled,
+          },
+            h('span', { className: 'dsp-dot', style: { background: splitEnabled && splitActive ? T.stDone : T.danger } }),
+            `${t('splitTitle')}：${splitEnabled ? (splitActive ? t('splitStateOn') : t('splitStateIdle')) : t('splitStateOff')}`),
+          h('span', { className: 'dsp-spring' }),
+          /* 如实显示**实时判据**：主通道名额/在途/剩余 —— 用户一眼看出"现在会不会分流"。 */
+          splitMain ? h('span', {
+            className: 'dsp-badge',
+            title: `${t('splitMainHint')}：${splitMain.provider ?? '—'} · ${t('splitLimit')} ${splitMain.limit} · ${t('splitRunning')} ${splitMain.running} · ${t('splitFree')} ${splitMain.free}`,
+          }, `${splitMain.provider ?? '—'} ${splitMain.running}/${splitMain.limit}`) : null,
+          splitReasonText ? h('span', { className: 'dsp-badge' }, splitReasonText) : null),
+        /* 开启时显示"提前量"选择（1=满员才分流；2=还剩 1 个名额就开始摊开）。 */
+        splitEnabled ? h('div', { className: 'dsp-stack' },
+          h('div', { className: 'dsp-field' },
+            h('span', { className: 'dsp-field-k' }, t('splitMinFree')),
+            h('select', {
+              className: 'dsp-select dsp-field-v', value: String(splitMinFreeSlots),
+              onChange: (e) => setSplit({ minFreeSlots: Number(e.target.value) }),
+              disabled: busy, 'aria-label': t('splitMinFree'),
+            },
+              [1, 2, 3].map((n) => h('option', { key: n, value: String(n) },
+                n === 1 ? t('splitMinFreeOne') : tFmt('splitMinFreeN', { n }))))),
+          h('div', { className: 'dsp-note', role: 'status' }, t('splitHint')),
+        ) : null,
+        splitFeedback ? h('div', { className: `dsp-feedback${splitFeedback.kind === 'err' ? ' dsp-err' : ''}`, role: 'status' }, splitFeedback.text) : null,
       );
     }
 
@@ -4414,7 +4541,7 @@ window.__ModuleLoader__.load({
       const [feedback, setFeedback] = useState(null);
       const {
         conn, snapshot, quota, planQuota, dispatch, kill, dismiss, tail,
-        channels, channelGet, channelSet, retry, fallbackGet, fallbackSet,
+        channels, channelGet, channelSet, retry, fallbackGet, fallbackSet, splitGet, splitSet,
         sequentialGet, sequentialSet,
         modelSwitchesGet, modelSwitchSet,
         switchSet,
@@ -4434,6 +4561,9 @@ window.__ModuleLoader__.load({
       const [channelsInfo, setChannelsInfo] = useState({ channels: [], warnings: [], levelsStatus: null });
       const [channel, setChannelState] = useState({ provider: 'plan', model: 'GLM-5.3-Flash' });
       const [fallback, setFallbackState] = useState({ enabled: false, chain: [], targets: [], target: null });
+      /* ZB-82：分流模式状态（初值 = core 的默认：关）。wire 返回权威值后覆盖。
+       * 依赖降级链里有没有"与主通道不同"的目标 ⇒ 在 fallback 变化后重取。 */
+      const [split, setSplitState] = useState({ enabled: false, minFreeSlots: 1, main: null, targets: [], distinctTargets: [], active: false, reason: 'disabled' });
       /* ZB-52：顺序派发（每引擎一份模型顺序）。初值 = 三引擎空表 ——
        * 与 core 的 `getSequential()` 同形，wire 返回权威值后覆盖。
        * ZB-52c：**没有开关** —— "是否顺序派发"由「模型」值表达（模型为空即顺序派发），
@@ -4470,6 +4600,10 @@ window.__ModuleLoader__.load({
         Promise.resolve(fallbackGet()).then((r) => {
           if (alive && r && r.ok) setFallbackState({ enabled: !!r.enabled, chain: r.chain ?? [], targets: r.targets ?? [], target: r.target ?? null });
         }).catch(() => { /* 同上 */ });
+        /* ZB-82：分流模式状态（读失败保持初值 = 关，不猜测）。 */
+        Promise.resolve(splitGet()).then((r) => {
+          if (alive && r && r.ok && r.split) setSplitState(r.split);
+        }).catch(() => { /* 同上 */ });
         /* ZB-52：顺序派发（与 fallback 同一纪律：**失败保持初值**，不猜测、不假装已读到）
          * ZB-52b：统一走 `normSeqShape` —— 三引擎键/逐模型档位一次归一，
          * ext / demo / live 三条数据源形状一致（旧源没有 levels ⇒ 全 null = 引擎默认）。 */
@@ -4483,7 +4617,7 @@ window.__ModuleLoader__.load({
         return () => {
           alive = false;
         };
-      }, [channels, channelGet, fallbackGet, sequentialGet, modelSwitchesGet]);
+      }, [channels, channelGet, fallbackGet, splitGet, sequentialGet, modelSwitchesGet]);
 
       /* 快照兜底回填通道清单（自愈路径）：`snapshot()` 的载荷里本来就有 `channels[]`。
        * 只在"当前清单为空"时采纳 —— 否则会用旧快照覆盖用户刚切通道后的权威值。
@@ -4521,6 +4655,15 @@ window.__ModuleLoader__.load({
           if (r && r.ok) setFallbackState({ enabled: !!r.enabled, chain: r.chain ?? [], targets: r.targets ?? [], target: r.target ?? null });
         });
       }, [fallbackSet]);
+      /* ZB-82：分流模式写入。**乐观回显 + 权威值校正**（与 fallback 同款）：
+       * 先按用户操作渲染开关，wire 返回权威 `split` 状态后覆盖（含 `active`/`main.free` 等实时判据）。 */
+      const onSplitSet = useCallback((patch) => {
+        setSplitState((prev) => ({ ...prev, ...patch }));
+        return Promise.resolve(splitSet(patch)).then((r) => {
+          if (r && r.ok && r.split) setSplitState(r.split);
+          return r;
+        });
+      }, [splitSet]);
       /* ZB-52：顺序派发写入（**只发 `{order}`** —— core 已废弃 `enabled`，传它会**抛 TypeError**；
        * 顺序派发由「模型」值表达，不再有开关）。
        * 乐观回显：面板先按用户操作渲染，wire 返回权威值后校正（与 fallback 同款）。
@@ -4610,7 +4753,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsp-body' },
           h(Section, { id: SEC.channel, title: t('secChannel'), collapsible: true },
             /* 离线说明只在 body 首行渲染一处（去重）：这里不再重复同一句话。 */
-            h(ChannelSection, { channelsInfo, channel, fallback, onSwitch, onFallbackSet, sequential, onSequentialSet, offline: conn !== 'live', offlineReason, sw: dispatchSwitch, chanError,
+            h(ChannelSection, { channelsInfo, channel, fallback, split, onSwitch, onFallbackSet, onSplitSet, sequential, onSequentialSet, offline: conn !== 'live', offlineReason, sw: dispatchSwitch, chanError,
               /* ZB-58：逐模型开关 —— 「模型」下拉据此过滤已关闭项；顺序列表里可原地重开。 */
               disabledModels: modelSw && Array.isArray(modelSw.disabled) ? modelSw.disabled : null,
               onToggleModel: onModelToggle })),

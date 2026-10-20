@@ -839,6 +839,10 @@ export function createDispatcher(options = {}) {
   // Z6：默认通道与自动降级链（持久化于 workRoot/state，绝不写 $DSH_HOME）
   const channelFile = join(dirState, 'channel.json');
   const fallbackFile = join(dirState, 'fallback.json');
+  /* ZB-82（用户要求）：**分流模式**（split mode）—— 主通道名额将满时，把新任务
+   * 自动派给**降级通道**（它名额独立），从而"用两条通道拿到更大的实际并发"。
+   * 持久化在 <workRoot>/state/split.json（与 channel/fallback 同范式：原子写、可读回、面板可设）。 */
+  const splitFile = join(dirState, 'split.json');
   /* ZB-44：通道 → 引擎**快照**（listChannels 成功后落盘 <workRoot>/state/channels.json）。
    * 为什么要落盘：`dispatch()` / `startJob()` 是**同步**函数，需要在不能 await listChannels() 的前提下
    * 把「用户选的 provider id」映射到引擎（例如面板上的 opencode 通道 id）。读失败一律 fail-open
@@ -2270,6 +2274,116 @@ export function createDispatcher(options = {}) {
     } catch { /* 无文件/损坏：默认关 */ }
   }
 
+  /* ---------------- ZB-82：分流模式（split mode，用户要求） ---------------- */
+
+  /** 分流模式状态：`{enabled, minFreeSlots}`。
+   *  `enabled=false`（默认）⇒ 完全保持既有行为（什么都不分流）。
+   *  `minFreeSlots`（默认 1）⇒ 主通道**剩余名额**少于这个数时才分流：
+   *    · 1 = 主通道**满员**才分流（最保守，只填满才溢出）；
+   *    · 2 = 主通道**还剩 1 个名额**时就开始分流（更早摊开，更均衡）。 */
+  let splitMode = { enabled: false, minFreeSlots: 1 };
+
+  function persistSplit() {
+    atomicWrite(splitFile, `${JSON.stringify({ version: 1, ...splitMode, updatedAt: new Date(nowMs()).toISOString() }, null, 2)}\n`);
+  }
+
+  /** 设/读分流模式。入参 `{enabled?, minFreeSlots?}`；缺省字段沿用原值（不重置）。 */
+  function setSplitMode(next = {}) {
+    const out = { ...splitMode };
+    if (next.enabled != null) {
+      if (typeof next.enabled !== 'boolean') throw new TypeError('setSplitMode: enabled 必须是布尔');
+      out.enabled = next.enabled;
+    }
+    if (next.minFreeSlots != null) {
+      const n = Number(next.minFreeSlots);
+      if (!Number.isInteger(n) || n < 1 || n > 8) throw new TypeError('setSplitMode: minFreeSlots 必须是 1..8 的整数');
+      out.minFreeSlots = n;
+    }
+    splitMode = out;
+    persistSplit();
+    return getSplitMode();
+  }
+
+  /** 分流模式的**可读状态**（含"当前能不能分流"的实时判据，让面板/工具能如实显示）。 */
+  function getSplitMode() {
+    const targets = fallbackTargets.map((t) => ({ ...t }));
+    const main = { ...channel };
+    /* 主通道与降级目标**必须不同通道**才有分流价值（同一通道 = 同一份名额，分流是假动作）。 */
+    const distinct = targets.filter((t) => String(t.provider ?? '') !== String(main.provider ?? ''));
+    const mainEngine = normalizeEngine(resolveEngineOf({ provider: main.provider, model: main.model }));
+    const mainLimit = engineLimit(mainEngine);
+    const mainRunning = runningCountByEngine(mainEngine);
+    const mainFree = Math.max(0, mainLimit - mainRunning);
+    return {
+      ...splitMode,
+      main: { provider: main.provider ?? null, model: main.model ?? null, engine: mainEngine, limit: mainLimit, running: mainRunning, free: mainFree },
+      targets,
+      /* `active` = 用户开了 + 降级链里有**不同通道** + 那个目标还有名额。三者缺一都不分流。 */
+      distinctTargets: distinct,
+      active: splitMode.enabled && distinct.length > 0,
+      reason: !splitMode.enabled ? 'disabled'
+        : distinct.length === 0 ? 'no-distinct-target'
+          : null,
+    };
+  }
+
+  /**
+   * ZB-82：**分流决策** —— 决定这次派发该用哪个通道。
+   *
+   * 触发判据（全满足才分流）：
+   *   ① 用户开了分流（`splitMode.enabled`）；
+   *   ② 降级链里有**与主通道不同**的目标（同通道 = 同一份名额 ⇒ 分流无意义，必须排除）；
+   *   ③ **主通道剩余名额** < `minFreeSlots`（默认 1 ⇒ 满员才分流）；
+   *   ④ 目标通道**自己还有名额**（不能把溢出的任务堆到一个也满了的通道）。
+   *
+   * ⚠️ 用「**在途数**」而不是「运行数」：派发是 fire-and-forget，用户可能**连发多个**
+   * 而它们还都在 queued（pump 还没来得及启动）。若只数 running，连发第 2、3 个时
+   * running 仍是 0 ⇒ 不会分流，等它们陆续启动才发现满了 —— **分流慢一拍**。
+   * 故这里数 `running + queued`（该引擎的在途任务），这才是"我打算占用多少名额"的真实意图。
+   *
+   * 返回 `{provider, model, reasoningLevel, reason}` 或 null（不分流）。
+   * **诚实**：不分流时也给出 reason（面板/工具可见"为什么没分流"）。
+   */
+  function splitDecisionFor(spec) {
+    if (!splitMode.enabled) return null;
+    const mainProvider = String(channel.provider ?? '');
+    /* 调用方**显式指定了通道** ⇒ 尊重他的选择，绝不偷偷改（这与"显式指定模型不被顺序链劫持"同一纪律）。 */
+    const explicit = String(spec?.provider ?? '');
+    if (explicit && explicit !== mainProvider) return null;
+    const targets = fallbackTargets.filter((t) => String(t.provider ?? '') !== mainProvider);
+    if (targets.length === 0) return null;
+    const mainEngine = normalizeEngine(resolveEngineOf({ provider: mainProvider, model: channel.model }));
+    const inflight = runningCountByEngine(mainEngine) + queuedCountByEngine(mainEngine);
+    const free = Math.max(0, engineLimit(mainEngine) - inflight);
+    if (free >= splitMode.minFreeSlots) return null; // 主通道还够用 ⇒ 不分流
+    /* 选第一个"自己还有名额"的目标（按降级链顺序 ⇒ 与用户的意图顺序一致）。 */
+    for (const t of targets) {
+      const eng = normalizeEngine(resolveEngineOf({ provider: t.provider, model: t.model }));
+      const tInflight = runningCountByEngine(eng) + queuedCountByEngine(eng);
+      if (tInflight < engineLimit(eng)) {
+        return { provider: t.provider, model: t.model ?? null, reasoningLevel: t.reasoningLevel ?? null, reason: 'main-full' };
+      }
+    }
+    return null; // 目标也满了 ⇒ 老实排队（不硬塞）
+  }
+
+  /** 某引擎的**在途**任务数（running + queued）—— 分流判据用（见 splitDecisionFor 的说明）。 */
+  function queuedCountByEngine(engine) {
+    const want = normalizeEngine(engine);
+    let n = 0;
+    for (const j of jobs.values()) if (j.state === 'queued' && engineOfJob(j) === want) n += 1;
+    return n;
+  }
+
+  function loadSplitState() {
+    try {
+      const data = JSON.parse(readFileSync(splitFile, 'utf8'));
+      if (data && typeof data.enabled === 'boolean') {
+        splitMode = { enabled: data.enabled, minFreeSlots: Number(data.minFreeSlots) >= 1 ? Number(data.minFreeSlots) : 1 };
+      }
+    } catch { /* 无文件/损坏：默认关 */ }
+  }
+
   /* ---------------- ZB-52：顺序派发（状态 + 公开 API） ---------------- */
 
   /** 顺序派发的**归一**：每项 = `{route, reasoningLevel|null}`。
@@ -3425,6 +3539,20 @@ export function createDispatcher(options = {}) {
   function dispatch(spec) {
     const effSpec = { ...spec };
     if (effSpec.provider == null && channel.provider) effSpec.provider = channel.provider;
+    /* ZB-82：**分流模式** —— 主通道名额将满时，把这次任务改派到降级通道（名额独立）。
+     * 必须在"补默认 provider"之后、补默认 model 之前判定：
+     *   · 之后 ⇒ 才能知道"调用方有没有显式指定通道"（显式指定则不插手，见 splitDecisionFor）；
+     *   · 之前 ⇒ 避免把主通道的默认 model 也带过去（分流目标有自己的 model）。
+     * 只改 provider/model/档位三项；锁、cwd、timeoutMin 等**原样保留**（那是任务本身的属性）。 */
+    const split = splitDecisionFor(effSpec);
+    if (split) {
+      effSpec.provider = split.provider;
+      if (split.model) effSpec.model = split.model;
+      if (split.reasoningLevel) effSpec.reasoningLevel = split.reasoningLevel;
+      /* 在 job 上留痕（可见性）：面板/CLI 能看出"这条是被分流过来的"，而不是用户自己选的通道。 */
+      effSpec.splitFrom = channel.provider ?? null;
+      effSpec.splitReason = split.reason;
+    }
     if (effSpec.reasoningLevel == null && channel.reasoningLevel) effSpec.reasoningLevel = channel.reasoningLevel;
     /* F2（机制事实，2026-09-30 现场复现）：`--resume` 带 `--model` 必失败
      * （runner 侧报 `Error: Model creation failed`，exit=1，resultFile 不产出）。
@@ -3756,6 +3884,7 @@ export function createDispatcher(options = {}) {
   loadChannelState();
   loadEngineMap(); // ZB-44：通道→引擎快照（fail-open：读不到 ⇒ 全部按默认引擎 zcode）
   loadFallbackState();
+  loadSplitState(); // ZB-82：分流模式（fail-open：读不到 ⇒ 默认关 = 既有行为不变）
   loadSequentialState(); // ZB-52：顺序派发配置（fail-open：读不到 ⇒ 默认关）
   loadModelSwitches(); // ZB-58：逐模型开关（fail-open：读不到 ⇒ 一个都不禁用 = 全部可用）
   loadEffortDiskCache(); // ZB-57：档位探测结果的磁盘缓存（解决"每次重启都要等 2 分钟"；fail-open）
@@ -3785,6 +3914,9 @@ export function createDispatcher(options = {}) {
     setFallbackChain,
     setFallbackTarget, // ZB-30：面板入口（单目标：通道+模型+思考强度；null=关闭）
     getFallbackChain,
+    /* ZB-82：分流模式（用户要求）—— 主通道名额将满时自动改派到降级通道，用两条通道拿更大并发 */
+    getSplitMode,
+    setSplitMode,
     /* ZB-52：顺序派发（面板入口 = 开关 + 每引擎一份模型顺序；顺序即派发次序） */
     getSequential,
     setSequential,

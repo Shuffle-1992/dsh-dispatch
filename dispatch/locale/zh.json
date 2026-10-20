@@ -225,6 +225,23 @@
     "tvRawClose": "收起原文",
     "tvTruncatedA": "（已截断，原文共 ",
     "tvTruncatedB": " 字符）",
-    "tvEmpty": "（无）"
+    "tvEmpty": "（无）",
+    "splitTitle": "分流模式",
+    "splitStateOff": "关",
+    "splitStateOn": "分流中",
+    "splitStateIdle": "待命",
+    "splitEnableTitle": "开启后：主通道名额将满时，新任务自动改派到降级通道（两条通道名额叠加 ⇒ 更大并发）",
+    "splitNeedDistinctHint": "需要先把「自动降级」的目标设成**与主通道不同**的通道（同一通道 = 同一份名额，分流无意义）",
+    "splitNoTarget": "无可分流目标",
+    "splitActive": "正在分流",
+    "splitIdle": "主通道还够用",
+    "splitMinFree": "分流提前量",
+    "splitMinFreeOne": "满员才分流（默认）",
+    "splitMinFreeN": "还剩 {n} 个名额就开始",
+    "splitHint": "分流只在「未显式指定通道」时生效（显式指定 ⇒ 尊重你的选择）；被分流的任务带 splitFrom 可核对；目标通道也满 ⇒ 老实排队，不硬塞。",
+    "splitMainHint": "主通道实时名额",
+    "splitLimit": "上限",
+    "splitRunning": "在途",
+    "splitFree": "剩余"
   }
 }

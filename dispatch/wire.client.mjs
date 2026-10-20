@@ -113,6 +113,9 @@ export const TYPERT_REMOTE = {
     ['channels', [], 'channels(): Promise<{channels, warnings}>', [], '{channels, warnings}（5s 缓存）'],
     ['channel', [], 'channel(): Promise<channel>', [], '当前通道数据对象'],
     ['fallbackChain', [], 'fallbackChain(): Promise<{enabled, chain}>', [], '{enabled, chain}'],
+    /* ZB-82：分流模式（主通道将满 ⇒ 自动改派降级通道，用两条通道拿更大并发）。
+     * 无参=读；`{enabled?, minFreeSlots?}`=写。 */
+    ['split', ['patch'], 'split(patch?): Promise<{ok, split}|{ok:false, error}>', ['patch'], '{ok:true, split:{enabled, minFreeSlots, main:{…}, targets, distinctTargets, active, reason}}'],
     /* ZB-52：顺序派发（面板入口）。读回 {order, levels, sequentialCount}（**无 enabled**：
      * 顺序派发由「模型」值表达 —— 模型为空即顺序派发，不再有独立开关）；写接受 `{order}`。 */
     ['sequentialGet', [], 'sequentialGet(): Promise<{order, levels, sequentialCount}>', [], '{order:{zcode:[],opencode:[],qoder:[]}, levels:{…}, sequentialCount}'],
@@ -299,6 +302,7 @@ export function createClientWire(ctx, config = {}) {
       channels: () => remote.call('channels'),
       channel: () => remote.call('channel'),
       fallbackChain: () => remote.call('fallbackChain'),
+      split: (patch) => remote.call('split', patch && typeof patch === 'object' ? patch : {}),
       dispatch: (spec) => remote.call('dispatch', spec && typeof spec === 'object' ? spec : {}),
       kill: (id) => remote.call('kill', id),
       retry: (id, opts) => remote.call('retry', id, opts && typeof opts === 'object' ? opts : {}),

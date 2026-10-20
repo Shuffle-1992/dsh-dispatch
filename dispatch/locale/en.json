@@ -225,6 +225,23 @@
     "tvRawClose": "Hide raw text",
     "tvTruncatedA": " (truncated; full text is ",
     "tvTruncatedB": " characters)",
-    "tvEmpty": "(none)"
+    "tvEmpty": "(none)",
+    "splitTitle": "Split mode",
+    "splitStateOff": "Off",
+    "splitStateOn": "Splitting",
+    "splitStateIdle": "Idle",
+    "splitEnableTitle": "When on: as the main channel nears its limit, new tasks are auto-routed to the fallback channel (the two channels' slots add up ⇒ more concurrency)",
+    "splitNeedDistinctHint": "Set the Auto-fallback target to a channel **different** from the main one first (same channel = same slots, splitting is pointless)",
+    "splitNoTarget": "No distinct target",
+    "splitActive": "Splitting now",
+    "splitIdle": "Main channel still has room",
+    "splitMinFree": "Split threshold",
+    "splitMinFreeOne": "only when full (default)",
+    "splitMinFreeN": "start when {n} slots remain",
+    "splitHint": "Splitting applies only when no channel was explicitly given (explicit ⇒ your choice is respected); split tasks carry splitFrom for verification; if the target is also full, tasks queue honestly instead of being forced in.",
+    "splitMainHint": "Main channel slots",
+    "splitLimit": "limit",
+    "splitRunning": "in flight",
+    "splitFree": "free"
   }
 }

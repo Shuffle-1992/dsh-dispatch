@@ -344,16 +344,66 @@ dispatch action=dispatch { kind:'prompt', prompt:'…', provider:'qoder/Qwen3.8-
 
 **要点**：
 
-- 降级链**默认关闭**（`enabled:false`）；它只在**主通道失败/暂停时**自动接手，
-  **不会**因为"主通道满了"而自动分流 ⇒ **多任务分流要靠显式指定 provider**。
 - 每条通道**各自计名额**（Qoder 与 OpenCode 分开算）⇒ 主通道满员时，
   派到另一条通道的任务**立刻开跑**，不受主通道上限影响。
 - 降级目标**与主通道相同**时没有分流价值（同一条通道、同一份名额）。
-- 各引擎的**真实并发上限**见 `dispatch action=channels` 的 `engineDetail` /
-  `snapshot` 的 `engineLimits`；调高上限（配置 `maxConcurrentQoder` 等）也可，
-  但**并发的多个 CLI agent 会互相干扰**（真机实测），故默认值刻意保守。
 - ⚠️ 排队时**不是无信息地干等**：`list` 的 queued 行会给出 `lockWait`
   （位次 / 前方几个 / 被谁挡住 / 预计等待上界），据此判断是"等名额"还是"等锁"。
+
+### 6.6 三个提并发的办法（用户要求全部落地）
+
+| 办法 | 怎么做 | 适用 |
+|---|---|---|
+| ① **声明 `write`** | `dispatch { …, write:['a.ts','b.ts'] }` | **最推荐**：不同文件集自动并行，且仍有细粒度互斥保护 |
+| ② **`lock: 'none'`** | `dispatch { …, lock:'none' }` | 确认**无竞写关系**时完全不取锁（立即开跑，不排队等锁） |
+| ③ **调高上限** | 配置 `maxConcurrent` / `maxConcurrentOpenCode` / `maxConcurrentQoder` | 机器/额度撑得住时；三者语义见下 |
+| ④ **分流模式（新增）** | `action=split { enabled:true, minFreeSlots? }` | **自动**把溢出的任务摊到降级通道，两条通道名额**叠加** |
+
+**并发上限语义**（`action=channels` 的 `engineDetail` / snapshot 的 `engineLimits` 是权威）：
+
+| 上限 | 默认 | 实测依据 |
+|---|---|---|
+| `maxConcurrent`（全局） | 3 | 所有引擎**合计**上限 |
+| `maxConcurrentOpenCode` | 2 | **实测**：并发会让 `opencode run` 零输出 exit 1（1.19.2） |
+| `maxConcurrentQoder` | 3 | **实测**：同时起 3/5 个 `qoderclicn` 全部 exit=0 且结果正确 |
+
+实际并发 = **min(全局, 本引擎上限)**，再被锁互斥进一步压小。
+
+### 6.7 分流模式（split mode，用户要求）—— 自动用两条通道提并发
+
+**它解决什么**：主通道名额满时，新任务本来只能**排队**。若降级通道是**另一条**通道
+（名额独立），把溢出的任务摊过去 ⇒ 两条通道的并发**叠加**。
+
+```
+主通道 qoder/DeepSeek-Flash（名额 3） + 降级 opencode/minimax-m3.1-flash-free（名额 2）
+   ⇒ 分流后实际并发 5（而不是被主通道的 3 卡住）
+```
+
+**怎么开**：
+
+```powershell
+dispatch action=fallback { chain:['opencode'] }        # ① 先设降级目标（必须与主通道**不同**）
+dispatch action=split { enabled:true }                 # ② 开分流（minFreeSlots 默认 1）
+dispatch action=split                                  # 读状态（active / main.free / reason）
+dispatch action=split { enabled:true, minFreeSlots:2 } # 主通道还剩 1 个名额就开始摊开
+```
+
+**规则（每条都有测试钉住）**：
+
+| 规则 | 说明 |
+|---|---|
+| **同通道不分流** | 同通道 = 同一份名额 ⇒ 分流是假动作，直接判 `no-distinct-target` 并拒绝开启 |
+| **显式指定通道 ⇒ 不插手** | 尊重调用方选择（与"显式模型不被顺序链劫持"同一纪律） |
+| **目标也满 ⇒ 老实排队** | 不把溢出硬塞给已满的通道 |
+| **判据用"在途数"** | `running + queued`，否则连发多个时 running 还是 0 ⇒ 分流慢一拍 |
+| **留痕可见** | 被分流的 job 带 `splitFrom` / `splitReason`，能看出"这不是用户选的通道" |
+| **默认关** | 不开 ⇒ 既有行为一字不变 |
+
+⚠️ **与「自动降级」的区别**（两个机制，别混）：**降级 = 容错**（主通道**失败/暂停**才换）；
+**分流 = 提并发**（主通道**名额将满**就摊开）。降级链**不会**因"主通道满"自动分流。
+
+**面板**：「通道」分区里有「分流模式」开关，旁边如实显示主通道实时名额（`在途/上限`）
+与当前状态（`分流中` / `待命` / `无可分流目标`）。
 
 
 ---
