@@ -2,6 +2,54 @@
 
 > 按全局规则维护：遇到踩坑问题登记于此，避免重复踩坑。新条目置顶。
 
+## 2026-10-20 思考档位：探测拿不到逐模型、静默降级查不出来（ZB-75）
+
+### ① Qoder 逐模型档位**只能声明**，探测无出口（四条实测证据）
+
+用户实测：Qoder GUI 里各模型档位**不同**（`Qwen3.8-Flash` = 低/中/极高；`DeepSeek-Flash` = 低/高/最大；
+有的模型甚至**没有档位维度**），而面板给的是**引擎级 8 档并集**。逐模型矩阵**拿不到**：
+
+| 尝试 | 结果 |
+|---|---|
+| `--list-models --with-efforts` | ❌ **未知选项**（CLI 不支持；执行器旧注释以为有） |
+| 哨兵探测 `--reasoning-effort <假值> --list-models` | 只逼出**引擎级**合法集 `auto,none,low,medium,high,xhigh,max,ultracode` |
+| `-m <每个模型> --reasoning-effort <每档>` 全矩阵（15×8=120 次） | ❌ **全部 exit=0** —— **CLI 不按模型校验**档位 |
+| Qoder `catalog-v7`（95 KB 模型元数据） | ❌ **加密**（`UU1D…` base64，非明文 JSON） |
+
+**结论**：逐模型限制只在**真实 API 调用**时由服务端生效。权威数据只能来自 **Qoder GUI 模型卡片**
+⇒ core 用**声明表** `QODER_MODEL_LEVELS` 落地（面板逐模型下拉自动跟随），
+未声明的模型退回引擎级并集并标 `thinkingLevelsScope:'engine'`（诚实降级）。
+
+### ② Qoder **不回报实际生效档位** ⇒ 静默降级查不出来；唯一信号是 `thinking` 内容块
+
+`system/init` 与 `result` 事件里**都没有档位字段**（只有 `model`/`permissionMode`/`fast_mode_state`）。
+而执行器的 `reasoning-effort=<v>` 行**只是回显请求值** ⇒ `reasoningLevelApplied` 恒等于请求
+⇒ 用户设"极高"实际变"关闭思考"**完全不可见**。
+
+**唯一可观测信号**（真机矩阵：2 模型 × 7 档 × 2 次重复）：
+
+| 档位 | thinking 内容块 |
+|---|---|
+| `none` | **恒 0 块**（确定性，2/2 次） |
+| 其余（low/medium/high/xhigh/max/ultracode） | **恒有块**（2/2 次） |
+
+⇒ 可靠的**二值信号**（思考/不思考），但**区分不出** low 与 max。
+故 core 用 `thinkingObserved` + `thinkingMismatch` 做**派发后核对**（请求要思考 + 观测 silent ⇒ 报不符），
+并按用户要求给**向上改档**建议。
+
+### ③ "向上改档"必须取**最近**的更强档，不是最强档
+
+第一版实现每发现更强就更新基准 ⇒ 最终返回**最强**档（`low` → `xhigh`）。
+用户要的是"**优先向上改档位**"（渐进，先试更强一档）—— 一次拉满会白烧额度。
+改成 `s > ci && s < bestS`（最近的更强档）后 `low` → `medium`（该模型声明的下一档）。
+
+### ④ 测试注入 Qoder 执行器要用 `qoderRunnerPath`，不是 `runnerPath`
+
+`runnerPath` 只对 **zcode** 生效；Qoder 走的是 `qoderRunnerPath`。
+用错会**静默跑真实 `qoder-run.mjs`**（实测：观测值变成默认 `thinking`，断言假绿/假红）。
+另：假执行器的换行别用模板字面量里的 `\n`（易被写坏成字面反斜杠-n）⇒ 用
+`String.fromCharCode(10)` 或数组 join。
+
 ## 2026-10-18 派发测试暴露的四条真坑（8.3 短名 / 假成功 / 换模型 / 403）
 
 ### ① Windows 8.3 短名路径会让 Qoder **静默拒绝写文件**（任务却报 done）

@@ -265,6 +265,10 @@ export function createAggregator() {
    * 与 `toolNames`（init.tools = 引擎**可用**工具清单，恒 31 个）严格区分：
    * 只有这个能回答"任务到底动手了没有"。 */
   const toolCalls = [];
+  /* ZB-75：**观测到的思考量** —— 本次 assistant 事件里非空 `thinking` 内容块的个数与总字数。
+   * 用途：核对"请求的思考档位是否真生效"（Qoder 引擎不回报档位，这是唯一信号）。 */
+  let thinkingBlocks = 0;
+  let thinkingChars = 0;
   let sessionId = null;
   let model = null;
   let permissionMode = null;
@@ -325,7 +329,11 @@ export function createAggregator() {
       for (const b of blocks) {
         if (!b || typeof b !== 'object') continue;
         if (b.type === 'text' && typeof b.text === 'string') { texts.push(b.text); counters.chars += b.text.length; }
-        else if (b.type === 'thinking' && typeof b.thinking === 'string') { counters.chars += 0; } // thinking 不计入正文
+        /* ZB-75：thinking 不计入正文，但**必须计数** —— 它是"档位是否真生效"的唯一可观测信号
+         * （实测：`none` 恒 0 块、其余档位恒有块；见输出处的注释）。空块不算（引擎会给 `thinking:""`）。 */
+        else if (b.type === 'thinking' && typeof b.thinking === 'string') {
+          if (b.thinking.trim()) { thinkingBlocks += 1; thinkingChars += b.thinking.length; }
+        }
         else if (b.type === 'tool_use' && b.name) { toolNames.push(String(b.name)); toolCalls.push(String(b.name)); counters.tools = toolNames.length; }
       }
       return { type, known: true, assistant: true };
@@ -374,6 +382,7 @@ export function createAggregator() {
       totalCredits, contextRatio, durationMs, numTurns, isError, stopReason,
       response: text, responseChars: text.length,
       toolNames, toolCalls, permissionDenials,
+      thinkingBlocks, thinkingChars,
       eventCounts, unknownEvents, unknownEventCount: unknownCount, parseErrorCount: parseErrors,
       warnings,
     };
@@ -609,8 +618,24 @@ async function runOnce(opt, cli) {
   const elapsed = (Date.now() - started) / 1000;
   const exit = timedOut ? 124 : (code ?? 1);
 
-  /* 思考强度回显（core 的 applied 行：`reasoning-effort=<v> model=<id>`）。 */
+  /* 思考强度回显（core 的 applied 行：`reasoning-effort=<v> model=<id>`）。
+   *
+   * ⚠️ ZB-75 重要更正（2026-10-20 真机实测）：这一行过去**只是把请求值原样回显**，
+   * 而 Qoder 引擎**不回报实际生效档位** —— `system/init` 与 `result` 事件里都**没有**档位字段
+   * （只有 `model` / `permissionMode` / `fast_mode_state`）。于是 core 的 `reasoningLevelApplied`
+   * 对 Qoder 恒等于请求值 ⇒ **档位静默回落永远检测不出来**（用户实测：设"极高"实际变成"关闭思考"）。
+   *
+   * 那什么才是**可观测**的？实测矩阵（2 模型 × 7 档 × 2 次重复，`probe-think-matrix`）：
+   *   · `none`（无思考）⇒ assistant 里 **thinking 内容块恒为 0**（确定性，2/2 次都是 0）；
+   *   · 其余任何档位（low/medium/high/xhigh/max/ultracode）⇒ **恒有 thinking 块**（2/2 次都有）。
+   * 结论：**"有没有 thinking 块"是可靠的二值信号**（思考 vs 不思考），但**区分不出** low 与 max。
+   * 故这里如实上报两件事：请求档位 + **观测到的思考状态**（`thinking=yes/no`），
+   * 由 core 判定"请求要思考、实际没思考"= 档位被静默降级。绝不把请求值谎报成实际值。 */
   if (opt.reasoningEffort) out(`${PREFIX} reasoning-effort=${opt.reasoningEffort} model=${opt.model ?? s.model ?? '(default)'}`);
+  /* ZB-75：**观测到的思考状态**（独立行，供 core 核对档位是否真生效）。
+   * `observed=thinking` = 本次确实产生了 thinking 内容块；`observed=silent` = 一块都没有。
+   * 为什么不用请求值兜底：若把 silent 谎报成 thinking，核对就退化成"永远通过"（等于没核对）。 */
+  out(`${PREFIX} thinking-observed=${(s.thinkingBlocks ?? 0) > 0 ? 'thinking' : 'silent'} blocks=${s.thinkingBlocks ?? 0} chars=${s.thinkingChars ?? 0} requested=${opt.reasoningEffort}`);
   /* 档位表：Qoder 的档位随模型/账号而变，本执行器**不写死**；探测到才打（当前 CLI 未提供该子命令）。 */
   if (s.toolNames.length) out(`${PREFIX} tools count=${new Set(s.toolNames).size}`);
 

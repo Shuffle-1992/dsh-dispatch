@@ -233,6 +233,12 @@ export function slimJob(job) {
     stalled: job.state === 'running' && (!job.lastProgressAt || Date.now() - job.lastProgressAt > 150_000),
     tailCount: Array.isArray(tailLines) ? tailLines.length : 0,
     parseWarnings: (parseWarnings ?? []).slice(-5),
+    /* ZB-75：思考档位核对结论（不符时给出 requested/observed/suggested）——
+     * 单独给一个字段，因为它是**结构化的可执行结论**（"该向上改成 X 重试"），
+     * 比埋在 parseWarnings 的散文里更好被 agent/CLI 消费。null = 相符或无法核对。 */
+    thinkingMismatch: job.thinkingMismatch ?? null,
+    /* ZB-75：观测到的思考状态（Qoder 才有；其它引擎不上报 ⇒ null，不猜）。 */
+    thinkingObserved: job.thinkingObserved ?? null,
   };
 }
 

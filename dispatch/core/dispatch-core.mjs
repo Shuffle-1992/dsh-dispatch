@@ -137,6 +137,39 @@ const APPLIED_MAPPER = {
   qoder: (m) => ({ reasoningLevelApplied: m[1], reasoningTarget: m[2] }),
 };
 
+/** ZB-75：思考档位的**强度序**（弱→强）。用于"向上改档位重试"（用户教学要求）。
+ *  ⚠️ 只用于**排序/找相邻**，绝不用于校验合法性（合法集合随模型声明不同，见下）。
+ *  `auto`/`agent` 是"交给引擎决定"的**语义档位**，不在强度序里（返回 -1 ⇒ 不参与向上比较）。 */
+const LEVEL_STRENGTH = ['none', 'disabled', 'minimal', 'low', 'medium', 'enabled', 'high', 'xhigh', 'max', 'ultracode'];
+const strengthOf = (lv) => LEVEL_STRENGTH.indexOf(String(lv ?? ''));
+
+/** ZB-75：Qoder **逐模型**档位声明表（用户 2026-10-20 从 Qoder CN 模型卡片提供）。
+ *
+ *  为什么必须**声明**而不是探测（三条实测证据，见 pitfalls）：
+ *   ① CLI 无只读出口能给逐模型档位：`--list-models` 只吐模型名，`--with-efforts` 是**未知选项**；
+ *   ② 哨兵探测只逼出**引擎级**合法集（`auto,none,low,medium,high,xhigh,max,ultracode`）；
+ *   ③ `-m <每个模型> --reasoning-effort <每档>` 全矩阵（15 模型 × 8 档 = 120 次）**全部 exit=0**
+ *      —— CLI **不按模型校验**档位；逐模型限制只在**真实 API 调用**时由服务端生效；
+ *      Qoder 的 `catalog-v7` 元数据是加密的（`UU1D…`，非明文 JSON）。
+ *  故权威数据只能来自 **Qoder GUI 的模型卡片**（用户提供）。
+ *
+ *  键 = 裸模型名（与 `--list-models` 输出逐字一致）；值 = 该模型**实际可选**的档位（弱→强，有序）。
+ *  未列出的模型 ⇒ 退回引擎级并集（诚实降级：不谎称逐模型精确，也不假装没有档位维度）。
+ *  新增/变更模型时**改这一张表**即可（面板的逐模型下拉会自动跟随）。 */
+const QODER_MODEL_LEVELS = {
+  'Qwen3.8-Flash': ['low', 'medium', 'xhigh'],
+  'DeepSeek-Flash': ['low', 'high', 'max'],
+};
+
+/** ZB-75：**思考档位核对**用的"关闭思考"档位集 —— 用户本就要不思考时，静默不算"不符"。 */
+const THINK_OFF_LEVELS = new Set(['none', 'disabled']);
+
+/** ZB-75：Qoder **引擎级**档位并集的闭包缓存（`listChannels()` 每次探测后写入）——
+ *  供 `suggestStrongerLevel()` 在"该模型没有逐模型声明"时兜底。初值 null = 还没探测过
+ *  （此时不猜，直接不给向上建议）。 */
+let qoderLevelsCache = null;
+
+
 /** 引擎 → 该引擎的行正则表（缓存：解析是热路径，不能每行都重建正则）。 */
 const RES_CACHE = new Map();
 function resFor(engine) {
@@ -187,6 +220,11 @@ function resFor(engine) {
     levels: new RegExp(`^${p} ${LEVELS_KEYWORD[e] ?? 'reasoning-levels'} (\\S+?)=(\\S+)\\s*$`),
     // 引擎差异行②（生效确认行）—— 未知引擎退回"永不匹配"，绝不抛（见上面 APPLIED_RE_OF 的教训）
     applied: (APPLIED_RE_OF[e] ?? (() => /(?!)/))(p),
+    /* ZB-75：**观测到的思考状态**行（目前只有 Qoder 执行器打）——
+     * `[qoder-run] thinking-observed=thinking|silent blocks=N chars=N requested=<档位>`。
+     * 为什么需要它：Qoder 引擎**不回报实际生效档位**（init/result 里都没有该字段），
+     * 所以 `applied` 行只是回显请求值 ⇒ 档位静默回落检测不出来。这一行是**唯一**可观测信号。 */
+    thinkingObserved: new RegExp(`^${p} thinking-observed=(thinking|silent) blocks=(\\d+) chars=(\\d+) requested=(\\S+)\\s*$`),
   };
   RES_CACHE.set(e, res);
   return res;
@@ -380,6 +418,11 @@ function parseLineForEngine(text, engine) {
      * opencode = 确认实际生效的模型变体（variant=<档> model=<modelId>，无 provider 注入）。
      * 两者落到**同一组** job 字段（reasoningLevelApplied / reasoningTarget）。 */
     return APPLIED_MAPPER[e](m);
+  }
+  /* ZB-75：观测到的思考状态（Qoder 专用）—— 落到 job.thinkingObserved / thinkingBlocks，
+   * 供 `finalizeJob` 核对"请求要思考、实际却没思考"（= 档位被静默降级）。 */
+  if ((m = res.thinkingObserved.exec(text))) {
+    return { thinkingObserved: m[1], thinkingBlocks: Number(m[2]), thinkingChars: Number(m[3]), thinkingRequested: m[4] };
   }
   if (res.knownInfo.test(text)) return {}; // 已知信息行（cli= / task=），无需入库
   /* ZB-44：opencode 的 `variants <model>=<a,b>` 是**探测/声明行**（与 zcode 的 reasoning-levels 同义），
@@ -1683,6 +1726,13 @@ export function createDispatcher(options = {}) {
       job.reasoningLevelApplied = parsed.reasoningLevelApplied;
       job.reasoningTarget = parsed.reasoningTarget;
     }
+    /* ZB-75：观测到的思考状态（Qoder 专用；zcode/opencode 不上报 ⇒ 字段保持 undefined，不猜）。 */
+    if (parsed.thinkingObserved != null) {
+      job.thinkingObserved = parsed.thinkingObserved;
+      job.thinkingBlocks = parsed.thinkingBlocks;
+      job.thinkingChars = parsed.thinkingChars;
+      job.thinkingRequested = parsed.thinkingRequested;
+    }
     if (parsed.endpoint) job.endpoint = parsed.endpoint;
     if (parsed.usage) {
       job.usage = { ...job.usage, ...Object.fromEntries(Object.entries(parsed.usage).filter(([, v]) => v != null)) };
@@ -1730,6 +1780,25 @@ export function createDispatcher(options = {}) {
     watchdogs.delete(job.id);
     killRequested.delete(job.id);
     tails.set(job.id, job.tailLines);
+
+    /* ZB-75（用户教学要求）：**派发后核对思考档位是否符合设置，不符则向上改档位重试**。
+     *
+     * 背景（真机）：Qoder 引擎**不回报实际生效档位**（init/result 里都没有该字段），
+     * 故 `reasoningLevelApplied` 只是请求值回显 ⇒ 设"极高"实际变成"关闭思考"这类**静默降级**
+     * 一直发现不了。唯一可观测信号是 assistant 的 `thinking` 内容块（实测矩阵：`none` 恒 0 块，
+     * 其余档位恒有块 ⇒ 可靠的二值信号）。
+     *
+     * 判据：**请求的档位"要思考"（不在 THINK_OFF_LEVELS 里）+ 观测到 silent**
+     *      ⇒ 档位不符 ⇒ 记一条 `parseWarnings`（可见）+ 标记待重试。
+     * 为什么用 parseWarnings 而不是直接改状态：这是**核对结论**（事实记录），
+     * 不是失败判定 —— 任务本身可能成功（只是思考档位没按预期生效），不该因此判它失败。
+     * 重试走既有的 retry 通道（保留同会话/换通道语义），只把档位**向上**调一档。 */
+    const thinkCheck = checkThinkingApplied(job);
+    if (thinkCheck.mismatch) {
+      job.parseWarnings.push(thinkCheck.warning);
+      job.thinkingMismatch = { requested: job.spec?.reasoningLevel ?? null, observed: job.thinkingObserved ?? null,
+        blocks: job.thinkingBlocks ?? null, suggested: thinkCheck.suggested };
+    }
 
     /* ZB-26（审计 B3）：**落盘前**必须先盖版本戳 —— 否则终态记录带着"上一次更新"的旧
      * updatedAt 落盘，别的进程按新旧合并时会认为自己的旧副本更新，把终态覆盖回 running。 */
@@ -2861,6 +2930,9 @@ export function createDispatcher(options = {}) {
      * 通道 id 形如 `qoder/<模型名>`（真机模型名含空格与点，如 `qoder/Qwen3.8-Max`）。 */
     const qd = qoderProbeEnabled ? await detectQoderChannels() : { models: [], version: null, warning: null };
     if (qd.warning) warnings.push(qd.warning);
+    /* ZB-75：把 Qoder 的**引擎级**档位并集存到闭包缓存，供 `suggestStrongerLevel()`（向上改档位）
+     * 在"该模型没有逐模型声明"时兜底取用（那份数据本来就在这里，别处拿不到）。 */
+    if (Array.isArray(qd.levels) && qd.levels.length) qoderLevelsCache = [...qd.levels];
     const qoderChannels = qd.models.map((name) => ({
       id: `qoder/${name}`,
       name,
@@ -2869,10 +2941,16 @@ export function createDispatcher(options = {}) {
       reason: null,
       endpoint: null,
       models: [`qoder/${name}`],
-      /* ZB-52：思考强度档位（面板「思考强度」下拉据此渲染；没有就不带该字段）。
-       * ⚠️ 这是**引擎级**集合（逐模型子集 CLI 拿不到，见 qoder-run 的 probeEfforts 注释）——
-       * 不谎称逐模型精确；档位与模型不匹配时由 CLI 自己报错。 */
-      ...(Array.isArray(qd.levels) && qd.levels.length ? { thinkingLevels: [...qd.levels] } : {}),
+      /* ZB-52/ZB-75：思考强度档位（面板「思考强度」下拉据此渲染；没有就不带该字段）。
+       * ZB-75：**优先用逐模型声明**（`QODER_MODEL_LEVELS`，来自 Qoder GUI 模型卡片）——
+       * 该模型有声明就用它（面板只列真正可选的档位，不再让用户选到会被服务端拒绝的档位）；
+       * 没有声明才退回**引擎级**并集（`qd.levels`），并在通道上标注 `thinkingLevelsScope:'engine'`
+       * 让面板/工具能如实说明"这是引擎级集合、非逐模型精确"。 */
+      ...(QODER_MODEL_LEVELS[name]
+        ? { thinkingLevels: [...QODER_MODEL_LEVELS[name]], thinkingLevelsScope: 'model' }
+        : (Array.isArray(qd.levels) && qd.levels.length
+          ? { thinkingLevels: [...qd.levels], thinkingLevelsScope: 'engine' }
+          : {})),
     }));
 
     /* ZB-51：**免费额度（Start Plan）实际可用的模型**必须在这里收窄 —— 这里是**单一权威**
@@ -2965,6 +3043,71 @@ export function createDispatcher(options = {}) {
       opencodeVersion: oc.version,
       warnings,
     };
+  }
+
+  /** ZB-75（用户教学要求）：**核对思考档位是否真的按设置生效**。
+   *
+   * 判据（只在有观测信号时判定 —— 没有信号就说"无法核对"，绝不猜）：
+   *   · 请求档位缺失 / `agent` / 本身就是"不思考"档（none|disabled）⇒ **不算不符**
+   *     （用户本就要不思考，silent 是符合预期的）；
+   *   · 有 `thinkingObserved` 且为 `silent`，而请求档位要求思考 ⇒ **不符**（静默降级）。
+   *
+   * 向上改档位建议（`suggested`，用户要求"优先向上改"）：
+   *   在当前请求档位之上、**该模型支持的档位**里找第一个更强的；没有更强的就不建议
+   *   （如实说"已是最强档"而不是瞎指一个）。
+   *
+   * @returns {{mismatch:boolean, warning:string|null, suggested:string|null, checkable:boolean}}
+   */
+  function checkThinkingApplied(job) {
+    const requested = job.spec?.reasoningLevel ?? null;
+    const observed = job.thinkingObserved ?? null;
+    /* 没有观测信号（zcode/opencode 不上报；或旧执行器）⇒ 无法核对。如实说明，绝不假设通过。 */
+    if (observed == null) {
+      return { mismatch: false, warning: null, suggested: null, checkable: false };
+    }
+    /* 请求侧"不要求思考"⇒ 与 silent 一致，不是不符。 */
+    if (requested == null || requested === '' || requested === 'agent' || THINK_OFF_LEVELS.has(String(requested))) {
+      return { mismatch: false, warning: null, suggested: null, checkable: true };
+    }
+    if (observed !== 'silent') return { mismatch: false, warning: null, suggested: null, checkable: true };
+    /* ★ 不符：请求要思考，实际一块 thinking 都没有。 */
+    const suggested = suggestStrongerLevel(job, requested);
+    const tail = suggested
+      ? `建议**向上**改用 \`${suggested}\` 重试（优先向上：${requested} → ${suggested}）。`
+      : `该模型已无更强档位可用（当前 \`${requested}\` 之上没有可选档位）—— 请改模型或确认该模型是否支持思考。`;
+    return {
+      mismatch: true,
+      suggested,
+      checkable: true,
+      warning: `思考档位核对不符：请求 \`${requested}\`（要求思考），但本次**一个 thinking 内容块都没有**`
+        + `（observed=silent, blocks=${job.thinkingBlocks ?? 0}）⇒ 档位很可能被引擎/服务端静默降级。${tail}`
+        + '（Qoder 引擎不回报实际档位，此判据基于 thinking 内容块的有无，见 ZB-75。）',
+    };
+  }
+
+  /** ZB-75：在该模型**支持的档位**里，找比 `cur` 更强的最近一档（用户要求"优先向上改"）。
+   *  支持集优先取逐模型声明（`QODER_MODEL_LEVELS`），否则取引擎级并集（`channelLevels` 缓存）。
+   *  返回 null = 没有更强的（或拿不到支持集 ⇒ 不猜）。 */
+  function suggestStrongerLevel(job, cur) {
+    const model = String(job.spec?.model ?? '');
+    const bare = model.replace(/^qoder\//, '');
+    const declared = QODER_MODEL_LEVELS[bare];
+    const supported = Array.isArray(declared) && declared.length
+      ? declared
+      : (Array.isArray(qoderLevelsCache) && qoderLevelsCache.length ? qoderLevelsCache : null);
+    if (!supported) return null;                       // 拿不到支持集 ⇒ 不猜（绝不瞎指一个档位）
+    const ci = strengthOf(cur);
+    if (ci < 0) return null;                           // 语义档位（auto/agent）不参与向上比较
+    /* ★ 找**最近的**更强档（而不是最强档）—— "向上改"要**渐进**：一次跳太强会白烧额度，
+     * 且用户说的是"优先向上改档位"（先试更强一档），不是"直接拉满"。
+     * 实测踩到：原实现每发现更强就更新基准 ⇒ 最终返回**最强**档（low → xhigh），与预期不符。 */
+    let best = null;
+    let bestS = Infinity;
+    for (const lv of supported) {
+      const s = strengthOf(lv);
+      if (s > ci && s < bestS) { bestS = s; best = lv; }
+    }
+    return best;
   }
 
   /** 按 tag 回读台账最后一条匹配记录（已知 sessionId 时优先精确匹配），只补 job 缺失的字段。 */

@@ -207,19 +207,110 @@ qoder:    cli · cn · v1.1.73 · 已登录 · ~\.qoder-cn\bin\qoderclicn\qoderc
 |---|---|---|---|
 | ZCode | `--reasoning-level` | runner `--list-providers` 的 `reasoning-levels` 行 | 逐模型声明 |
 | OpenCode | `--variant` | `opencode models --verbose` 的 `variants` 键（**逐模型**） | 如 `low,medium,high,xhigh,max` |
-| Qoder | `--reasoning-effort` | **哨兵值逼 CLI 报出合法集合** + 逐个实测接受性 | `auto,none,low,medium,high,xhigh,max,ultracode` |
+| Qoder | `--reasoning-effort` | **逐模型声明表**（`QODER_MODEL_LEVELS`，来自 Qoder GUI 模型卡片）；未声明的模型退回**引擎级**并集 | 见下 |
+
+**Qoder 逐模型档位（ZB-75，2026-10-20 用户从 Qoder CN 模型卡片提供）**：
+
+| 模型 | 可选档位 |
+|---|---|
+| `qoder/Qwen3.8-Flash` | 低 / 中 / 极高（`low,medium,xhigh`） |
+| `qoder/DeepSeek-Flash` | 低 / 高 / 最大（`low,high,max`） |
+| 其余 13 个模型 | 未声明 ⇒ 退回引擎级并集 `auto,none,low,medium,high,xhigh,max,ultracode` |
+
+> ⚠️ **为什么 Qoder 的逐模型档位只能"声明"、不能"探测"**（三条实测证据，别再去试）：
+> 1. CLI 没有只读出口能给逐模型档位 —— `--list-models` 只吐模型名，`--with-efforts` 是**未知选项**；
+> 2. 哨兵探测（`--reasoning-effort <假值> --list-models`）只逼出**引擎级**合法集；
+> 3. `-m <每个模型> --reasoning-effort <每档>` 全矩阵（15 模型 × 8 档 = 120 次）**全部 exit=0**
+>    —— **CLI 不按模型校验档位**，逐模型限制只在**真实 API 调用**时由服务端生效；
+>    Qoder 的 `catalog-v7` 元数据是**加密的**（`UU1D…`，非明文 JSON）。
+> 故权威数据只能来自 **Qoder GUI 的模型卡片**。新增/变更模型时改 `QODER_MODEL_LEVELS` 一张表即可
+> （面板的逐模型下拉自动跟随；`channels[].thinkingLevelsScope` = `model` / `engine` 标明来源）。
 
 要点（**别踩的坑**）：
 
-- **档位是探测出来的，不写死**：上游改了模型目录，档位表跟着变（重演 ZB-31「表变了但代码写死」的坑）。
+- **档位是探测出来的，不写死**（ZCode / OpenCode）：上游改了模型目录，档位表跟着变
+  （重演 ZB-31「表变了但代码写死」的坑）。Qoder 是**声明式**，故表要**人工维护**（见上）。
 - **探测很慢**（Qoder 实测约 2 分钟：15 模型 × 9 次 CLI 调用）⇒ 走 **TTL 缓存 + 后台预热**。
   故**首次**打开面板时「思考强度」下拉可能是空的，**下次刷新就有**（这是设计，不是坏了）。
 - **OpenCode 的档位是逐模型的**：真机有 4 个模型**根本没有**档位维度
   （`big-pickle` / `mimo-v2.6-flash-free` / `nemotron-3-ultra-free` / `nemotron-3.5-lightning-free`）
-  —— 它们不会被造出档位。面板的档位下拉取**该引擎所有模型的并集**，
-  故选中的模型**未必**支持下拉里的每一项；档位与模型不匹配时由 CLI 自己报错。
-- **Qoder 逐模型的档位子集拿不到**（CLI 只在真正开会话时才判定"模型×档位"匹配，只读探测无出口）
-  ⇒ 面板给的是**引擎级**合法集合，不谎称逐模型精确。
+  —— 它们不会被造出档位。
+- **Qoder 引擎不回报实际生效档位**（`system/init` 与 `result` 里都没有该字段）⇒
+  **设了"极高"实际可能变成"关闭思考"**（静默降级）。派发台对此做了**派发后核对**，见 §6.3。
+
+### 6.3 思考档位核对与"向上改档位重试"（ZB-75，用户要求）
+
+**为什么要核对**：Qoder 引擎不回报实际档位，所以"我设了极高，实际却是关闭思考"这种情况
+**光看日志看不出来**（`reasoningLevelApplied` 过去只是把请求值原样回显）。
+
+**判据**（唯一可观测信号 = assistant 的 `thinking` 内容块有无；真机实测矩阵 2 模型 × 7 档 × 2 次重复）：
+
+| 观测 | 含义 |
+|---|---|
+| `thinking-observed=thinking` | 本次**确实产生了 thinking 内容块** ⇒ 在思考 |
+| `thinking-observed=silent` | 一个 thinking 块都没有 ⇒ **没在思考** |
+
+- `none`（无思考）⇒ **恒为 silent**（确定性）；其余任何档位 ⇒ **恒有 thinking 块**。
+- ⇒ 这是可靠的**二值信号**（思考 / 不思考），但**区分不出** low 与 max 的具体档位。
+
+**核对规则**（绝不误报）：
+
+| 请求档位 | 观测 | 结论 |
+|---|---|---|
+| `none` / `disabled`（本就要不思考） | silent | **相符**（符合预期，不报） |
+| 任何"要思考"的档位 | thinking | 相符 |
+| 任何"要思考"的档位 | **silent** | ★ **不符** ⇒ 报 `thinkingMismatch` |
+| `agent`（Agent决定） | 任意 | 不核对（没有预期档位可比） |
+| 任何 | **无观测信号**（非 Qoder 引擎/旧执行器） | **无法核对**（≠ 通过，也 ≠ 不符） |
+
+**不符时的结论落在哪**（两处，都可见）：
+- `parseWarnings` 里一条人话（面板/CLI 都能看到）；
+- `thinkingMismatch: { requested, observed, blocks, suggested }` 结构化字段（便于 agent 消费）。
+
+**向上改档位重试（用户要求"优先向上改"）**：
+- `suggested` = 在**该模型支持的档位**里，比当前**更强的最近一档**（**渐进**，不直接拉满 ——
+  一次跳太强会白烧额度）；
+- 已是最强档 ⇒ `suggested: null`（如实说"该模型已无更强档"，不瞎指一个）；
+- 拿不到该模型支持集 ⇒ 不给建议（不猜）。
+- ⚠️ **档位不符不判任务失败**：任务本身可能已成功（只是思考档位没按预期生效），
+  故只记录结论 + 建议，**不改状态**。要不要按建议重试由调用方决定。
+
+---
+
+## 6.5 多任务并发：用降级通道分流（用户要求，2026-10-20）
+
+**问题**：主通道有**并发上限**（`maxConcurrentQoder` 默认 **1**、`maxConcurrentOpenCode` 默认 **2**、
+全局 `maxConcurrent` 默认 **3**）。同时派多个任务时，超出的会**排队等名额**——
+若它们都挤在主通道，就会出现"明明还有别的通道空闲，却全在排队"。
+
+**做法**：**开启降级通道**，且让它与主通道**不是同一条**（不同引擎或不同通道），
+然后**把多出来的任务直接派给降级通道那条** —— 绕开主通道的并发上限，不必排队。
+
+```powershell
+# ① 看当前主通道与降级目标
+dispatch action=channel
+dispatch action=fallback
+
+# ② 设降级目标（与主通道**不同**的通道，例：主通道 qoder ⇒ 降级到 opencode）
+dispatch action=fallback { chain:['opencode'] }
+
+# ③ 多任务时，把一部分直接派给降级通道（不等主通道名额）
+dispatch action=dispatch { kind:'prompt', prompt:'…', provider:'opencode/deepseek-v4.1-flash-free' }
+dispatch action=dispatch { kind:'prompt', prompt:'…', provider:'qoder/Qwen3.8-Flash' }   # 主通道
+```
+
+**要点**：
+
+- 降级链**默认关闭**（`enabled:false`）；它只在**主通道失败/暂停时**自动接手，
+  **不会**因为"主通道满了"而自动分流 ⇒ **多任务分流要靠显式指定 provider**。
+- 每条通道**各自计名额**（Qoder 与 OpenCode 分开算）⇒ 主通道满员时，
+  派到另一条通道的任务**立刻开跑**，不受主通道上限影响。
+- 降级目标**与主通道相同**时没有分流价值（同一条通道、同一份名额）。
+- 各引擎的**真实并发上限**见 `dispatch action=channels` 的 `engineDetail` /
+  `snapshot` 的 `engineLimits`；调高上限（配置 `maxConcurrentQoder` 等）也可，
+  但**并发的多个 CLI agent 会互相干扰**（真机实测），故默认值刻意保守。
+- ⚠️ 排队时**不是无信息地干等**：`list` 的 queued 行会给出 `lockWait`
+  （位次 / 前方几个 / 被谁挡住 / 预计等待上界），据此判断是"等名额"还是"等锁"。
 
 
 ---
