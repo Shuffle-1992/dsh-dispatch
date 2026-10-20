@@ -2,6 +2,28 @@
 
 > 按全局规则维护：遇到踩坑问题登记于此，避免重复踩坑。新条目置顶。
 
+## 2026-10-20 测试注入执行器：`runnerPath` 只对 zcode 生效（ZB-75/77 两次踩同一个坑）
+
+**现象**：`retry-model-switch.test.mjs` 偶发"假执行器 40s 未落地"。深挖后发现它**根本没跑假执行器**
+—— 实测耗时 **9.4 秒**、`pauseReason=provider-blocked`、`sessionId=ses_ea76a428…`（真实会话 id）
+⇒ 它跑的是**真实 opencode CLI**（真去联网、撞了 403）。
+
+**根因**：core 的执行器路径是**逐引擎**的，`runnerPath` **只对 zcode** 生效：
+
+| 引擎 | 注入选项 |
+|---|---|
+| zcode | `runnerPath` |
+| **opencode** | **`opencodeRunnerPath`** |
+| **qoder** | **`qoderRunnerPath`** |
+
+用 `runnerPath` 注入 OpenCode/Qoder 的测试，会**静默落到真实执行器** ⇒ 慢、联网、结果依赖网络环境
+⇒ 断言变成"看运气"（真机假红，且掩盖真实缺陷）。
+
+**纪律**：给非 zcode 引擎写测试时，**必须显式注入对应引擎的执行器路径**；
+若一个测试要覆盖多引擎，三个都注入（`runnerPath` + `opencodeRunnerPath` + `qoderRunnerPath`）。
+`sequential-dispatch.test.mjs` 早就写对了（注释：「必须显式给：否则 qoder 会落到默认真执行器」）——
+说明这个坑**已经被踩过并记录在代码里**，只是新测试没照做。
+
 ## 2026-10-20 把「工具权限未放行」误诊成「沙箱限制」（ZB-76）
 
 **误诊原文**（某会话报告）：「Qoder CLI 的沙箱只能读写工作区内的文件，网络和编译会被拦，

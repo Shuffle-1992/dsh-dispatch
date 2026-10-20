@@ -41,8 +41,17 @@ function fakeRunner(dir, { mode = 'fail-session' } = {}) {
   writeFileSync(p, `process.stderr.write(${JSON.stringify('[fake-runner] CONFIGURATION_ERROR')});\nprocess.stderr.write(${JSON.stringify('[fake-runner] CONFIGURATION_ERROR')} + "\\n");\nprocess.stdout.write(${JSON.stringify(body.split('\n')[0])} + "\\n");\nprocess.exit(1);\n`, 'utf8');
   return p;
 }
+/* ⚠️ ZB-77：OpenCode 引擎走的是 **`opencodeRunnerPath`**（`runnerPath` 只对 zcode 生效）——
+ * 与 ZB-75 踩的 Qoder `qoderRunnerPath` 是**同一个坑**。
+ * 用 `runnerPath` 注入会**静默跑真实 opencode CLI**（实测：耗时 9.4s、真去联网、pause=provider-blocked、
+ * sessionId 是真实会话 id），于是断言全落在真实 CLI 行为上 ⇒ 又慢又假红。
+ * 这里三个都注入，保证**任何引擎**都跑假执行器。 */
 const mkDispatcher = (dir, mode) => createDispatcher({
-  runnerPath: fakeRunner(dir, { mode }), workRoot: join(dir, 'work'), jobsFile: join(dir, 'state', 'jobs.json'),
+  runnerPath: fakeRunner(dir, { mode }),
+  opencodeRunnerPath: fakeRunner(dir, { mode }),
+  qoderRunnerPath: fakeRunner(dir, { mode }),
+  workRoot: join(dir, 'work'),
+  jobsFile: join(dir, 'state', 'jobs.json'),
 });
 
 /** 轮询等 job 落到终态/paused（带总超时；不许固定 sleep）。

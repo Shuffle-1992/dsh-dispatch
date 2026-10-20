@@ -428,8 +428,8 @@ function buildToolDescription(switchFile) {
   const sw = readSwitch(switchFile);
   const state = sw.enabled ? '已开启' : '已关闭';
   return [
-    '【派发优先级：能用派发台就优先用派发台】凡是「把任务交给一个 agent 去做」的诉求——用户说「派发给 ZCode / 让 ZCode 做 / 用 ZCode 跑 / zcode 派发 / 在派发台派一个」，或只是笼统地说「派发这个任务」——**先**用本工具的 action=dispatch：它才会在「DSH 派发台」面板里生成一个可监视的 job（独立 ZCode 进程、独立额度与会话，可查输出/终止/续跑/换通道）。',
-    '✅ **仅当派发台不可用时**才退回 DSH 自带的 subagent / spawn_teammate / subagent_fork / 后台 jobs：即 action=status 显示开关已关闭、dispatch 返回 ok:false（未配置 runner/workRoot、锁冲突等），或用户明确要求「你自己（DSH）去做」。此时要**说明为什么没用派发台**，不要静默切换。',
+    '【派发优先级：能用派发台就优先用派发台】**凡是"要另一个 agent 去做"的活，默认走本工具** —— 不必等用户说出"派发"二字。触发词（用户说「派发给 ZCode / 让 ZCode 做 / 用 ZCode 跑 / zcode 派发 / 在派发台派一个」，或笼统说「派发这个任务」）只是**最明显的一类**；同样该主动用的是这几条**判据**：① 任务**自包含**且能**独立完成**（调研、写一个小项目、跑一段验证、多步骤实现）；② 会**跑很久**（几十秒以上）或**要反复试错**；③ 想**并行**推进多件互不相干的活；④ 用户提到**别的引擎/模型**（ZCode / OpenCode / Qoder / 某个具体模型）或问"能不能派给别人做"。**命中任一条 ⇒ 直接用**（并一句话说明你派了什么）。只有本工具才会在「DSH 派发台」面板里生成一个可监视的 job（独立进程、独立额度与会话，可查输出/终止/续跑/换通道）。',
+    '⚠️ **要调 `subagent` 之前先停一下**：如果你正打算用 DSH 自带的 subagent / spawn_teammate / subagent_fork / 后台 jobs，先问一句"这算不算上面四条判据" —— 算，就改用派发台（自带手段在面板里**看不见**，额度也不分账）。✅ **仅当派发台不可用时**才退回自带手段：即 action=status 显示开关已关闭、dispatch 返回 ok:false（未配置 runner/workRoot、锁冲突等），或用户明确要求「你自己（DSH）去做」。此时要**说明为什么没用派发台**，不要静默切换。',
     /* ZB-37：真机事故（2026-10-11）逼出来的两条硬规则 —— 写进工具描述，让下一次不再走歪。 */
     '🚫 **不要用 `pwsh` / `Bash` 直接跑 `collab-kit/zcode-run.mjs`（或用 `run_in_background` 承载它）**：那会**绕过派发台**——丢 单写者文件锁、用量台账/额度分账、面板可见性、暂停分类与降级链。派发台的 job **落地时同样会自动唤醒**发起会话（与 DSH 后台任务同款），所以「想被唤醒」不是绕过的理由。',
     '🔁 **额度撞顶（dispatch 后 job 变 `paused / quota-exhausted`，如 Coding Plan 的 5 小时窗口满）时怎么办**：(1) 先 `action=channels` 看清单——**免费额度通道**（`account:<family>-start-plan`）常常仍可用，并带 `quotaText`（剩余/窗口剩余时间）；(2) **换通道派发**：`action=dispatch` 直接传 `provider: "<通道 id>"`（接受清单里任意 id，不再受枚举限制），或 `action=channel {provider}` 设默认通道再派；(3) 或 `action=fallback {chain:["<备用通道 id>"]}` 开降级链后 `action=retry {id}` 自动交接；(4) **不要**因为付费通道撞限额就改用后台 jobs 直跑 runner。',
@@ -555,19 +555,31 @@ function makeLogger(ctx) {
 }
 
 /**
- * ZB-22：注入 system prompt 的「派发台」提示段。
+ * ZB-22 / ZB-77：注入 system prompt 的「派发台」提示段。
  *
- * 现场症状「新会话的 agent 不太用派发台」的根因是**它压根没被告知**：工具的 description
- * 只在模型主动读工具清单时起作用，而 DSH 自带 subagent 是系统提示里已有的熟路。
- * 本段与 dsh-tool-jobs 的 `tool:jobs` 段同级，位置紧跟 TOOL_JOBS（1600+5），排在 TOOL_SUBAGENT 之前。
+ * 现场症状「派发台开着，但 agent 很少主动用」的根因：旧文案只在用户说出**魔法词**
+ * （"派发 / 交给 ZCode / 让 ZCode 做"）时才触发 —— 而真实竞争是**模型的默认习惯**：
+ * 它一遇到"独立子任务"就顺手用 DSH 自带的 `subagent`（系统提示里已有的熟路），
+ * 于是派发台**再开着也不会被想起来**。
+ *
+ * ZB-77 强化（用户要求「派发台开着时，很好有主动使用的」）：
+ *  ① **从"被叫才用"改成"该用就用"**：给出**判据**（什么情况属于该派发），而不是只列触发词；
+ *  ② **正面点出竞争对象**：明确"要用 subagent 时，先问一句该不该走派发台"；
+ *  ③ **把理由说清**（面板可监视 / 独立进程与额度 / 落地自动唤醒），让"主动用"有依据；
+ *  ④ **保留唯一的硬例外**（用户点名要你自己做 / 开关关闭），否则会变成"无条件优先"而误伤。
+ *
+ * 位置：与 dsh-tool-jobs 的 `tool:jobs` 段同级，紧跟 TOOL_JOBS（1600+5），排在 TOOL_SUBAGENT 之前 ——
+ * 排在竞争对象**之前**，模型读到"独立任务"时会先看到本段。
  * 比工具 description 短：系统提示每轮都占 token，工具清单只在模型看工具时占。
  */
 const SYSTEM_PROMPT_SECTION = [
-  '【DSH 派发台】要把一个独立任务交给另一个 agent 去做时（用户说「派发 / 交给 ZCode / 让 ZCode 做 / 用 ZCode 跑 / 在派发台派一个」，或笼统说「派发这个任务」），用工具 dispatch 的 action=dispatch，**不要**改用 DSH 自带的 subagent / spawn_teammate / subagent_fork / 后台 jobs —— 只有前者会在「DSH 派发台」面板里生成可监视的 job（独立 ZCode 进程、独立额度与会话）。',
-  '派发是 fire-and-forget：**不要**轮询、不要 sleep。job 落地（done / failed / killed / interrupted / paused）时本会话会被自动唤醒并收到一条 dispatch 通知，届时用 action=tail / action=list 读结果。',
+  '【DSH 派发台 · 优先使用】本会话**装着派发台插件**（面板「DSH 派发台」）。**凡是"要另一个 agent 去做"的活，默认走它** —— 不要顺手用 DSH 自带的 subagent / spawn_teammate / subagent_fork / 后台 jobs：那些在面板里**看不见**，而派发台会生成**可监视的 job**（独立进程、独立额度与会话、落地自动唤醒本会话）。',
+  '**什么时候该主动用（判据，不必等用户说"派发"）**：① 任务**自包含**且能**独立完成**（调研、写一个小项目、跑一段验证、多步骤实现）；② 会**跑很久**（几十秒以上）或**要反复试错**；③ 想**并行**推进多件互不相干的活；④ 用户提到**别的引擎/模型**（ZCode / OpenCode / Qoder / 某个具体模型），或问"能不能派给别人做"。**命中任一条 ⇒ 直接用**，并**一句话说明**你派了什么（用户可随时叫停）。',
+  '**要派发时的第一反应**：如果你正打算调 `subagent`，**先停一下**问自己"这算不算上面那四条" —— 算，就改用派发台；不算（极短、需要你亲自边做边判断、或结果你要立刻接着用于本会话推理），才用自带手段。',
+  '派发是 fire-and-forget：**不要**轮询、不要 sleep。job 落地（done / failed / killed / interrupted / paused）时本会话会被**自动唤醒**并收到一条 dispatch 通知，届时用 action=tail / action=list 读结果。多个独立任务可**一起派**（各自 provider 不冲突时并行）。',
   '派发参数 thinking（思考强度）默认 agent=由你按任务判断：简单查询/机械修改传 disabled，复杂推理/架构任务传 enabled（档位集合见 action=channels 的 thinkingLevels）——判断后传具体档位；不传 thinking 则按通道默认思考强度执行（action=channel 可设；通道设 Agent决定=由你按任务自行决定）。',
-  'OpenCode 通道（本地真实 OpenCode 进程 + 免费模型）同样走派发台：`provider: "opencode/<model>"`（清单见 action=channels 的 `channels[].engine`）；额度撞顶时换通道/开降级链，**不要**绕过派发台直接跑 CLI。Qoder 通道（本地真实 Qoder CLI）同形：`provider: "qoder/<model>"`（如 `qoder/Qwen3.8-Max`，清单同样以 action=channels 为准）。',
-  '例外：用户明确要你自己做，或 action=status 显示开关已关闭 / dispatch 返回 ok:false —— 这时按工具说明退回 DSH 自带手段，并说明原因。',
+  'OpenCode 通道（本地真实 OpenCode 进程 + 免费模型）同样走派发台：`provider: "opencode/<model>"`（清单见 action=channels 的 `channels[].engine`）；额度撞顶时换通道/开降级链，**不要**绕过派发台直接跑 CLI。Qoder 通道（本地真实 Qoder CLI）同形：`provider: "qoder/<model>"`（如 `qoder/Qwen3.8-Max`，清单同样以 action=channels 为准）。**Qoder 需要联网/跑任意命令的任务要传 `auto: true`**（默认模式只保证工作区内写文件；不传 auto 时网络会被权限拦下）。',
+  '例外：用户明确要你自己做，或 action=status 显示开关已关闭 / dispatch 返回 ok:false —— 这时按工具说明退回 DSH 自带手段，并说明原因。**除这两种情况外，默认优先派发台。**',
 ].join('\n');
 
 /**
