@@ -107,6 +107,28 @@ console.log('\nC. 同通道不分流（分流必须是假动作之外的真分�
   } finally { d.dispose?.(); }
 }
 
+console.log('\nC2. ★ ZB-83：**同引擎不同模型也不算可分流目标**（名额按引擎计）');
+{
+  const d = mk();
+  try {
+    /* 主通道 = qoder/DeepSeek-Flash；降级目标 = qoder/Qwen3.8-Flash ——
+     * provider 不同，但**引擎都是 qoder** ⇒ 共享同一份 3 个名额 ⇒ 分流不增加并发。
+     * 真机实测就踩到了这个：旧判据（比 provider）报 active=true ⇒ 给用户"并发变大了"的假象。 */
+    d.setFallbackTarget({ provider: 'qoder/Qwen3.8-Flash' });
+    d.setSplitMode({ enabled: true });
+    const sm = d.getSplitMode();
+    ok(sm.active === false && sm.reason === 'no-distinct-target',
+      `C2a ★ 同引擎 ⇒ active=false（实际 ${sm.active} / reason=${sm.reason}）—— 不给"并发变大了"的假象`);
+    ok((sm.distinctTargets ?? []).length === 0, 'C2b 同引擎的目标不进 distinctTargets');
+    const recs = [];
+    for (let i = 0; i < 5; i += 1) {
+      const j = d.dispatch({ ...P, tag: `c2${i}` });
+      recs.push(d.get(j.id ?? j.job?.id)?.spec?.provider);
+    }
+    ok(recs.every((p) => p === 'qoder'), `C2c ★ 同引擎时绝不改派（实际 ${JSON.stringify([...new Set(recs)])}）`);
+  } finally { d.dispose?.(); }
+}
+
 console.log('\nD. 显式指定通道 ⇒ 不插手（尊重调用方选择）');
 {
   const d = mk();

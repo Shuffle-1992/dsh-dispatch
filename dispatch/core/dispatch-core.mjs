@@ -2308,9 +2308,18 @@ export function createDispatcher(options = {}) {
   function getSplitMode() {
     const targets = fallbackTargets.map((t) => ({ ...t }));
     const main = { ...channel };
-    /* 主通道与降级目标**必须不同通道**才有分流价值（同一通道 = 同一份名额，分流是假动作）。 */
-    const distinct = targets.filter((t) => String(t.provider ?? '') !== String(main.provider ?? ''));
     const mainEngine = normalizeEngine(resolveEngineOf({ provider: main.provider, model: main.model }));
+    /* ⚠️ ZB-83（真机实测抓到的判据缺口）：分流的前提是「**名额独立**」，
+     * 而名额是**按引擎**计的（`engineLimit` / `runningCountByEngine` 都按引擎）——
+     * 所以判据必须比**引擎**，不是比 provider！
+     *
+     * 反例（真机）：主通道 `qoder/DeepSeek-Flash` + 降级目标 `qoder/Qwen3.8-Flash`
+     * —— provider 不同，但**引擎都是 qoder** ⇒ 共享同一份 3 个名额 ⇒ 分流只是"换个模型跑"，
+     * **并发一点没增加**。而旧判据（比 provider）会把它当成"可分流目标" ⇒ `active:true`，
+     * 面板/用户以为并发变大了，实际没有 —— **比不分流更糟（假象）**。
+     *
+     * 故：只有**引擎不同**的目标才算"可分流目标"（引擎不同 ⇒ 名额各自独立 ⇒ 并发真的叠加）。 */
+    const distinct = targets.filter((t) => normalizeEngine(resolveEngineOf({ provider: t.provider, model: t.model })) !== mainEngine);
     const mainLimit = engineLimit(mainEngine);
     const mainRunning = runningCountByEngine(mainEngine);
     const mainFree = Math.max(0, mainLimit - mainRunning);
@@ -2318,7 +2327,7 @@ export function createDispatcher(options = {}) {
       ...splitMode,
       main: { provider: main.provider ?? null, model: main.model ?? null, engine: mainEngine, limit: mainLimit, running: mainRunning, free: mainFree },
       targets,
-      /* `active` = 用户开了 + 降级链里有**不同通道** + 那个目标还有名额。三者缺一都不分流。 */
+      /* `active` = 用户开了 + 降级链里有**引擎不同**的目标 + 那个目标还有名额。三者缺一都不分流。 */
       distinctTargets: distinct,
       active: splitMode.enabled && distinct.length > 0,
       reason: !splitMode.enabled ? 'disabled'
@@ -2347,12 +2356,15 @@ export function createDispatcher(options = {}) {
   function splitDecisionFor(spec) {
     if (!splitMode.enabled) return null;
     const mainProvider = String(channel.provider ?? '');
+    const mainEngine = normalizeEngine(resolveEngineOf({ provider: mainProvider, model: channel.model }));
     /* 调用方**显式指定了通道** ⇒ 尊重他的选择，绝不偷偷改（这与"显式指定模型不被顺序链劫持"同一纪律）。 */
     const explicit = String(spec?.provider ?? '');
     if (explicit && explicit !== mainProvider) return null;
-    const targets = fallbackTargets.filter((t) => String(t.provider ?? '') !== mainProvider);
+    /* ⚠️ ZB-83：只考虑**引擎不同**的目标 —— 名额按引擎计，引擎相同 ⇒ 同一份名额 ⇒
+     * 分流只是"换个模型跑"，并发一点没增加（真机反例：主 qoder/DeepSeek-Flash
+     * + 降级 qoder/Qwen3.8-Flash ⇒ provider 不同但引擎相同 ⇒ 并发仍是 3）。 */
+    const targets = fallbackTargets.filter((t) => normalizeEngine(resolveEngineOf({ provider: t.provider, model: t.model })) !== mainEngine);
     if (targets.length === 0) return null;
-    const mainEngine = normalizeEngine(resolveEngineOf({ provider: mainProvider, model: channel.model }));
     const inflight = runningCountByEngine(mainEngine) + queuedCountByEngine(mainEngine);
     const free = Math.max(0, engineLimit(mainEngine) - inflight);
     if (free >= splitMode.minFreeSlots) return null; // 主通道还够用 ⇒ 不分流
