@@ -45,8 +45,10 @@ const mkDispatcher = (dir, mode) => createDispatcher({
   runnerPath: fakeRunner(dir, { mode }), workRoot: join(dir, 'work'), jobsFile: join(dir, 'state', 'jobs.json'),
 });
 
-/** 轮询等 job 落到终态/paused（带总超时；不许固定 sleep）。 */
-async function waitSettled(d, id, ms = 15000) {
+/** 轮询等 job 落到终态/paused（带总超时；不许固定 sleep）。
+ *  ⚠️ 超时给足：本测试要**真 spawn 一个子进程**（假执行器），套件并行跑时 CPU 争抢会让
+ *  spawn+退出明显变慢（实测单独跑 <1s，套件里偶发 >15s）⇒ 40s 余量，避免假红。 */
+async function waitSettled(d, id, ms = 40000) {
   const t0 = Date.now();
   for (;;) {
     const j = d.get(id);
@@ -56,11 +58,15 @@ async function waitSettled(d, id, ms = 15000) {
   }
 }
 
-/** 真跑一个失败任务并等落地（拿到带 sessionId 的 paused job）。 */
+/** 真跑一个失败任务并等落地（拿到带 sessionId 的 paused job）。
+ *  返回前**确认真的落地了**（否则 retry 会抛"仍在 running"——那是测试的等待不足，不是源码缺陷）。 */
 async function seedFailed(d, spec) {
   const j = d.dispatch(spec);
   const id = j.id ?? j?.job?.id;
-  await waitSettled(d, id);
+  const settled = await waitSettled(d, id);
+  if (settled && settled.state === 'running') {
+    throw new Error(`测试前置失败：假执行器 ${id} 40s 内未落地（仍是 running）——属等待预算不足/机器过载，非源码缺陷`);
+  }
   return id;
 }
 

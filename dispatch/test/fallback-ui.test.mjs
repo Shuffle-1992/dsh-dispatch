@@ -203,13 +203,14 @@ ok(selects.length === 6, `② 开启后出现目标三下拉（通道/模型/思
 /* 本测试让**上面「通道」与下面降级目标选中同一个通道**（personal/deepseek-flash）——
  * 这样"选项逻辑完全一致"可以用「两侧 option 列表逐字相等」直接证明。 */
 const labels = selects.flatMap(optLabels);
-/* ⚠️ 档位选项跟随**当前选中路由**：本 fixture 的两条 ZCode 路由都是 GLM-5.3 系（low/high/max 三档），
- * 故断言"档位渲染成中文、且至少出现低/高强度"。四档（关闭/开启思考）语义由
- * `thinking-level.test.mjs` 覆盖（原先这里依赖 personal/deepseek 通道，而它已被白名单剔除）。 */
-ok(labels.includes('低强度') && labels.includes('高强度'),
-  `③ 档位 option 中文标签（实际标签：${JSON.stringify(labels)}）`);
+/* ⚠️ 档位选项跟随**当前选中路由**：本 fixture 的两条 ZCode 路由都是 GLM-5.3 系（low/high/max 三档）。
+ * ZB-74（用户要求）：档位改为**双语**「中文(英文)」—— 档位值是引擎的英文 token，
+ * 双语才能让面板选项与日志/报错里的英文对上号。 */
+ok(labels.includes('低强度(Low effort)') && labels.includes('高强度(High effort)'),
+  `③ 档位 option 双语标签「中文(英文)」（实际标签：${JSON.stringify(labels)}）`);
 ok(!labels.some((l) => ['disabled', 'enabled', 'low', 'high', 'max'].includes(l)),
-  '★ 档位在 UI 上**只出现中文**（原始字符串仅作为 option value 传输）');
+  '★ 档位在 UI 上不出现**裸**英文 token（原始字符串仅作为 option value 传输）');
+ok(!labels.some((l) => /\(\s*\)/.test(l)), '★ 双语标签不出现空括号（任一侧缺失时退回单语）');
 /* ★ ZB-51（用户要求）：ZCode 的模型下拉必须列出**具体模型**
  * （"原本是有 GLM5.3 和 GLM5.3 Flash 的"），且免费额度只列它真正提供的模型
  * （用户实测：Start Plan 只给 GLM-5.3-Flash）。 */
@@ -222,13 +223,13 @@ ok(selects.some((s) => flattenOptions(s).some((c) => c.props.value === 'high')),
 /* ZB-52：主/降级「模型」首项现在**都是「顺序派发」**（用户要求「降级也要支持顺序派发」）——
  * 存值同为 `''`（= 不绑定具体模型 ⇒ 走顺序列表）。「（通道默认模型）」这个 label 在本 fixture 里
  * 已不出现于模型下拉（`chanDefaultModel` 键仍被 JobRow 的交接重跑下拉使用）。 */
-ok(labels.includes('顺序派发') && labels.includes('Agent决定（按任务判断）'),
-  '★ 模型/档位首项为「顺序派发」与「Agent决定」（主与降级一致）');
+ok(labels.includes('顺序派发') && labels.includes('Agent决定（按任务判断）(Agent decides (per task))'),
+  '★ 模型/档位首项为「顺序派发」与双语「Agent决定」（主与降级一致；ZB-74 起档位双语）');
 /* ZB-30b（用户要求「不要沿用原任务，就跟上面完全一致的选项逻辑」）：作用域取后 3 个下拉。 */
 const fbSelects = selects.slice(3);
 const fbLabels = fbSelects.flatMap(optLabels);
-ok(fbLabels.includes('Agent决定（按任务判断）'),
-  '★ 降级档位下拉首项 = Agent决定（与上面「通道」分区同一套选项逻辑）');
+ok(fbLabels.includes('Agent决定（按任务判断）(Agent decides (per task))'),
+  '★ 降级档位下拉首项 = 双语「Agent决定」（与上面「通道」分区同一套选项逻辑）');
 ok(!fbLabels.some((l) => l.includes('沿用原任务')),
   '★ 降级目标下拉里不再出现「沿用原任务…」（用户明确要求去掉）');
 /* 两个分区的选项集**逐项相等**：这是"完全一致"的硬证据。

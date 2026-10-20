@@ -823,6 +823,20 @@ window.__ModuleLoader__.load({
       return String(s).toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en';
     })();
     const t = (k) => STRINGS[LANG][k] ?? STRINGS.zh[k] ?? k;
+    /** ZB-74（用户要求）：**双语标签**「中文(英文)」—— 两处「思考强度」下拉都用它。
+     *  为什么档位要双语而其它文案不要：档位值是**引擎原样收下的英文 token**
+     *  （`auto`/`none`/`low`/`medium`/`high`/`xhigh`/`max`/`ultracode`），用户要在面板上
+     *  把"选的中文"与"日志/报错里出现的英文"对上号；只给中文会让排障时对不上。
+     *  规则：中文与英文**相同时只显示一次**（如 Auto/自动 在英文语境下不写成 "Auto(Auto)"）；
+     *  任一缺失则退回单语（绝不出现 `低强度()` 这种空括号）。 */
+    const tBi = (k) => {
+      const zh = STRINGS.zh[k];
+      const en = STRINGS.en[k];
+      if (zh == null && en == null) return k;
+      if (zh == null) return String(en);
+      if (en == null) return String(zh);
+      return String(zh) === String(en) ? String(zh) : `${zh}(${en})`;
+    };
     /** ZB-58：带占位符的文案（`{n}` / `{total}` …）—— `t()` 只做静态查表，这里补一层极简替换。
      *  占位符缺失时保留原文（`{n}` 原样可见 = 可读的失败信号，不静默变成空串）。 */
     const tFmt = (k, vars) => String(t(k)).replace(/\{(\w+)\}/g, (m0, name) => (vars && vars[name] != null ? String(vars[name]) : m0));
@@ -2299,7 +2313,9 @@ window.__ModuleLoader__.load({
     const PAUSE_LABEL_KEY = { 'quota-exhausted': 'pQuota', 'plan-not-entitled': 'pEntitled', 'provider-signing': 'pSigning', 'config-error': 'pConfig', 'provider-blocked': 'pBlocked' };
     const pauseLabel = (r) => t(PAUSE_LABEL_KEY[r] ?? 'pUnknown');
     /* ZB-29e（用户要求）：思考强度档位**中文显示** —— 值与传输一律用原始字符串（disabled/enabled/
-     * low/high/max），只在显示层映射中文标签；未知档位（上游新增）原样显示，绝不隐藏、不猜语义。 */
+     * low/high/max），只在显示层映射中文标签；未知档位（上游新增）原样显示，绝不隐藏、不猜语义。
+     * ZB-74（用户要求）：改为**双语**「中文(英文)」（见 `tBi` 的说明）—— 档位值是引擎的英文 token，
+     * 双语才能让面板选项与日志/报错里的英文对上号。 */
     const THINKING_LABEL_KEY = { disabled: 'thinkDisabled', enabled: 'thinkEnabled', low: 'thinkLow', high: 'thinkHigh', max: 'thinkMax',
       /* ZB-55：三引擎实测 11 档 —— 上面 5 个之外再补 6 个（未映射的会掉回英文原文 none/minimal/medium/xhigh）。
        * ⚠️ 第一行必须保持 `{ disabled: 'thinkDisabled'` 这个**字面形状**（thinking-level.test.mjs 钉住）；
@@ -2307,7 +2323,8 @@ window.__ModuleLoader__.load({
       none: 'thinkNone', minimal: 'thinkMinimal', medium: 'thinkMedium', xhigh: 'thinkXhigh',
       auto: 'thinkAuto', ultracode: 'thinkUltracode',
     };
-    const thinkingLabel = (lv) => (lv == null || lv === '' ? '' : t(THINKING_LABEL_KEY[lv] ?? '') || lv);
+    /* ⚠️ 用 `tBi`（中文(英文)）而不是 `t` —— 档位显示双语；未映射的档位原样显示英文 token。 */
+    const thinkingLabel = (lv) => (lv == null || lv === '' ? '' : tBi(THINKING_LABEL_KEY[lv] ?? '') || lv);
     /* ZB-30：降级目标归一 / 形状 helper 已**上移**到 `demoWire()` 之前
      * （见那里的注释：demo 的 fallbackGet/fallbackSet 会引用它们，留在原处是 latent TDZ）。 */
     /* ZB-28：排队可观测 —— 把 core 的 lockWait 结构转成一行人话：
@@ -3463,7 +3480,7 @@ window.__ModuleLoader__.load({
             },
               seqMode
                 ? h('option', { value: 'agent' }, t('seqThinkingDefault'))
-                : h('option', { value: 'agent' }, t('thinkingAgent')),
+                : h('option', { value: 'agent' }, tBi('thinkingAgent')),
               seqMode ? null : (stale ? h('option', { value: cur }, `${thinkingLabel(cur)}（${t('thinkingStale')}）`) : null),
               seqMode ? null : levels.map((lv) => h('option', { key: lv, value: lv }, thinkingLabel(lv)))));
         })(),
@@ -3588,7 +3605,7 @@ window.__ModuleLoader__.load({
             },
               fbSeqMode
                 ? h('option', { value: 'agent' }, t('seqThinkingDefault'))
-                : h('option', { value: 'agent' }, t('thinkingAgent')),
+                : h('option', { value: 'agent' }, tBi('thinkingAgent')),
               /* ZB-31：与「通道」分区同一条纪律 —— 失效档位显式列出（见上面注释）。
                * ZB-52c：降级目标为顺序派发时与主通道一致（显示「设置默认」、不可改）。 */
               fbSeqMode ? null : (fbThinking !== 'agent' && !fbLevels.includes(fbThinking)

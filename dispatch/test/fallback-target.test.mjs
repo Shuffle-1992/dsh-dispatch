@@ -219,8 +219,10 @@ test('D. ★ client.js：降级开关带指示灯（.dsp-dot）、aria-pressed�
    * 模型首项 = 与上面同一个 key（chanDefaultModel）；档位首项 = 与上面同一个 key（thinkingAgent）。 */
   assert.ok(/h\('option', \{ value: '' \}, t\('chanDefaultModel'\)\)/.test(src),
     '★ 降级模型首项 = （通道默认模型），与上面「通道」分区同一个文案键');
-  assert.ok(/h\('option', \{ value: 'agent' \}, t\('thinkingAgent'\)\)/.test(src),
-    '★ 降级档位首项 = Agent决定（按任务判断），与上面「通道」分区同一个文案键');
+  /* ZB-74（用户要求）：档位首项改为**双语** `tBi('thinkingAgent')` —— 断言语义不变
+   * （"降级档位首项与主通道同一个文案键"），只更新锚点。 */
+  assert.ok(/h\('option', \{ value: 'agent' \}, tBi\('thinkingAgent'\)\)/.test(src),
+    '★ 降级档位首项 = 双语 Agent决定，与上面「通道」分区同一个文案键');
   assert.ok(!/fallbackKeepModel|fallbackKeepThinking/.test(code),
     '★ 「沿用原任务…」文案键已彻底移除（用户明确要求；剥注释后判定）');
   assert.ok(/disabled: busy \|\| !fbSel \|\| !fbSel\.enabled/.test(src),

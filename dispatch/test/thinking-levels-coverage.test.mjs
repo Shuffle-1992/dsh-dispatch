@@ -210,9 +210,10 @@ test('F. ★ 面板：失效档位显式列为 option（否则 <select> 会静�
     assert.ok(new RegExp(`${k}:`).test(src), `client STRINGS 含 ${k}`);
   }
   /* 为什么需要：<select> 的 value 找不到匹配 option 时，浏览器显示首项（Agent决定）
-   * 而真实存值是失效档位 —— 显示与事实不符。这条断言锁住"必须显式列出"。 */
-  assert.ok(/h\('option', \{ value: 'agent' \}, t\('thinkingAgent'\)\),/.test(src),
-    '首项仍是 Agent决定（失效项必须排在它之后，否则默认选中会错位）');
+   * 而真实存值是失效档位 —— 显示与事实不符。这条断言锁住"必须显式列出"。
+   * ZB-74：首项文案改为双语 `tBi('thinkingAgent')`（断言语义不变，只更新锚点）。 */
+  assert.ok(/h\('option', \{ value: 'agent' \}, tBi\('thinkingAgent'\)\),/.test(src),
+    '首项仍是 Agent决定（双语；失效项必须排在它之后，否则默认选中会错位）');
 });
 /* ---------- E. runner 拒绝非法档位时列出的是**修正后**的取值 ---------- */
 test('E. 非法档位 fail-fast 报错列出修正后的可用档位（low|high|max）', () => {

@@ -186,7 +186,7 @@ console.log('\nA. 进程行 = 三行布局');
   ok(text(badges[1]) === 'glm-5.3-flash-free', `A13 模型徽标**去掉引擎前缀**后显示（实际「${text(badges[1])}」）`);
   ok(cls(badges[1]).includes('dsp-job-model'), 'A13b 模型徽标带 dsp-job-model（可压缩 + 省略号）');
   ok(badges[1].props.title === 'opencode/glm-5.3-flash-free', `A13c 模型徽标 title = 完整名（悬浮可见，实际「${badges[1].props.title}」）`);
-  ok(text(badges[2]) === '高强度', `A13d 第 3 个徽标 = 思考强度（实际「${text(badges[2])}」）`);
+  ok(text(badges[2]) === '高强度(High effort)', `A13d 第 3 个徽标 = 思考强度（ZB-74 双语，实际「${text(badges[2])}」）`);
   ok(text(badges[3]) === '已放行权限', `A13e 第 4 个徽标 = 权限（实际「${text(badges[3])}」）`);
   ok(text(badges[4]) === '整仓库锁', `A13f ★ 第 5 个徽标 = 文件锁，且留在第 2 行（实际「${text(badges[4])}」）`);
   ok(!badges.some((b) => text(b).includes('接续自') || text(b).includes('跳')), 'A18 第 2 行不含血缘徽标（已移到第三行）');

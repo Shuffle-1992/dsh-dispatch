@@ -114,14 +114,15 @@ test('listChannels：通道带 thinkingLevels（plan 别名继承选中 provider
    * 形状契约不变 —— 消费的是**数组**，不是 map。 */
   assert.ok(/Array\.isArray\(sel\.thinkingLevels\)/.test(clientCode),
     '★ 面板按数组消费 sel.thinkingLevels（不是 map 取值；剥注释后判定）');
-  /* ★ ZB-29e：档位**中文显示** —— 值仍传原始字符串（disabled/enabled/…），只在显示层映射标签；
-   * 未知档位原样显示（不隐藏、不猜语义）。 */
-  assert.ok(/const THINKING_LABEL_KEY = \{ disabled: 'thinkDisabled'/.test(clientCode),
-    '★ 档位中文标签映射表存在（disabled/enabled/low/high/max）');
-  assert.ok(/const thinkingLabel = \(lv\) => \(lv == null \|\| lv === '' \? '' : t\(THINKING_LABEL_KEY\[lv\] \?\? ''\) \|\| lv\)/.test(clientCode),
-    '★ thinkingLabel：命中映射走中文，未知档位原样回退（不隐藏）');
+  /* ★ ZB-74（用户要求）：档位显示改为**双语**「中文(英文)」——
+   * 档位值是引擎原样收下的英文 token，双语才能让面板选项与日志/报错里的英文对上号。
+   * 断言语义不变（"命中映射走标签、未知档位原样回退、不隐藏"），只把锚点从 `t` 更新为 `tBi`。 */
+  assert.ok(/const thinkingLabel = \(lv\) => \(lv == null \|\| lv === '' \? '' : tBi\(THINKING_LABEL_KEY\[lv\] \?\? ''\) \|\| lv\)/.test(clientCode),
+    '★ thinkingLabel：命中映射走**双语标签**，未知档位原样回退（不隐藏）');
+  assert.ok(/const tBi = \(k\) => \{/.test(clientCode) && /STRINGS\.en\[k\]/.test(clientCode),
+    '★ 双语标签 helper `tBi` 存在（中文+英文，相同则只显示一次）');
   assert.ok(/h\('option', \{ key: lv, value: lv \}, thinkingLabel\(lv\)\)/.test(clientCode),
-    '★ 通道下拉：option value 仍是原始档位字符串，label 用中文');
+    '★ 通道下拉：option value 仍是原始档位字符串，label 用双语');
   const zh = JSON.parse(readFileSync(join(HERE, '..', 'locale', 'zh.json'), 'utf8'));
   const en = JSON.parse(readFileSync(join(HERE, '..', 'locale', 'en.json'), 'utf8'));
   for (const k of ['thinkDisabled', 'thinkEnabled', 'thinkLow', 'thinkHigh', 'thinkMax']) {
