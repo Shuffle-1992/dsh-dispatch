@@ -2,6 +2,39 @@
 
 > 按全局规则维护：遇到踩坑问题登记于此，避免重复踩坑。新条目置顶。
 
+## 2026-10-20 把「工具权限未放行」误诊成「沙箱限制」（ZB-76）
+
+**误诊原文**（某会话报告）：「Qoder CLI 的沙箱只能读写工作区内的文件，网络和编译会被拦，
+所以前两个调研任务没有产出实质内容」⇒ **据此放弃派发、改为自己手做**。
+
+**实测证伪**（同一任务：写文件 + `node --version` + WebFetch + WebSearch）：
+
+| 能力 | 默认 `accept_edits` | `auto:true`（`bypass_permissions`） |
+|---|---|---|
+| 写文件（工作区内） | ✅ **正常** | ✅ 正常 |
+| Bash / 编译 | ✅ 正常（`v24.14.1`）；**部分命令**需授权 | ✅ 正常 |
+| WebFetch | ❌ `Error: Fetch https://example.com?` | ✅ **成功** |
+| WebSearch | ❌ `Error: Allow searching the web?` | ✅ **成功** |
+
+⇒ **写文件/编译本来就是好的**；只有**网络与部分 Bash 需要授权**，而**无头模式下无人可批**。
+加 `auto:true` 后 **4/4 全成功** ⇒ 这是**可修的权限问题**，**不是引擎能力不足**。
+
+**代价**：误诊让 Agent **白白放弃能力**（把可修问题当成硬限制，于是不用派发台、自己手做）。
+
+**修法**：
+- core 新增暂停原因 `permission-blocked`（识别 `Allow searching the web` / `Allow Bash to run` /
+  `Error: Fetch https://…?` / `needs your approval` 等真机原文）；
+- **故意不进** `AUTO_FALLBACK_REASONS` —— 换通道治不了权限（新通道照样要授权），
+  进了只会白烧额度；
+- 执行器把"哪些工具被拦 + 怎么修"显式写 **stderr**（core 的 `classifyPause` 只看 stdout/stderr，
+  **不看 result.json** —— 与 ZB-71 的 OpenCode 403 同一个坑）；
+- 面板加可读文案 `pPerm`（三处同步：client zh/en + locale zh/en）。
+
+**顺带修正一条守门测试的基准**：`cross-check.test.mjs` 的 F4b（"客户端没有多出宿主不产生的暂停原因"）
+原先用 `AUTO_FALLBACK_REASONS ∪ {config-error}` 当"宿主会产生什么" ⇒ 漏掉故意不进降级链的原因，
+于是新加标签会**误报**。改为取 `PAUSE_SIGNATURES` 的**全部** reason。
+**教训：守门的基准必须来自"宿主会产生什么"，而不是"宿主会对什么自动动作"。**
+
 ## 2026-10-20 思考档位：探测拿不到逐模型、静默降级查不出来（ZB-75）
 
 ### ① Qoder 逐模型档位**只能声明**，探测无出口（四条实测证据）

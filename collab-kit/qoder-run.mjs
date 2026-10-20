@@ -596,6 +596,28 @@ async function runOnce(opt, cli) {
   if (fb.warning) process.stderr.write(`${fb.warning}\n`);
   note(`permission-mode-requested=${requestedMode} reported=${s.permissionMode ?? '(unknown)'}${fb.fellBack ? ' FELLBACK' : ''}`);
 
+  /* ---- ZB-76：**工具权限未放行**（真机 2026-10-20 实测：被误诊为"沙箱限制"）----
+   *
+   * 现场：`accept_edits` 下写文件**正常**，但网络/部分 Bash 返回
+   *   `Error: Fetch https://example.com?` / `Error: Allow searching the web?` / `Allow Bash to run…`
+   * 实测对照：同任务加 `--auto`（→ `bypass_permissions`）后 **4/4 全成功**（写+Bash+WebFetch+WebSearch）
+   *   ⇒ **不是"只能读写工作区"，而是权限待审批**。
+   *
+   * 为什么必须显式打出来：core 的 `classifyPause` 只看 stdout/stderr（不看 result.json），
+   * 且**回答正文里的这些字样不足以定因**（任务可能只是部分步骤被拦、整体仍 exit=0）。
+   * 这里把"哪些工具被拦"直接写 stderr ⇒ core 能判成 `permission-blocked` 并给出可执行指引，
+   * 而不是让 Agent 自己猜（真机就猜成了"沙箱限制"，于是放弃派发）。
+   * ⚠️ 只在**确实命中**时打（无命中不产生噪音）。 */
+  const PERM_PROMPT_RE = /Allow searching the web|Allow Bash to run|Allow WebFetch|Error: Fetch https?:\/\/|needs? (?:your )?(?:approval|permission)|requires? (?:your )?approval|permission prompt/i;
+  if (PERM_PROMPT_RE.test(String(s.response ?? ''))) {
+    const blocked = [...new Set((s.response.match(/Allow [A-Za-z ]+/g) ?? []).map((x) => x.trim()))];
+    process.stderr.write(`${PREFIX} 工具权限未放行（**不是**沙箱限制）：本次有工具调用需要授权审批，无头模式下无人可批 ⇒ 被拦。`
+      + `${blocked.length ? `被拦工具/提示：${blocked.slice(0, 4).join(' / ')}。` : ''}`
+      + '处理：① 需要联网/任意命令的任务请用 `auto:true`（→ `--permission-mode bypass_permissions`，实测可放行网络与 Bash）；'
+      + '② 只写工作区内文件用默认 `accept_edits` 即可（实测写文件正常，无需 auto）；'
+      + '③ 也可在 Qoder 里把该目录加信任。**注意**：权限是**可修**的，不代表引擎能力不足。\n');
+  }
+
   /* ---- 静默假成功检测（ZB-72：真机两类都实测到了）----
    *
    * 共同特征：`exit=0` / 无 `permission_denials`，但**实际什么都没做**。用户看到"任务成功"，

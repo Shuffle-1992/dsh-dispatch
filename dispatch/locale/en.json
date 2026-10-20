@@ -145,6 +145,7 @@
     "pSigning": "Signing required",
     "pConfig": "Config error",
     "pBlocked": "Free models blocked",
+    "pPerm": "Tool permission not granted",
     "pUnknown": "Unknown",
     "lockWait": "Queue wait",
     "timedOut": "Timed out",

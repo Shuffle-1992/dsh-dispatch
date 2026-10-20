@@ -262,6 +262,20 @@ const PAUSE_SIGNATURES = [
    * 有意义的是**跨通道**（换到 ZCode/Qoder）。故它进 AUTO_FALLBACK_REASONS，且**不进**顺序派发的延续面。 */
   { reason: 'provider-blocked', patterns: [/FreeTierError/, /abusive traffic/i, /free models aren't available/i] },
   { reason: 'provider-signing', patterns: [/ClientRequestSigningV4Error/] },
+  /* ZB-76（2026-10-20 真机实测新增）：**工具权限未放行**（不是沙箱限制，也不是网络故障）。
+   *
+   * 现场：Qoder 在 `accept_edits` 下，写文件**正常**，但 `WebFetch` / `WebSearch` / 部分 Bash
+   * 返回 `Error: Fetch https://…?` / `Error: Allow searching the web?` / `Allow Bash to run…`。
+   * 实测对照：同一任务加 `auto:true`（→ `--permission-mode bypass_permissions`）后 **4/4 全成功**
+   * （写文件 + Bash + WebFetch + WebSearch）⇒ **不是"只能读写工作区"**，而是**权限待审批**。
+   *
+   * 为什么要单独成一类：① 旧代码认不出 ⇒ 任务停在 `failed/unknown`，用户/Agent 只能自己猜，
+   * 真机就发生过**误诊为"沙箱限制"**（把可修的权限问题当成引擎能力不足，于是放弃派发）；
+   * ② 它**可修**（`auto:true` 或信任目录）⇒ 给出可执行指引比"失败"有用得多；
+   * ③ **不**进 AUTO_FALLBACK_REASONS：换通道治不了权限（新通道照样要授权）。 */
+  { reason: 'permission-blocked', patterns: [/Allow searching the web/i, /Allow Bash to run/i, /Allow WebFetch/i,
+    /Error: Fetch https?:\/\//i, /needs? (?:your )?(?:approval|permission)/i, /requires? (?:your )?approval/i,
+    /permission prompt/i, /tool (?:use )?was denied/i] },
   { reason: 'config-error', patterns: [/Select a model before continuing/i, /CONFIGURATION_ERROR/] },
   { reason: 'quota-exhausted', patterns: [/quota_exceeded/i, /coding_plan_required/i, /rate_limited/i, /insufficient/i, /\b429\b/, /balance/i] },
 ];

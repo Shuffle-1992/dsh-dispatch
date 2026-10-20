@@ -145,6 +145,7 @@
     "pSigning": "需签名",
     "pConfig": "配置错误",
     "pBlocked": "免费模型被封锁",
+    "pPerm": "工具权限未放行",
     "pUnknown": "未知原因",
     "lockWait": "排队等待",
     "timedOut": "超时终止",

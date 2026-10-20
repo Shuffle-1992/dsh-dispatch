@@ -19,6 +19,11 @@ import { createRemoteFace } from '../wire.host.mjs';
 
 /* `AUTO_FALLBACK_REASONS` 不是公开导出（它是内部判据），走 core 的 `__testables` 取真身。 */
 const AUTO_FALLBACK_REASONS = __testables.AUTO_FALLBACK_REASONS;
+/* ZB-76：F4 的**权威原因集**必须取自 `PAUSE_SIGNATURES`（宿主**真正会产生**的全部暂停原因），
+ * 而不是只看"会自动降级的那些" —— 后者会漏掉 `permission-blocked`（它**故意不进**降级链：
+ * 换通道治不了权限），于是"客户端多了一个标签"这条守门会**误报**。
+ * 教训：守门的基准必须来自"宿主会产生什么"，而不是"宿主会对什么自动动作"。 */
+const PAUSE_SIGNATURES = __testables.PAUSE_SIGNATURES;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLIENT = join(HERE, '..', 'client.js');
@@ -68,7 +73,10 @@ if (client.KNOWN_ENGINES) {
     'F3 客户端「可关闭」状态集 === 宿主 core.SETTLED_STATES（面板显示"能关"而宿主拒绝，就是这条漂了）');
 
   /* ── F4：暂停原因 ───────────────────────────────────────────────────── */
-  const reasons = [...AUTO_FALLBACK_REASONS, 'config-error'].sort();
+  /* 权威集 = 宿主 `PAUSE_SIGNATURES` 里**全部**原因（它才是"宿主会产生什么"）。
+   * 保留 AUTO_FALLBACK_REASONS ∪ {config-error} 的并集，避免旧版 core 无 PAUSE_SIGNATURES 时退化。 */
+  const sigReasons = Array.isArray(PAUSE_SIGNATURES) ? PAUSE_SIGNATURES.map((s) => s.reason) : [];
+  const reasons = [...new Set([...AUTO_FALLBACK_REASONS, 'config-error', ...sigReasons])].sort();
   const missing = reasons.filter((r) => !(r in (client.PAUSE_LABEL_KEY ?? {})));
   ok(missing.length === 0,
     `F4 宿主的暂停原因在客户端都有中文标签（缺：${missing.join(',') || '无'}）`);
