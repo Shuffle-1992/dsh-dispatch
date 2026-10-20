@@ -192,7 +192,7 @@ qoder:    cli · cn · v1.1.73 · 已登录 · ~\.qoder-cn\bin\qoderclicn\qoderc
 | 不支持 | — | `mode` / `memoryBench` | `mode` / `memoryBench` |
 | 权限放行 | 无（不需要） | `--auto`（默认关） | `--permission-mode`（默认 `accept_edits`） |
 | 续会话 | `--resume` | `-s <id>`（同 cwd） | `--session-id`（按项目隔离） |
-| 并发上限 | `maxConcurrent` | `maxConcurrentOpenCode`（默认 2） | `maxConcurrentQoder`（默认 1） |
+| 并发上限 | `maxConcurrent` | `maxConcurrentOpenCode`（默认 2） | `maxConcurrentQoder`（默认 3） |
 | 通道 id 形态 | `plan` / `account:<family>-start-plan` | `opencode/<model>` | `qoder/<model>` |
 | 档位探测开关 | `--list-providers` 自带 | `--list-models --with-variants` | `--list-models --with-efforts` |
 
@@ -316,9 +316,15 @@ qoder:    cli · cn · v1.1.73 · 已登录 · ~\.qoder-cn\bin\qoderclicn\qoderc
 
 ## 6.5 多任务并发：用降级通道分流（用户要求，2026-10-20）
 
-**问题**：主通道有**并发上限**（`maxConcurrentQoder` 默认 **1**、`maxConcurrentOpenCode` 默认 **2**、
+**问题**：主通道有**并发上限**（`maxConcurrentQoder` 默认 **3**、`maxConcurrentOpenCode` 默认 **2**、
 全局 `maxConcurrent` 默认 **3**）。同时派多个任务时，超出的会**排队等名额**——
 若它们都挤在主通道，就会出现"明明还有别的通道空闲，却全在排队"。
+
+> 🔴 **ZB-79 实测纠正（2026-10-20）**：`maxConcurrentQoder` 旧默认是 **1**（Qoder 通道永远单进程），
+> 而那条依据（"额度有限 / 并发 CLI 会互相干扰"）**从未实测过**。
+> 真机对照：同时起 **3 个**、**5 个** `qoderclicn` 进程 ⇒ **3/3、5/5 全部 exit=0** 且结果正确
+> ⇒ **Qoder 可以并发**，默认已提到 **3**，并**补上了配置字段**（旧版根本没有该字段 ⇒ 用户改不了）。
+> 对比：OpenCode 的"并发会让 `opencode run` 零输出 exit 1"是**实测真的**（1.19.2），故仍保守默认 2。
 
 **做法**：**开启降级通道**，且让它与主通道**不是同一条**（不同引擎或不同通道），
 然后**把多出来的任务直接派给降级通道那条** —— 绕开主通道的并发上限，不必排队。

@@ -765,10 +765,16 @@ export function createDispatcher(options = {}) {
    * 那是第二重理由，**不是**唯一理由；用户仍可自行调高（不拦截，但请知情）。
    * 全局 maxConcurrent 仍是所有引擎合计的上限，故实际并发 = min(全局, 本引擎上限)。 */
   const maxConcurrentOpenCode = Math.max(1, Number(options.maxConcurrentOpenCode ?? 2) || 2);
-  /* ZB-51：Qoder 独立并发上限，**默认 1**。理由：Qoder 免费/basic 额度有限（真机实测一次
-   * 简单问答即消耗 credits），并发跑多个会更快撞限额；且真机教训是"并发多个 CLI agent 会互相干扰"。
-   * 额度充足时可显式调大。 */
-  const maxConcurrentQoder = Math.max(1, Number(options.maxConcurrentQoder ?? 1) || 1);
+  /* ZB-79（2026-10-20 实测纠正）：Qoder 独立并发上限，**默认 3**（原先默认 1）。
+   *
+   * 旧默认 1 的理由是**猜测且从未实测**（"额度有限 / 并发多个 CLI agent 会互相干扰"）。
+   * 真机对照实测：同时起 3 个 / 5 个 `qoderclicn` 进程 ⇒ **3/3、5/5 全部 exit=0**、
+   * 结果正确（`7!` 都答 5040）、耗时 10–20s 无明显劣化 ⇒ **Qoder 可以并发**。
+   *
+   * ⚠️ 与 OpenCode 的区别是**有实测支撑的**：OpenCode 1.19.2 并发会让 `opencode run`
+   * 零输出 exit 1（那条默认 2 的依据是真的）。Qoder 没有这个现象，故不该照抄 OpenCode 的保守值。
+   * 全局 maxConcurrent 仍是所有引擎合计的上限 ⇒ 实际并发 = min(全局, 本引擎上限)。 */
+  const maxConcurrentQoder = Math.max(1, Number(options.maxConcurrentQoder ?? 3) || 3);
   const runnerCwd = options.runnerCwd ? resolve(options.runnerCwd) : process.cwd();
   const timeoutGraceMs = Math.max(0, Number(options.timeoutGraceSec ?? 120) * 1000);
   const spawnImpl = options.spawnImpl || nodeSpawn;
@@ -1979,10 +1985,39 @@ export function createDispatcher(options = {}) {
     /* ZB-58：**功能总开关关闭 ⇒ 整块功能不生效**（派发不走顺序链；面板也不展示该选项）。
      * 已在进行中的顺序链（`seqRuns` 里登记过的任务）按"登记即继续"处理 ——
      * 关开关不该把正在跑的任务搞成半途而废（见 advanceSequential 只认已登记任务）。 */
+    /* ⚠️ ZB-78（2026-10-20 真机踩到的静默 bug）：**"指定了模型"不能只看 `spec.model`**。
+     *
+     * 现场：`dispatch({ provider: 'qoder/DeepSeek-Flash', thinking: 'max' })` ——
+     * 通道 id 里**带着模型名**（这是工具文档推荐的常见传法），此时 `spec.model` 仍是 null，
+     * 于是顺序链认为"没指定模型"⇒ 接管 ⇒ 把 model 换成**列表第一项**（Qwen3.8-Flash）、
+     * 连 thinking 也一并覆盖成列表第一项配的档位。**用户显式选定的模型与档位被静默改掉。**
+     *
+     * 为什么之前没暴露：`normalizeEngineSpec`（把 `qoder/<model>` 剥成 `model`）是在**更晚的**
+     * `dispatchRaw` 里才跑的；`sequentialChainForSpec` 在这之前就被调用 ⇒ 那一刻 model 还是 null。
+     * 传 `model:` 的路径（A/B 两种）因为 model 有值而侥幸正确，只有"模型藏在 provider 里"这条踩中。
+     *
+     * 修法：把 provider 里内嵌的模型 id 也算作"已指定模型"（与 normalizeEngineSpec 同一判据）。
+     * 这样 C 组与 A/B 组行为一致 —— **显式指定 ⇒ 顺序链一律不接管**（教学文档的承诺）。 */
+    const embedded = embeddedModelOf(spec);
+    if (embedded) return null;                                   // 模型藏在 provider 里 ⇒ 也算指定了模型
     if (spec?.model != null && spec.model !== '') return null; // 指定了模型 ⇒ 不接管
     const eng = normalizeEngine(spec?.engine ?? resolveEngineOf(spec ?? {}));
     const chain = expandSequentialChain(eng);
     return chain.length ? { engine: eng, chain } : null;
+  }
+
+  /** ZB-78：从 `provider` 里取出**内嵌的模型 id**（`opencode/<model>` / `qoder/<model>` 形态）。
+   *  与 `normalizeEngineSpec` 的剥前缀判据一致（同一形状、同一引擎集），只是**提前**在
+   *  `sequentialChainForSpec` 能看到的时刻做判断。返回 null = provider 是裸通道 id（没带模型）。 */
+  function embeddedModelOf(spec) {
+    const prov = spec?.provider;
+    if (typeof prov !== 'string') return null;
+    const p = prov.trim();
+    if (!p) return null;
+    const bare = normalizeEngine(spec?.engine ?? resolveEngineOf(spec ?? {}));
+    if (bare === 'qoder' && isQoderId(p)) return p.slice('qoder/'.length);
+    if (bare === 'opencode' && isOpenCodeId(p)) return p;
+    return null;
   }
 
   /**

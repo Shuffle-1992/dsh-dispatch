@@ -37,6 +37,13 @@ const FIELDS = [
   { name: 'demo', type: 'boolean', def: false, desc: 'UI 演示模式：客户端用内置假数据渲染悬浮窗，不触达 dispatcher' },
   { name: 'maxConcurrent', type: 'number', def: 3, min: 1, max: 8, desc: '同时运行的 run 上限（单写者互斥语义下的并发度）' },
   { name: 'maxConcurrentOpenCode', type: 'number', def: 2, min: 1, max: 8, desc: 'OpenCode 引擎的**独立**并发上限（与 ZCode 分开计数；**实测依据**：同一时刻并发的 opencode 进程会让 `opencode run` 零输出 exit 1（观测于 1.19.2），故默认 2、不建议调高；免费层另有按 IP 限流）；maxConcurrent 仍是全局上限（实际并发 = min(两者)）' },
+  /* ZB-79（2026-10-20 实测纠正）：原先 `maxConcurrentQoder` 在 core 里**硬编码默认 1**，
+   * 且**没有**这个配置字段 ⇒ 用户**无法调高**，Qoder 通道永远单进程。
+   * 旧注释给的理由（"额度有限 / 并发 CLI 会互相干扰"）是**猜测，没实测过**。
+   * 真机对照实测（2026-10-20）：同时起 3 个 / 5 个 `qoderclicn` 进程，**3/3、5/5 全部 exit=0**
+   * 且结果正确（耗时 10–20s，无明显劣化）⇒ **Qoder 可以并发**。
+   * 故默认提到 3（与全局默认一致），并**补上配置字段**让用户可自行调整。 */
+  { name: 'maxConcurrentQoder', type: 'number', def: 3, min: 1, max: 8, desc: 'Qoder 引擎的**独立**并发上限（与其它引擎分开计数）；**实测依据**：同时起 3/5 个 qoderclicn 进程全部 exit=0 且结果正确（2026-10-20 实测，旧默认 1 的依据是猜测且从未实测）⇒ 默认 3；maxConcurrent 仍是全局上限（实际并发 = min(两者)）' },
   { name: 'runnerPath', type: 'string', def: '', desc: 'runner 脚本绝对路径（通用工具仓库 dispatch/collab-kit/zcode-run.mjs，只读使用）；留空则不创建 dispatcher' },
   { name: 'opencodeRunnerPath', type: 'string', def: '', desc: 'OpenCode 执行器脚本绝对路径（<本仓库>/collab-kit/opencode-run.mjs，只读使用，兼作 --list-models / --version 只读探测）；留空则用默认推断（env DSP_OPENCODE_RUNNER → 仓库内 collab-kit/opencode-run.mjs）' },
   { name: 'ledgerPath', type: 'string', def: '', desc: '台账 dispatch-runs.jsonl 绝对路径；留空则跳过台账回读与用量聚合' },
@@ -617,13 +624,16 @@ export function apply(ctx, config = {}) {
       workRoot: config.workRoot,
       maxConcurrent: config.maxConcurrent,
       maxConcurrentOpenCode: config.maxConcurrentOpenCode,
+      /* ZB-79：Qoder 独立并发上限**必须在这里透传** —— 否则新加的配置字段是**摆设**
+       * （core 会用自己的默认值，用户改配置根本不生效）。 */
+      maxConcurrentQoder: config.maxConcurrentQoder,
       ...(config.runnerCwd ? { runnerCwd: config.runnerCwd } : {}),
       /* 空串**不传**（而不是传 ''）：core 对「未配置」与「配了但为空」的处理不同 ——
        * 不传 ⇒ core 自行推断（env DSP_OPENCODE_RUNNER → 仓库内 collab-kit/opencode-run.mjs）；
        * 传空串 ⇒ core 认为"配了但没有"，通道为空。 */
       ...(config.opencodeRunnerPath ? { opencodeRunnerPath: config.opencodeRunnerPath } : {}),
     });
-    log('info', `dispatcher 就绪：work=${dispatcher.workRoot} maxConcurrent=${config.maxConcurrent ?? 3} maxConcurrentOpenCode=${config.maxConcurrentOpenCode ?? 2}`);
+    log('info', `dispatcher 就绪：work=${dispatcher.workRoot} maxConcurrent=${config.maxConcurrent ?? 3} maxConcurrentOpenCode=${config.maxConcurrentOpenCode ?? 2} maxConcurrentQoder=${config.maxConcurrentQoder ?? 3}`);
   } else {
     log('warn', '缺少 runnerPath / workRoot 配置，dispatcher 未创建（UI 将进入 demo 降级；工具动作返回可读错误）');
   }
