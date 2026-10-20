@@ -577,6 +577,8 @@ window.__ModuleLoader__.load({
            sending: '提交中…',
         fbQueued: '已排队：', errPrefix: '失败：', 
          noJobs: '暂无进程记录', exit: '退出', kill: '终止', tail: '输出', tailLoading: '读取中…', tailEmpty: '（无输出）',
+        hbElapsed: '已跑', hbChars: '字数', hbTools: '工具', hbLastTool: '最近工具', hbRepeat: '（相同状态 ×{n} 次）',
+        hbStageSpawn: '启动中', hbStageSession: '建会话', hbStageWaiting: '等首字', hbStageRun: '运行中', hbStageDone: '收尾',
         closeJob: '关闭', cwd: '工作目录', createdAt: '创建于', sessionId: '会话',
         grpActive: '进行中', grpPaused: '需处理', grpFailed: '异常', grpDone: '已完成', grpOther: '其他',
         jobMore: '还有', jobMoreN: '条更早的', jobCollapse: '收起',
@@ -710,6 +712,8 @@ window.__ModuleLoader__.load({
            sending: 'Sending…',
         fbQueued: 'Queued: ', errPrefix: 'Failed: ', 
          noJobs: 'No process records yet', exit: 'exit', kill: 'Kill', tail: 'Tail', tailLoading: 'Loading…', tailEmpty: '(no output)',
+        hbElapsed: 'elapsed', hbChars: 'chars', hbTools: 'tools', hbLastTool: 'last tool', hbRepeat: '(same state ×{n})',
+        hbStageSpawn: 'spawning', hbStageSession: 'creating session', hbStageWaiting: 'waiting for first token', hbStageRun: 'running', hbStageDone: 'finishing',
         closeJob: 'Close', cwd: 'Workdir', createdAt: 'Created', sessionId: 'Session',
         grpActive: 'Running', grpPaused: 'Needs action', grpFailed: 'Failed', grpDone: 'Completed', grpOther: 'Other',
         jobMore: 'Show', jobMoreN: 'older', jobCollapse: 'Collapse',
@@ -3622,6 +3626,89 @@ window.__ModuleLoader__.load({
      * dispatch 工具代劳（模型/通道/思考强度由 Agent 按工具说明与通道设置决定）。
      * 「通道」分区仍可设置默认思考强度（这就是给派发 Agent 的规定）；进程/用量/单写者分区照旧。 */
 
+    /* ─────────── ZB-81（用户要求）：**进行时输出要能读懂** ───────────
+     *
+     * 现场（用户截图）：输出区把 runner 的**心跳行原样堆**出来 ——
+     * ```
+     * [qoder-run] progress stage=run elapsed=1763s chars=1261 tools=135 stageAgo=0s session=a4066594-8a86-…
+     * [qoder-run] progress stage=run elapsed=1773s chars=1261 tools=135 stageAgo=0s session=a4066594-8a86-…
+     * ```
+     * 相邻两行**只差 elapsed**（差 10s），其余逐字相同 ⇒ 一屏 30 行全是同一件事，
+     * 「可阅读性基本为零」（用户原话）。而真正有信息量的（stage 变化、chars/tools 增长、
+     * 异常/警告）被淹在重复里。
+     *
+     * 目标：**保留信息、去掉重复、把字段说成人话**。三条规则：
+     *   ① **折叠连续的同质心跳**：stage/chars/tools 都没变 ⇒ 合并成一行并记「×N」，
+     *      只把首尾的 elapsed 显示成区间（`持续 1763s→1793s`）——这正是一屏 30 行想表达的事；
+     *   ② **变化才单独成行**：stage 变了 / chars 或 tools 增长 ⇒ 单独一行（这才是"进展"）；
+     *   ③ **非心跳行原样保留**：真正的输出（done/provider/错误/模型回答）绝不改写、绝不丢，
+     *      因为排障靠它们；只对**纯心跳**做结构化。
+     *
+     * ⚠️ 只做**显示层**变换（tail.lines 是只读文本），不改 runner 协议、不改 core 解析。
+     * 与 `nextTailScroll` 一样是**纯函数**，便于脱离 React 独立测试。
+     *
+     * @param {string[]} lines runner 原始输出行
+     * @returns {string} 适合人类阅读的文本（折叠后）
+     */
+    function readableTail(lines) {
+      if (!Array.isArray(lines) || lines.length === 0) return '';
+      /* 心跳行识别：与 core 的 RES.progress 同形，但**宽松**匹配（执行器文案变体多）。
+       * 匹配不上的一律按"真实输出"原样保留 —— 宁可少折叠，不可误改真实输出。 */
+      const HB_RE = /^(?:\[([a-z0-9-]+)-run\])\s+progress\s+stage=(\S+)\s+elapsed=(\d+)s\s+chars=(\d+)\s+tools=(\d+)(?:\s+lastTool=(\S+))?\s+stageAgo=(\d+)s(?:\s+session=(\S+))?\s*$/;
+      const out = [];
+      let i = 0;
+      while (i < lines.length) {
+        const raw = String(lines[i] ?? '');
+        const m = HB_RE.exec(raw);
+        if (!m) {
+          /* 非心跳行：**原样**保留（真实输出/错误/done 行都在这里）。 */
+          out.push(raw);
+          i += 1;
+          continue;
+        }
+        /* 找到"同质"连续段：stage/chars/tools/lastTool 都相同（只有 elapsed/stageAgo 在变）。
+         * 注意 session 相同才合并（不同会话不该混成一行）。 */
+        const key = (x) => [x[2], x[4], x[5], x[6] ?? '', x[8] ?? ''].join('|');
+        const k0 = key(m);
+        let j = i;
+        while (j + 1 < lines.length) {
+          const nx = HB_RE.exec(String(lines[j + 1] ?? ''));
+          if (!nx || key(nx) !== k0) break;
+          j += 1;
+        }
+        const first = m;
+        const last = HB_RE.exec(String(lines[j] ?? '')) ?? m;
+        const eng = first[1] ?? '';
+        const stage = first[2];
+        const chars = Number(first[4]);
+        const tools = Number(first[5]);
+        const lastTool = first[6] ?? null;
+        const count = j - i + 1;
+        /* 字段说成人话：`stage=run` ⇒ 「运行中」；chars/tools 给中文标签；
+         * 相同值连续 ⇒ 用 `×N 次` 表达"一直在同一状态"，并给 elapsed 区间。 */
+        const stageLabel = STAGE_LABEL_KEY[stage] ? t(STAGE_LABEL_KEY[stage]) : stage;
+        const parts = [
+          `${eng ? `${eng} ` : ''}${stageLabel}`,
+          `${t('hbElapsed')} ${first[3]}s${count > 1 ? `→${last[3]}s` : ''}`,
+          `${t('hbChars')} ${chars}`,
+          `${t('hbTools')} ${tools}`,
+        ];
+        if (lastTool) parts.push(`${t('hbLastTool')} ${lastTool}`);
+        /* 重复计数单独放末尾（一眼看出"这是重复"而不是"发生了很多事"）。 */
+        const tailNote = count > 1 ? `　${tFmt('hbRepeat', { n: count })}` : '';
+        out.push(`${eng ? `[${eng}-run]` : ''} ${parts.join(' · ')}${tailNote}`);
+        i = j + 1;
+      }
+      return out.join('\n');
+    }
+
+
+    /* ZB-81：**心跳行的人话标签**（进行时输出可读化）。
+     * `stage` 的取值来自执行器（spawn/create-session/waiting-turn/run/…），未知值原样显示（不猜）。 */
+    const STAGE_LABEL_KEY = {
+      spawn: 'hbStageSpawn', 'create-session': 'hbStageSession', 'waiting-turn': 'hbStageWaiting',
+      run: 'hbStageRun', done: 'hbStageDone',
+    };
     /* ZB-05：tail 输出框的滚动决策（**纯函数**，便于脱离 React 独立测试）。
      *
      * 背景（用户报告）：「输出框里的文本一直闪烁，滚到最下面会自动弹回最上面内容」。
@@ -3972,7 +4059,7 @@ window.__ModuleLoader__.load({
           },
             tail === null ? t('tailLoading')
               : tail === undefined ? t('tailEmpty')
-                : tail && tail.ok ? (tail.lines && tail.lines.length ? tail.lines.join('\n') : t('tailEmpty'))
+                : tail && tail.ok ? (tail.lines && tail.lines.length ? readableTail(tail.lines) : t('tailEmpty'))
                   : `${t('errPrefix')}${tail && tail.error ? tail.error : 'unknown'}`)) : null,
       );
     }
