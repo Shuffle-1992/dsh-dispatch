@@ -1293,6 +1293,20 @@ export function createDispatcher(options = {}) {
    * UI 展示逻辑不变（用户要求"显示被锁文件与对应进程"已由 listFileLocks 满足）。
    */
   function crossLevelBlocked(job, locks) {
+    /* ⚠️ ZB-80（2026-10-20 真机踩到的静默 bug）：**`locks` 为空 = 明确不取锁，必须直接放行**。
+     *
+     * 现场：`dispatch({ lock: 'none' })`（= 教学文档承诺的"明确不取锁"）的任务，
+     * 仍被**别的会话**持有的文件锁挡住，`lockWait.blockers` 显示
+     * `cross:file:…/smoke` —— 排在队列里**等一个它根本不需要的锁**。
+     *
+     * 根因：本函数原先只看"**想要哪种锁**"（`locks` 里有 file ⇒ 查 repo 锁；否则 ⇒ 查 file 锁），
+     * 没有先判"**到底想不想要锁**"。`locksFor(spec)` 对 `lock:'none'` 返回**空数组**，
+     * 而空数组落进 `else` 分支 ⇒ 被当成"想拿整仓库锁" ⇒ 去查别人的文件锁 ⇒ 挡住。
+     *
+     * 修法：空锁集 ⇒ 返回 null（无跨层级冲突）。这与 `locksFor` 的注释
+     * （"`lock === 'none'` ⇒ 明确不取锁"）以及教学文档的承诺**一致**。
+     * `tryAcquire` 拿到空锁集时也会走同一判据 ⇒ 两个入口行为一致（不再一个放行一个挡住）。 */
+    if (!locks || locks.length === 0) return null; // 明确不取锁 ⇒ 无冲突可言
     const isFileLock = locks.some((l) => l.name === 'file');
     if (isFileLock) {
       // 想拿文件锁 ⇒ 看整仓库锁是否被别人持有
