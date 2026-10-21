@@ -2784,6 +2784,12 @@ window.__ModuleLoader__.load({
         wbAuth && wbAuth.markers && wbAuth.markers.length ? `${t('wbStateMarker')}：${wbAuth.markers.join(', ')}` : '',
         residue ? t('wbStateResidueHint') : '',
         wb && wb.loginEvidence ? wb.loginEvidence : '',
+        /* ZB-99d：**数据来源自诊断** —— 下次再显示"未知"时，用户悬浮这一行就能告诉我
+         * 断在哪一环（父层没传 / 自拉失败 / 登录状态接口也没有 / 全都没有）。 */
+        `数据来源：${hasPropsDetail ? '面板 channels'
+          : selfDetail ? '组件自拉 channels'
+            : statusArtifacts ? '登录状态接口'
+              : '无（这就是"未知"的原因）'}`,
       ].filter(Boolean).join('\n');
       const stateNode = h('span', {
         style: { opacity: 0.9, cursor: 'help' },
