@@ -196,10 +196,47 @@ CLI **没有** `login` 子命令。登录有三条路，**⓿ 最省事（面板
 
 #### 凭据在哪
 
-**`~/.codebuddy/`**（真机落点：`settings.json` / `user-state.json` / `local_storage/` / `sessions/` / `logs/`）。
-派发台**不读不写**这些凭据，只保守判断登录态。
+**配置/日志在** `~/.codebuddy/`（`settings.json` / `user-state.json` / `local_storage/` / `sessions/` / `logs/`）。
+
+**但真正的登录凭据不在这里**（ZB-94 真机查清）：
+
+```
+凭据     %LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\<authId>.info   （authId 实测为 workbuddy-desktop）
+登出标记  <凭据文件>.logged-out     ← 存在即「一票判未登录」，凭据文件在也没用
+```
+
+派发台对这些文件**只读探测（只判存在性/大小），绝不读内容、不写**。
 > ⚠️ 网上流传的 `~/.codebuddy-session.json` 是**社区反代项目**（workbuddy2api）的路径，
 > **不是官方 CLI 的** —— 别照着找。
+
+#### 掉线自救（ZB-94）
+
+- 凭据**会被持续刷新**（真机：登录 21:03，凭据文件 21:10 仍在更新）⇒
+  **重启 DSH/CLI 不需要重登**，也不是"固定 N 小时过期"。
+- ⚠️ **CLI 被强杀（`taskkill /F`）后可能留下 `.logged-out`** ⇒ 之后一直报
+  `Authentication required`，用户看到的是"我明明登录过，为什么一直要重登"。
+  派发台自己的登录服务原先就是强杀 —— 现已改成**温和终止优先**（3 秒后才兜底强杀）。
+
+掉线时按顺序查：
+
+```powershell
+# 1. 有没有登出标记
+dir "$env:LOCALAPPDATA\CodeBuddyExtension\Data\Public\auth\*.logged-out"
+
+# 2. 有标记且凭据文件也在 ⇒ 矛盾残留：改名备份即可（不碰凭据内容）
+$a = "$env:LOCALAPPDATA\CodeBuddyExtension\Data\Public\auth"
+Get-ChildItem $a -Filter '*.logged-out' | ForEach-Object {
+  Copy-Item $_.FullName "$($_.FullName).bak"; Remove-Item $_.FullName
+}
+
+# 3. 验证
+codebuddy -p "hi" --output-format json
+```
+
+- 有标记 → 上面这步多半**不用重登**就能恢复
+- 没标记但仍报未登录 → 凭据真失效，只能重新 `/login`
+
+派发台现在会在**未登录报错时自动做这个诊断**（发现"凭据在 + 标记在"就在 stderr 直接指出来）。
 
 派发台会把未登录归为 **`CLI 未登录`（`not-logged-in`）暂停态**（不是"失败/未知原因"），
 并在进程 stderr 里直接给出上面两条路。

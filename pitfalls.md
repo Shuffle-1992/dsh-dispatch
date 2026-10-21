@@ -715,3 +715,41 @@ codebuddy --serve --port <n>
 "非法模型哨兵"要真起一次 CLI（≈8 秒），而 `--list-models` 会被通道探测反复调用
 ⇒ 缓存（系统临时目录 + 10 分钟 TTL），并**连失败原因一起缓存**（`not-logged-in`），
 否则每次刷新都白烧 8 秒。
+
+---
+
+## 2026-10-21 ZB-94：WorkBuddy 登录态"莫名掉线"—— 真因是**强杀留下 logout marker**
+
+现象：用户登录后可以正常派发，过一段时间又开始报
+`AUTHENTICATION required. Please use /login`；重登一次又好了，反复出现。
+
+排查（真机 + bundle 逆向，两条线交叉）：
+- 引擎侧（Qoder / WorkBuddy 两个引擎分别派发去查）**都读不到**那个 9MB bundle ——
+  **不是模型能力问题，是沙箱策略**：默认 acceptEdits 下 `Bash`/`PowerShell` **工具级全禁**，
+  `Read`/`Grep`/`Glob` 可用但**限工作区内**。WorkBuddy 还补了两条独立反证（换 `C:\Windows\win.ini`
+  报文一模一样 ⇒ 非单文件拉黑；`Bash pwd` 也被拒 ⇒ 工具级），比 Qoder 的"沙箱只允许工作区"更准确。
+- 本地（danger-full-access）查出机制：
+
+```
+凭据     %LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\<authId>.info   （实测 workbuddy-desktop）
+登出标记  <凭据文件>.logged-out     ← 存在即一票判未登录
+```
+
+- `getLogoutMarkerPath(t)` 的实现就是一行 `.logged-out`；
+- `store()` 写完凭据会 `retireLogoutMarker()` 自动撤销标记；
+  **但只要标记还在，`storeSessionSubject.next(void 0)` ⇒ 一律判未登录（凭据文件在也没用）**；
+- 凭据**会持续刷新**（登录 21:03，文件 mtime 21:10 仍在变）⇒ 不是"固定 N 小时过期"，
+  **重启 DSH 也不需要重登**（纠正了上一轮基于短样本得出的错误结论）；
+- 另有 `CODEBUDDY_CREDENTIALS_IN_MEMORY=1` 分支：凭据只存内存不落盘（极端情况下也会"掉线"）。
+
+真因（机制 + 时间线吻合）：**我自己用 `taskkill /T /F` 强杀了 `--serve` 登录服务**，
+CLI 走了异常退出路径写下 `.logged-out` ⇒ 之后所有进程都判未登录。
+**教训：清理"后台登录服务"这种动作，必须温和终止优先，不能图省事强杀。**
+
+已落地的两处改进：
+1. `stopCodebuddyLogin()` 改为**温和终止优先**（`child.kill()` → 3 秒后仍存活才 `taskkill /F` 兜底），
+   并在 1.5 秒后**只读复查**有没有残留标记，结果随 `codebuddyLoginStatus()` 返回；
+2. 未登录报错时**自动做残留诊断**（新增 `authArtifacts()`：只判存在性/大小，绝不读内容），
+   发现"凭据在 + 标记在"就直接在 stderr 指出这是强杀残留，并给出**改名备份**（可逆）的修复法。
+
+硬约束也没破：派发台始终**只读探测**凭据目录，从不读内容、不删文件（修复靠用户/官方 `/login`）。

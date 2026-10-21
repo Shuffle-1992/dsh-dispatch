@@ -42,7 +42,7 @@
  *   · 权限放行**默认关**：只有 core 显式传 `--auto` 才映射为 `--permission-mode bypassPermissions`。
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, openSync, readSync, closeSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, openSync, readSync, closeSync, statSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve, extname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -766,6 +766,21 @@ async function runOnce(opt, cli) {
   const AUTH_RE = /Authentication required|Please use \/login|not logged in|未登录|请先登录/i;
   const authHit = AUTH_RE.test(`${s.errors.join(' ')} ${s.response}`);
   if (authHit) {
+    /* ZB-94：先做**登录残留诊断**（真机 2026-10-21 实测机制）——
+     *   凭据  %LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\<authId>.info
+     *   标记  <凭据文件>.logged-out  ← **存在即一票判未登录**（凭据文件在也没用）
+     * CLI 被**强杀**（taskkill /F）后可能留下这个标记 ⇒ 表现就是"明明登录过却一直未登录"。
+     * 这一步**只读不写**：把"凭据还在 + 标记在"这个矛盾状态摊给用户，并给出可逆修复法。 */
+    const art = authArtifacts();
+    const credAlive = art.credentials.filter((p) => { try { return statSync(p).size > 0; } catch { return false; } });
+    const residue = (art.markers.length && credAlive.length)
+      ? `${PREFIX} ⚠ 发现**登出标记残留**（这是"登录过却一直未登录"的常见原因，通常是 CLI 被强杀留下的）：\n`
+        + art.markers.map((p) => `    ${p}`).join('\n')
+        + `\n  而凭据文件仍在：${credAlive.join(', ')}\n`
+        + '  ⇒ 修复（任选其一，都不需要手改凭据内容）：\n'
+        + '     ① 用插件详情页的「登录」重登（成功后会**自动撤销**该标记，最稳）；\n'
+        + '     ② 或把上面那个 `.logged-out` 文件**改名备份**（如加 .bak 后缀）后重试。\n'
+      : '';
     process.stderr.write(`${PREFIX} CLI 未登录（**不是**任务失败、也不是权限/沙箱问题）：WorkBuddy CLI 的登录态与`
       + '桌面应用**互相独立**，CLI 必须单独登录一次。\n'
       + '处理（一次性；两种方式任选，都不需要手改任何文件）：\n'
@@ -775,7 +790,9 @@ async function runOnce(opt, cli) {
       + `  ② 真终端里交互启动：node "${cli}"，进入界面后输入斜杠命令 /login。\n`
       + '     ⚠️ /login 是 **CLI 界面里的斜杠命令**，不是 PowerShell/cmd 命令 ——\n'
       + '        在 shell 里直接敲 /login 会报「无法将 /login 项识别为 cmdlet…」（真机踩过）。\n'
-      + '  登录成功后无头派发即自动可用；凭据由 CLI 自己保存在 ~/.codebuddy/ 下（派发台不读不写）。\n');
+      + '  登录成功后无头派发即自动可用（marker 残留会让它一直不可用，见上面诊断）。\n'
+      + `${residue}`
+      + `  凭据目录（只读探测，不读内容、不写）：${art.dirs[0] ?? '(未发现)'}\n`);
   }
 
   /* ---- 静默假成功检测（与 qoder-run 同一套经验）---- */
@@ -879,6 +896,36 @@ async function runOnce(opt, cli) {
  * 本函数**只负责起服务并报端口/密码**（REST 调用在宿主：它有统一超时与错误包装）。
  * 进程必须**保持存活**：OAuth 在浏览器完成后，CLI 需要轮询/接收结果才能落地登录态。
  */
+/**
+ * ZB-94：扫描 WorkBuddy CLI 的**登录产物**（**只读**：只判存在性与大小，绝不读内容）。
+ *
+ * 真机实测路径（2026-10-21）：
+ *   凭据  `%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\<authId>.info`
+ *   标记  `<凭据文件>.logged-out`   ← **存在即一票判未登录**（凭据文件在也没用）
+ *
+ * 为什么需要它：CLI 被**强杀**（taskkill /F）后会留下 `.logged-out`，之后无论怎么跑都报
+ * "Authentication required" —— 用户看到的是"我明明登录过，为什么一直未登录"。本函数把
+ * 这个**矛盾状态**（凭据在 + 标记也在）查出来，交给调用方给可读指引（而不是让人去重登猜）。
+ */
+export function authArtifacts(env = process.env) {
+  const dirs = [];
+  const la = String(env.LOCALAPPDATA ?? '').trim();
+  if (la) dirs.push(join(la, 'CodeBuddyExtension', 'Data', 'Public', 'auth'));
+  const credentials = [];
+  const markers = [];
+  for (const d of dirs) {
+    let names = [];
+    try { names = readdirSync(d); } catch { continue; } // 目录不存在 ⇒ 跳过（不报错）
+    for (const name of names) {
+      const p = join(d, name);
+      if (name.endsWith('.logged-out')) markers.push(p);
+      else if (name.endsWith('.info')) credentials.push(p);
+    }
+  }
+  const liveCred = credentials.filter((p) => { try { return statSync(p).size > 0; } catch { return false; } });
+  return { dirs, credentials, liveCredentials: liveCred, markers, hasResidue: markers.length > 0 && liveCred.length > 0 };
+}
+
 async function loginServe(cli, opt) {
   const port = Number.isFinite(opt.port) && opt.port > 0 ? opt.port : 19000 + Math.floor(Math.random() * 500);
   note(`login-serve starting cli=${cli} port=${port}`);

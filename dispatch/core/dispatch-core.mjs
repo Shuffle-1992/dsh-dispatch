@@ -3128,7 +3128,7 @@ export function createDispatcher(options = {}) {
     });
   }
 
-  /** 登录服务的进程树终止（Windows 下必须 /T，否则 `--serve` 会变孤儿）。 */
+  /** 登录服务的进程树终止（Windows 下必须 /T，否则 `--serve` 会变孤儿）。**仅作兜底**。 */
   function killLoginTree(child) {
     if (!child?.pid) return;
     try { nodeSpawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }); } catch {
@@ -3136,13 +3136,65 @@ export function createDispatcher(options = {}) {
     }
   }
 
-  /** 停止登录服务（幂等）。 */
+  /**
+   * ZB-94：只读扫描 WorkBuddy CLI 的登录产物（**只判存在性/大小，绝不读内容**）。
+   * 真机路径：`%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\<authId>.info`
+   * 登出标记：`<凭据文件>.logged-out`（存在即一票判未登录）。
+   */
+  function scanCodebuddyAuthArtifacts() {
+    const la = String(process.env.LOCALAPPDATA ?? '').trim();
+    const dir = la ? join(la, 'CodeBuddyExtension', 'Data', 'Public', 'auth') : null;
+    const out = { dir, credentials: [], liveCredentials: [], markers: [], hasResidue: false };
+    if (!dir) return out;
+    let names = [];
+    try { names = readdirSync(dir); } catch { return out; }
+    for (const name of names) {
+      const p = join(dir, name);
+      if (name.endsWith('.logged-out')) out.markers.push(p);
+      else if (name.endsWith('.info')) {
+        out.credentials.push(p);
+        try { if (statSync(p).size > 0) out.liveCredentials.push(p); } catch { /* 忽略 */ }
+      }
+    }
+    out.hasResidue = out.markers.length > 0 && out.liveCredentials.length > 0;
+    return out;
+  }
+
+  /** ZB-94：最近一次 stop 之后是否发现登出标记残留（面板/工具可读；**不自动删**）。 */
+  let lastLoginStopInfo = null;
+
+  /**
+   * 停止登录服务（幂等）。ZB-94 改为**温和优先**。
+   *
+   * 真机发现（2026-10-21）：原先直接 `taskkill /T /F` 强杀 ⇒ CLI 可能写入
+   * `.logged-out` 标记 ⇒ **之后凭据文件还在也会一直判未登录**，用户表现是
+   * "我明明登录过，为什么一直要重登"（我自己就踩过一次：清理后台服务后半小时掉线）。
+   * 现在：先 `child.kill()` 让 runner 走自身清理（它会连带结束 CLI 子进程），
+   * 3 秒后仍存活才 taskkill /F 兜底；并在 1.5 秒后**只读复查**是否残留标记，结果留档。
+   */
   function stopCodebuddyLogin() {
     const s = cbLoginSession;
     cbLoginSession = null;
-    if (!s) return { ok: true, stopped: false };
-    killLoginTree(s.child);
-    return { ok: true, stopped: true };
+    if (!s) return { ok: true, stopped: false, logoutMarkerResidue: false };
+    let graceful = false;
+    try { graceful = s.child?.kill?.() ?? false; } catch { graceful = false; }
+    const pid = s.child?.pid;
+    if (pid) {
+      const t = setTimeout(() => {
+        try {
+          if (s.child?.exitCode == null) nodeSpawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true });
+        } catch { /* 尽力 */ }
+      }, 3000);
+      t.unref?.();
+    }
+    const timer = setTimeout(() => {
+      try {
+        const art = scanCodebuddyAuthArtifacts();
+        if (art.hasResidue) lastLoginStopInfo = { at: nowMs(), kind: 'logout-marker-residue', markers: art.markers, credentials: art.liveCredentials };
+      } catch { /* 复查失败不影响 stop */ }
+    }, 1500);
+    timer.unref?.();
+    return { ok: true, stopped: true, graceful, logoutMarkerResidue: false };
   }
 
   /**
@@ -3218,13 +3270,24 @@ export function createDispatcher(options = {}) {
   /** 查询登录状态（GET /api/v1/auth/account/status）。登录服务未启动/超时 ⇒ 可读错误。 */
   async function codebuddyLoginStatus() {
     const s = cbLoginSession;
-    if (!s) return { ok: false, error: '登录服务未启动（请先点「登录 WorkBuddy」）' };
+    /* ZB-94：即使登录服务没在跑，也把**磁盘侧的登录产物诊断**返回 ——
+     * 因为"登录过却一直未登录"最常见的真因就是 `.logged-out` 残留（强杀后遗留），
+     * 而这时恰恰**没有**登录服务在跑。只读扫描，不读内容、不写。 */
+    const artifacts = scanCodebuddyAuthArtifacts();
+    if (!s) {
+      return {
+        ok: false,
+        error: '登录服务未启动（请先点「登录 WorkBuddy」）',
+        artifacts,
+        ...(lastLoginStopInfo ? { lastStop: lastLoginStopInfo } : {}),
+      };
+    }
     if (nowMs() - s.startedAt > CB_LOGIN_TTL_MS) {
       stopCodebuddyLogin();
-      return { ok: false, error: '登录服务已超时（15 分钟）关闭，请重新点「登录 WorkBuddy」' };
+      return { ok: false, error: '登录服务已超时（15 分钟）关闭，请重新点「登录 WorkBuddy」', artifacts };
     }
     const st = await cbHttp(s.port, '/api/v1/auth/account/status', { token: s.token });
-    if (!st.ok) return { ok: false, error: `查询登录态失败（${st.status ?? st.error}）：${String(st.text).slice(0, 200)}` };
+    if (!st.ok) return { ok: false, error: `查询登录态失败（${st.status ?? st.error}）：${String(st.text).slice(0, 200)}`, artifacts };
     const sd = st.json?.data ?? st.json ?? {};
     return {
       ok: true,
@@ -3232,6 +3295,10 @@ export function createDispatcher(options = {}) {
       account: sd.account ?? null,
       port: s.port,
       webui: `http://127.0.0.1:${s.port}/?password=${encodeURIComponent(s.password)}`,
+      /* ZB-94：把"盘上凭据是否还在 / 有没有登出标记残留"一并给出。
+       * 这三个字段让面板能回答「我到底登录着没有」而不只是"账号态 true/false"。 */
+      artifacts,
+      ...(lastLoginStopInfo ? { lastStop: lastLoginStopInfo } : {}),
     };
   }
 

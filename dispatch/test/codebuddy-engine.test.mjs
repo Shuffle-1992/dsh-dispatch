@@ -289,7 +289,10 @@ console.log('\nF. 登录助手（ZB-87）');
   ok(typeof disc.stopCodebuddyLogin === 'function', 'dispatcher 暴露 stopCodebuddyLogin');
   const st = await disc.codebuddyLoginStatus();
   ok(st.ok === false && /未启动/.test(String(st.error ?? '')), '★ 未启动时 status 给可读错误（不抛、不假装已登录）');
-  eq(disc.stopCodebuddyLogin(), { ok: true, stopped: false }, 'stop 幂等（没会话也不报错）');
+  /* ZB-94：返回值新增 `graceful`/`logoutMarkerResidue` 两个诊断字段 ⇒ 只锁语义，不锁字段集
+   * （锁死整体 deepEqual 会让"以后加诊断字段"变成假红）。 */
+  const stopRes = disc.stopCodebuddyLogin();
+  ok(stopRes.ok === true && stopRes.stopped === false, 'stop 幂等（没会话也不报错，且 stopped=false）');
 
   /* ③ 宿主协议面：action 与 face 方法都必须登记（否则面板按钮调不到）。 */
   const wire = await import('../wire.host.mjs');
