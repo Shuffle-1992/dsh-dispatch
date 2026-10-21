@@ -403,6 +403,32 @@ console.log('\nG. 登录条位置与数据源（用户要求：只放插件详�
   ok(need.every((k) => zh.ui[k] && en.ui[k]), '★ 新增登录态文案 zh/en 全齐（269 key 对齐）');
 }
 
+/* ===== ZB-96：按引擎的积分/消耗（余额查不到的引擎靠它判断） ===== */
+{
+  const coreSrc = readFileSync(join(HERE, '..', 'core', 'dispatch-core.mjs'), 'utf8');
+  const hostSrc = readFileSync(join(HERE, '..', 'wire.host.mjs'), 'utf8');
+
+  /* ① WorkBuddy 的费用行必须被解析并落到 job 上（否则"按引擎消耗"里它永远是 null） */
+  ok(coreSrc.includes('costUsd: new RegExp') && coreSrc.includes('cost usd='),
+    '★ 有 `cost usd=` 行解析（WorkBuddy 的费用口径）');
+  ok(/if \(parsed\.costUsd != null\) job\.costUsd = parsed\.costUsd/.test(coreSrc),
+    '★ 费用落到 job.costUsd（与 qoder 的 credits 分开，绝不混用）');
+
+  /* ② 消耗聚合存在、如实标注 scope=process（不是历史累计） */
+  ok(/function creditConsumptionSnapshot\(\)/.test(coreSrc), '有 creditConsumptionSnapshot');
+  ok(/scope: 'process'/.test(coreSrc), '★ 消耗聚合标注 scope=process（不冒充历史累计）');
+  ok(/creditConsumption: creditConsumptionSnapshot\(\)/.test(coreSrc),
+    '★ creditConsumption 出现在 listChannels 返回里（agent 可读）');
+  /* 绝不把 credits 与 usd 相加 —— 口径不同 */
+  const aggFn = coreSrc.match(/function creditConsumptionSnapshot\(\)[\s\S]*?\n  \}/);
+  ok(!!aggFn && !/credits.*\+.*costUsd|costUsd.*\+.*credits/.test(aggFn[0]),
+    '★ credits 与 costUsd **不相加**（两者口径不同，混算会得出无意义的数）');
+
+  /* ③ 统一视图的三态语义（null=官方不提供 ≠ false=取不到） */
+  ok(/export function buildCreditSummary/.test(hostSrc), 'wire.host 导出 buildCreditSummary');
+  ok(/available: null/.test(hostSrc), '★ qoder/codebuddy 标 available:null（官方不提供，不是临时故障）');
+}
+
 cleanup();
 console.log(`\n===== ZB-84 WorkBuddy/CodeBuddy 引擎：${pass} PASS / ${fails.length} FAIL =====`);
 if (fails.length) {

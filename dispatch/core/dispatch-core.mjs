@@ -193,6 +193,9 @@ function resFor(engine) {
     /* Qoder 的用量是**credits**，不是 token（真机实测 token 字段恒为 0）——
      * 故它另有一条专用行；token 恒为 0 时 `usage` 行只有请求数有意义。 */
     credits: new RegExp(`^${p} credits total=(\\S+) contextRatio=(\\S+) durationMs=(\\S+) turns=(\\S+)\\s*$`),
+    /* ZB-96：WorkBuddy 的费用行（真机实测：它的商品计量是"积分"，但 result 只给 total_cost_usd，
+     * 执行器如实打出来、不换算）。落到 `job.costUsd`，供"按引擎的积分消耗"聚合。 */
+    costUsd: new RegExp(`^${p} cost usd=(\\S+) durationMs=(\\S+) turns=(\\S+)\\s*$`),
     /* Qoder 的 context 行：它的上下文窗口大小不由 CLI 报告（真机未给），故 used 与窗口都是 `-`，
      * 真实信号是**占比**。这里刻意放宽为"可能全是占位符"，避免把它记成无法识别的行。 */
     contextRatioLine: new RegExp(`^${p} context used=(\\S+) \\(([\\d.]+|-)% of (\\S+)\\) turnCount=(\\S+)\\s*$`),
@@ -405,6 +408,15 @@ function parseLineForEngine(text, engine) {
       contextRatio: num(m[2]),
       durationMs: num(m[3]),
       ...(num(m[4]) != null ? { turnCount: num(m[4]) } : {}),
+    };
+  }
+  /* ZB-96：WorkBuddy 的 `cost usd=` 行 —— 落到 `job.costUsd`（qoder 用 credits，它用美元；
+   * 两者都是"该引擎自己的计量口径"，不互相换算，也不冒充 token）。 */
+  if ((m = res.costUsd.exec(text))) {
+    return {
+      costUsd: num(m[1]),
+      durationMs: num(m[2]),
+      ...(num(m[3]) != null ? { turnCount: num(m[3]) } : {}),
     };
   }
   /* Qoder 的 context 行（used / 窗口可能是 `-`，真实信号是占比）—— 放在严格的 context 之后匹配，
@@ -1437,6 +1449,29 @@ export function createDispatcher(options = {}) {
         : maxConcurrent);
   /** 每引擎当前运行数（**按 ENGINES 生成**，新增引擎自动纳入 —— 手写 {zcode,opencode} 会漏掉后来的引擎）。 */
   const runningByEngineSnapshot = () => Object.fromEntries(ENGINES.map((e) => [e, runningCountByEngine(e)]));
+
+  /**
+   * ZB-96：**按引擎的积分/费用消耗**（本进程内的 job 聚合）。
+   *
+   * 为什么只能算"本进程"：`dispatch-runs.jsonl` 是 **ZCode runner 独有**的台账，
+   * Qoder（credits）与 WorkBuddy（costUsd）的记录**不在**里面（真机确认 core 对 OpenCode 也跳过台账回读）。
+   * 所以这里如实标注 `scope:'process'` —— 不给用户"这是历史累计"的错觉。
+   *
+   * 用途：余额查不到的引擎（qoder / codebuddy 官方无接口），至少能让 agent 看到"这轮已经花了多少"，
+   * 从而判断要不要继续派。**绝不把 credits 和 usd 相加**（口径不同）。
+   */
+  function creditConsumptionSnapshot() {
+    const out = Object.fromEntries(ENGINES.map((e) => [e, { runs: 0, credits: null, costUsd: null }]));
+    for (const j of jobs.values()) {
+      const e = normalizeEngine(j.engine);
+      if (!out[e]) continue;
+      out[e].runs += 1;
+      if (Number.isFinite(j.credits)) out[e].credits = (out[e].credits ?? 0) + j.credits;
+      if (Number.isFinite(j.costUsd)) out[e].costUsd = (out[e].costUsd ?? 0) + j.costUsd;
+    }
+    return { scope: 'process', note: '仅本进程内的 job 聚合（ZCode 台账 dispatch-runs.jsonl 不含其它引擎）', byEngine: out };
+  }
+
   function runningCountByEngine(engine) {
     const want = normalizeEngine(engine);
     let n = 0;
@@ -1862,6 +1897,8 @@ export function createDispatcher(options = {}) {
     /* ZB-51：Qoder 的 credits / 上下文占比 / 引擎侧耗时 —— 落到 job 上（面板与工具可见）。
      * 只在这些行**确实出现**时才写（zcode/opencode 不上报它们，保持字段为 undefined 而不是 0）。 */
     if (parsed.credits != null) job.credits = parsed.credits;
+    /* ZB-96：WorkBuddy 的费用同样落到 job（口径不同，字段也分开，绝不混用）。 */
+    if (parsed.costUsd != null) job.costUsd = parsed.costUsd;
     if (parsed.contextRatio != null) job.contextRatio = parsed.contextRatio;
     if (parsed.durationMs != null) job.durationMs = parsed.durationMs;
     if (parsed.responseChars != null) job.responseChars = parsed.responseChars;
@@ -3679,6 +3716,9 @@ export function createDispatcher(options = {}) {
       engines: [...ENGINES],
       engineDetail,
       levelsStatus, // ZB-56：逐引擎档位探测状态（ready | pending | none），面板据此显示「载入中」
+      /* ZB-96：按引擎的**积分/费用消耗**（本进程内）—— 余额查不到的引擎（qoder/codebuddy）
+       * 靠它给 agent 一个"这轮已经花了多少"的判据。 */
+      creditConsumption: creditConsumptionSnapshot(),
       opencodeVersion: oc.version,
       codebuddyVersion: cb.version,
       warnings,
