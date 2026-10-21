@@ -343,8 +343,22 @@ console.log('\nG. 登录条位置与数据源（用户要求：只放插件详�
   const iBareLogin = clientSrc.search(/login: \(opts\) => call\('login'/);
   ok(iRemoteLogin > 0, '★ face 变体的 login 走 `remote.call(...)`（真机曾误写成裸 call 报错）');
   ok(iBareLogin > iRemoteLogin, '★ 裸 `call` 版只出现在**后面的** ext 变体里（顺序锁，防抄错作用域）');
-  ok((clientSrc.match(/remote\.call\('login'/g) ?? []).length === 1, 'remote.call 版 login 恰好 1 处');
+  ok((clientSrc.match(/remote\.call\('login'/g) ?? []).length >= 1, 'login 走 remote.call（face 变体 + 方法表至少各一处）');
   ok((clientSrc.match(/login: \(opts\) => call\('login'[^)]*\)/g) ?? []).length === 1, '裸 call 版 login 恰好 1 处');
+
+  /* ★ ZB-91 真机 bug：`face` 映射表（手写）**漏了 `split`** ⇒ `splitSetImpl` 调
+   * `face.split(...)` 抛 undefined ⇒ App 的 split 状态保持初值 ⇒ 分流开关灰着点不动，
+   * 而宿主侧其实是 enabled:true。这类漏登记**只在真机 live 链路炸**
+   * （ext 变体走 `call(...)`，离线/测试路径照不到），故用通用锁：
+   * **所有 `face.xxx(` 调用都必须在 `const face = {…}` 里有同名键**。 */
+  const faceObjMatch = clientSrc.match(/const face = \{([\s\S]*?)\n      \};/);
+  ok(!!faceObjMatch, '能取出 face 映射表字面量');
+  const faceKeys = faceObjMatch ? [...faceObjMatch[1].matchAll(/^\s{8}(\w+):/gm)].map((m) => m[1]) : [];
+  const faceUsed = [...new Set([...clientSrc.matchAll(/\bface\.(\w+)\(/g)].map((m) => m[1]))];
+  const faceMissing = faceUsed.filter((n) => !faceKeys.includes(n));
+  ok(faceKeys.length > 0 && faceMissing.length === 0,
+    `★ face 映射表覆盖所有 face.* 调用（缺：${faceMissing.join(', ') || '无'}）`);
+  ok(faceKeys.includes('split'), '★ face 映射表含 split（ZB-91 真机就是漏了它导致分流开关点不动）');
 }
 
 cleanup();

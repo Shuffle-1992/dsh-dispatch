@@ -1325,6 +1325,16 @@ window.__ModuleLoader__.load({
         // Z12：派发总开关（switchGet 读状态；switchSet 走宿主唯一写入口）
         switchGet: () => remote.call('switchGet'),
         switchSet: (next) => remote.call('switchSet', next && typeof next === 'object' ? next : {}),
+        /* ★ ZB-91 真机 bug：**这张表漏了 `split`**。
+         * 后果链条（用户看到的"分流开关点不动"）：`splitSetImpl` 调 `face.split(...)`
+         * → undefined is not a function → 被 catch 成 `{ok:false}`
+         * → App 的 split 状态**保持初值**（`distinctTargets:[]`、`enabled:false`）
+         * → 面板 `disabled: !splitCanEnable` → 开关灰着、点击无效；而宿主侧其实
+         * `enabled:true / active:true`（我用 action=split 读到过）。
+         * ⚠️ 纪律：**这张表是手写的**，往 `face.*` 加任何新方法都必须同时在下面登记，
+         * 否则只在真机 live 链路炸（ext 变体走 `call(...)`，测试与离线路径都照不到）。 */
+        split: (patch) => remote.call('split', patch && typeof patch === 'object' ? patch : {}),
+        login: (opts) => remote.call('login', opts && typeof opts === 'object' ? opts : {}),
       };
       // 旧接口（UI 信封：永不 reject）。别名方法不能在对象字面量里互相引用方法名
       // （属性不是作用域绑定，pitfalls Z7-1），先落局部函数。
