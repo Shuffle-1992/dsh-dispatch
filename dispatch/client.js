@@ -615,6 +615,9 @@ window.__ModuleLoader__.load({
         wbLoginStopHint: '关闭登录服务（连带结束 CLI 子进程）',
         wbLoginOpen: '打开登录链接', wbLoginWebui: '打开 Web UI',
         wbLoginAuthed: '已登录', wbLoginNotAuthed: '未登录', wbLoginFail: '登录服务不可用',
+        wbLoginTimeout: '登录请求超时（宿主未在 45 秒内响应）',
+        wbLoginNoMethod: '宿主未提供 login 方法 —— 请重启 DSH 后重试（客户端已更新、宿主还是旧版时会出现）',
+        wbLoginState: '登录态：',
         chanEngineHintCodebuddy: 'WorkBuddy / CodeBuddy 引擎（走**官方 CLI**，不依赖任何反代）：不支持 mode / memoryBench；思考强度映射为 CodeBuddy 的 --effort（档位值由 CLI 自身 --help 声明，minimal→max，共 6 档）。执行器默认带 --permission-mode acceptEdits（能改工作目录内的文件）；需要全放行时由派发方**显式**传 auto=true（映射为 bypassPermissions）。⚠️ **CLI 的登录态与 WorkBuddy 桌面应用互相独立** —— 桌面用得好好的，CLI 仍可能在无头执行时报 “Authentication required”；此时任务会停在 `未登录` 暂停态，需交互启动 CLI 后输入 /login（一次性）。该 CLI 的进程退出码**恒为 0 即使任务失败**，执行器已把它并入 done exit 码，故别只看 exit=0 判断成功。',
         enginesTitle: '引擎',
         enginesHint: '本机自动探测到的执行引擎（形态 / 版本 / 登录态）。插件按「环境变量 → 配置 → PATH → 已知安装位置（含跨盘符）」五级查找，无需手填路径。',
@@ -761,6 +764,9 @@ window.__ModuleLoader__.load({
         wbLoginStopHint: 'Stop the sign-in service (also ends the CLI child process)',
         wbLoginOpen: 'Open sign-in link', wbLoginWebui: 'Open Web UI',
         wbLoginAuthed: 'signed in', wbLoginNotAuthed: 'not signed in', wbLoginFail: 'sign-in service unavailable',
+        wbLoginTimeout: 'sign-in request timed out (host did not respond within 45s)',
+        wbLoginNoMethod: 'host does not expose login() — restart DSH and retry (happens when the client is newer than the host)',
+        wbLoginState: 'Sign-in state: ',
         chanEngineHintCodebuddy: 'WorkBuddy / CodeBuddy engine (runs the **official CLI**; no reverse proxy involved): no mode / memoryBench; thinking maps to CodeBuddy --effort (the level set is declared by the CLI itself in --help: minimal→max, 6 levels). The executor defaults to --permission-mode acceptEdits (can edit files inside the working directory); to allow everything the dispatcher must pass auto=true explicitly (mapped to bypassPermissions). Note: the CLI login is **independent of the WorkBuddy desktop app** — the desktop can be signed in while headless runs still report "Authentication required"; the job then pauses as `not logged in` and you need to start the CLI interactively once and run /login. This CLI exits with code 0 even when the task fails, and the executor folds that into the done exit code — so do not judge success from exit=0 alone.',
         enginesTitle: 'Engines',
         enginesHint: 'Execution engines auto-detected on this machine (form / version / login). The plugin searches in five levels — env var → config → PATH → known install locations (incl. other drives) — so no path needs to be filled in by hand.',
@@ -2585,10 +2591,36 @@ window.__ModuleLoader__.load({
     function EngineLoginBar({ engineDetail, channels }) {
       const { login } = useWire();
       const [st, setSt] = useState({ busy: false, result: null });
+      const aliveRef = useRef(true);
+      useEffect(() => () => { aliveRef.current = false; }, []);
+
+      /* ZB-89（真机 bug：点「登录/检查状态」后按钮**永远停在「登录中…」**）：
+       * 旧实现 `Promise.resolve(login({sub}))` 有三个洞：
+       *   ① `login` 若不是函数（宿主 wire 未提供）⇒ **同步抛错**，而它在 Promise.resolve 的
+       *      实参位置求值 ⇒ `.catch` 根本接不到 ⇒ busy 永久为 true（就是用户看到的"卡住"）；
+       *   ② 宿主侧调用挂起不返回 ⇒ 同样永久 busy（没有任何超时）；
+       *   ③ 组件卸载后再 setState ⇒ 警告。
+       * 现在：同步 try/catch + **45s 超时兜底** + 卸载防护。宁可报"超时"也不要卡住不动。 */
       const run = (sub) => {
         setSt({ busy: true, result: null });
-        Promise.resolve(login({ sub })).then((r) => setSt({ busy: false, result: r ?? null }))
-          .catch((e) => setSt({ busy: false, result: { ok: false, error: e?.message ?? String(e) } }));
+        const timeoutMs = 45000;
+        let timer = null;
+        const settle = (r) => {
+          if (timer) { clearTimeout(timer); timer = null; }
+          if (aliveRef.current) setSt({ busy: false, result: r });
+        };
+        timer = setTimeout(() => settle({ ok: false, error: `${t('wbLoginTimeout')}（${Math.round(timeoutMs / 1000)}s）` }), timeoutMs);
+        try {
+          if (typeof login !== 'function') {
+            settle({ ok: false, error: t('wbLoginNoMethod') });
+            return;
+          }
+          Promise.resolve(login({ sub }))
+            .then((r) => settle(r ?? { ok: false, error: t('wbLoginFail') }))
+            .catch((e) => settle({ ok: false, error: e?.message ?? String(e) }));
+        } catch (e) {
+          settle({ ok: false, error: e?.message ?? String(e) });
+        }
       };
       /* ZB-88：判据**双保险** —— 只依赖 `engineDetail` 太脆：它来自 discovery，
        * 一旦宿主某次没带上（旧版 wire / 探测尚未完成），按钮就**静默消失**，
@@ -2601,6 +2633,25 @@ window.__ModuleLoader__.load({
       if (!hasWbEngine) return null;
       const r = st.result;
       const acct = r && r.account && (r.account.userName || r.account.userId);
+      /* 结果区独立成块（`flexBasis:100%` + 上下留白）—— 真机反馈"没看到链接"：
+       * 原来它和按钮挤在同一行、紧随其后，很容易被当成按钮的一部分而忽略。 */
+      const resultNode = r
+        ? h('div', {
+          className: r.ok === false ? 'dsp-feedback dsp-err' : 'dsp-note',
+          role: 'status',
+          style: { flexBasis: '100%', marginTop: '4px', wordBreak: 'break-all' },
+        },
+        r.ok === false
+          ? `⚠ ${r.error ?? t('wbLoginFail')}`
+          : [
+            r.authUrl ? h('div', { key: 'a' }, `${t('wbLoginOpen')}：`, h('a', { href: r.authUrl, target: '_blank', rel: 'noreferrer' }, r.authUrl)) : null,
+            r.webui ? h('div', { key: 'w' }, `${t('wbLoginWebui')}：`, h('a', { href: r.webui, target: '_blank', rel: 'noreferrer' }, r.webui)) : null,
+            h('div', { key: 'stt' }, t('wbLoginState'), r.authenticated === true
+              ? `${t('wbLoginAuthed')}${acct ? `（${r.account.userName || r.account.userId}）` : ''}`
+              : r.authenticated === false ? t('wbLoginNotAuthed') : '—'),
+            r.hint ? h('div', { key: 'h', style: { opacity: 0.8 } }, r.hint) : null,
+          ])
+        : null;
       return h('div', { className: 'dsp-field', style: { marginTop: '4px', flexWrap: 'wrap', gap: '4px' } },
         h('span', { style: { opacity: 0.75 }, title: t('wbLoginHint') }, `${t('wbLoginTitle')}：`),
         h('button', {
@@ -2615,18 +2666,7 @@ window.__ModuleLoader__.load({
           className: 'dsp-switch dsp-toggle', type: 'button', disabled: st.busy,
           title: t('wbLoginStopHint'), onClick: () => run('stop'),
         }, t('wbLoginStop')),
-        /* 结果区：可点链接（登录链接 / Web UI）+ 账号态 + 说明；失败给可读原因。 */
-        r
-          ? (r.ok === false
-            ? h('span', { className: 'dsp-note', role: 'status', style: { flexBasis: '100%' } }, `⚠ ${r.error ?? t('wbLoginFail')}`)
-            : h('span', { className: 'dsp-note', role: 'status', style: { flexBasis: '100%' } },
-              r.authUrl ? h('a', { key: 'auth', href: r.authUrl, target: '_blank', rel: 'noreferrer' }, `${t('wbLoginOpen')} `) : null,
-              r.webui ? h('a', { key: 'ui', href: r.webui, target: '_blank', rel: 'noreferrer' }, `${t('wbLoginWebui')} `) : null,
-              h('span', { key: 'stt' }, r.authenticated === true
-                ? `${t('wbLoginAuthed')}${acct ? `（${r.account.userName || r.account.userId}）` : ''}`
-                : r.authenticated === false ? t('wbLoginNotAuthed') : ''),
-              r.hint ? h('span', { key: 'hint', style: { marginLeft: '6px', opacity: 0.8 } }, r.hint) : null))
-          : null,
+        resultNode,
       );
     }
 

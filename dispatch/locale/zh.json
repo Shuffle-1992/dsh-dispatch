@@ -260,6 +260,9 @@
     "wbLoginAuthed": "已登录",
     "wbLoginNotAuthed": "未登录",
     "wbLoginFail": "登录服务不可用",
-    "chanInfoTitle": "通道清单说明（悬停查看）"
+    "chanInfoTitle": "通道清单说明（悬停查看）",
+    "wbLoginTimeout": "登录请求超时（宿主未在 45 秒内响应）",
+    "wbLoginNoMethod": "宿主未提供 login 方法 —— 请重启 DSH 后重试（客户端已更新、宿主还是旧版时会出现）",
+    "wbLoginState": "登录态："
   }
 }

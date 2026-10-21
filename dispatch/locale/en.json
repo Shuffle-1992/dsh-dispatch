@@ -260,6 +260,9 @@
     "wbLoginAuthed": "signed in",
     "wbLoginNotAuthed": "not signed in",
     "wbLoginFail": "sign-in service unavailable",
-    "chanInfoTitle": "Channel list notes (hover to view)"
+    "chanInfoTitle": "Channel list notes (hover to view)",
+    "wbLoginTimeout": "sign-in request timed out (host did not respond within 45s)",
+    "wbLoginNoMethod": "host does not expose login() — restart DSH and retry (happens when the client is newer than the host)",
+    "wbLoginState": "Sign-in state: "
   }
 }
