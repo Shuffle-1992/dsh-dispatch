@@ -753,3 +753,33 @@ CLI 走了异常退出路径写下 `.logged-out` ⇒ 之后所有进程都判未
    发现"凭据在 + 标记在"就直接在 stderr 指出这是强杀残留，并给出**改名备份**（可逆）的修复法。
 
 硬约束也没破：派发台始终**只读探测**凭据目录，从不读内容、不删文件（修复靠用户/官方 `/login`）。
+
+---
+
+## 2026-10-22 ZB-101b：WorkBuddy 是积分制，但 **CLI 不暴露积分**（Qoder 正好相反）
+
+用户指出「WorkBuddy 也是积分制的」—— 对，但**拿不到数**。穷举了六条路，全部落空：
+
+| 途径 | 结果 |
+|---|---|
+| `-p --output-format stream-json` 的 assistant `message.usage` | 只有 `input_tokens/output_tokens/cache_*`，**无 credits 字段**（真机抓包 24696 in / 2 out） |
+| 同一场的 `result.total_cost_usd` | **恒 0**；`usage` 同样只有 token；`modelUsage` 也只有 token |
+| `/cost` 斜杠命令（无头） | 不支持：`/cost isn't a supported command`，指引到 `/status` |
+| `/stats` 斜杠命令（无头） | 不支持，指引到 `/status` / `/tasks` / `/todos` |
+| `/status` 斜杠命令（无头） | 只回一句「Status output is displayed in the CLI」——**不给数据** |
+| `--serve` REST | usage/credits/quota/billing 全 404（只有 auth 端点） |
+| 本地存储 `~/.workbuddy/local_storage` | `balance` 是模型图标名 `wb-balanced`、`credit` 是升级引导配置项，**无余额/消耗数值** |
+
+⇒ **WorkBuddy 的积分只能在桌面应用里看；CLI 侧无法获得，也不该猜汇率去折算 token。**
+派发台的处理：`costUsd` 只在 `> 0` 时显示（真机恒 0 ⇒ 实际上永远不显示），**不伪造数字**；
+能显示真实积分的只有 Qoder。
+
+### 顺带：Qoder 正好相反（同一类坑）
+
+`result.total_credits` **恒 0**（一场真实算了 0.494866 积分的会话也是 0），
+真值藏在**每条 assistant 的 `message.usage.credits`** 里。
+必须**按 `message.id` 去重累加** —— 同一条消息会派发多个事件（thinking/text/tool_use 各一条，
+usage 相同），不去重会把一场会话算成 3 倍。
+
+**教训：引擎的"计量字段"要按事件逐个核，不能信 result 里那个名字最像的字段。**
+两个引擎在这点上恰好相反：Qoder 的 result 无值、message 有值；WorkBuddy 两边都没有（客户端专有）。
