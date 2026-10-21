@@ -3587,10 +3587,20 @@ window.__ModuleLoader__.load({
             `${t('filtHiddenA')}${hidden}${t('filtHiddenB')}${folded.length}${t('filtHiddenC')}`);
         })(),
         h('div', { className: 'dsp-note', role: 'status' },
-          /* ZB-51：未指定模型时显示「Agent决定」（与模型下拉首项同一文案）。
+          /* ZB-51：未指定模型时显示「顺序派发」（与模型下拉首项同一文案）。
            * ZB-52c：模型为空 = 顺序派发（**唯一真相**）⇒ 该位置固定显示「顺序派发」，不再有第三种状态
-           * （开关已删除："模型值"与"开关"不会再互相矛盾）。 */
-          `${t('chanNewTask')}${channel.provider}/${channel.model || t('seqTitle')} · ${t('thinking')}: ${channel.reasoningLevel === 'agent' || !channel.reasoningLevel ? t('thinkingAgentShort') : thinkingLabel(channel.reasoningLevel)}`),
+           * （开关已删除："模型值"与"开关"不会再互相矛盾）。
+           *
+           * ZB-86（用户真机截图发现，2026-10-21）：这里曾显示 `qoder/qoder/DeepSeek-Flash` —— **双前缀**。
+           * 原因：**模型 id 本身就带通道前缀**（`opencode/<m>` / `qoder/<m>` / `codebuddy/<m>`），
+           * 再拼一次 `provider/` 必然重复。规则：模型 id 已以该 provider 开头就**不再重复拼**。 */
+          `${t('chanNewTask')}${(() => {
+            const prov = String(channel.provider ?? '');
+            const model = channel.model == null ? '' : String(channel.model);
+            if (!model) return prov ? `${prov}/${t('seqTitle')}` : t('seqTitle');
+            if (!prov) return model;
+            return model.startsWith(`${prov}/`) ? model : `${prov}/${model}`;
+          })()} · ${t('thinking')}: ${channel.reasoningLevel === 'agent' || !channel.reasoningLevel ? t('thinkingAgentShort') : thinkingLabel(channel.reasoningLevel)}`),
         /* 引擎专属提示（跟随选中通道动态显示）——OpenCode 通道不支持 mode/memoryBench 等硬边界。 */
         chanEngineNote,
         /* ── ZB-33：免费额度通道的额度条（仅选中该通道时显示） ── */
