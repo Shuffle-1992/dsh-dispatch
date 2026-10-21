@@ -2735,6 +2735,21 @@ window.__ModuleLoader__.load({
       );
     }
 
+    /**
+     * ZB-97：**额度的极短写法**（模块级，侧栏额度行与引擎状态条共用同一套口径）。
+     * 完整原因永远放 title —— 正文只留极短，符合用户"别显示一大段"的要求。
+     */
+    function creditBriefOf(credit, t) {
+      if (!credit || typeof credit !== 'object') return null;
+      if (credit.kind === 'free') return t('creditFree');
+      if (credit.available === true) {
+        const m = (v) => (Number.isFinite(v) ? `${(v / 1e6).toFixed(1)}M` : '?');
+        return `${m(credit.remainingUnits)}/${m(credit.totalUnits)}`;
+      }
+      if (credit.available === false) return t('creditUnavailable');
+      return t('creditNoApi');
+    }
+
     function EngineStatus({ engineDetail, creditSummary }) {
       if (!engineDetail || typeof engineDetail !== 'object') return null;
       /* ZB-84/87：**从 KNOWN_ENGINES 生成**（原先写死三引擎 ⇒ 第四引擎的 WorkBuddy
@@ -2743,17 +2758,7 @@ window.__ModuleLoader__.load({
       if (!rows.length) return null;
       /* ZB-96：**积分/额度**简写 —— 逐引擎如实（有的显示余量、没有的显示"无接口"、免费的显示"免费"）。
        * 完整原因放 title：正文只留极短，避免把引擎条撑爆（用户明确要求别显示一大段）。 */
-      const creditBrief = (engine) => {
-        const c = creditSummary && typeof creditSummary === 'object' ? creditSummary[engine] : null;
-        if (!c) return null;
-        if (c.kind === 'free') return t('creditFree');
-        if (c.available === true) {
-          const m = (v) => (Number.isFinite(v) ? `${(v / 1e6).toFixed(1)}M` : '?');
-          return `${m(c.remainingUnits)}/${m(c.totalUnits)}`;
-        }
-        if (c.available === false) return t('creditUnavailable');
-        return t('creditNoApi');
-      };
+      const creditBrief = (engine) => creditBriefOf(creditSummary && typeof creditSummary === 'object' ? creditSummary[engine] : null, t);
       const FORM_KEY = {
         cli: 'engineFormCli',
         'client-bundled-cli': 'engineFormClientBundled',
@@ -3302,6 +3307,16 @@ window.__ModuleLoader__.load({
         : null;
       const giftText = giftSel ? (giftSel.quotaText ?? (giftSel.giftQuotaUnavailable ? `${t('giftQuotaUnavailable')}（${giftSel.giftQuotaUnavailable}）` : null)) : null;
 
+      /* ── ZB-97：**选中任意通道都显示它的引擎额度**（用户要求：选中对应通道到侧栏）──
+       * 免费额度通道另有更完整的进度条（上面 giftSel 分支）；这里覆盖其余三种情况：
+       *   有余额数据（zcode 其它通道）/ 该有但取不到 / **官方无接口**（qoder、codebuddy）/ 免费（opencode）。
+       * 一句话原则：**查得到就显示，查不到就如实说查不到，绝不编数字。** */
+      const selEngine = engineOf(sel?.engine ?? channel?.provider);
+      const selCredit = (channelsInfo && typeof channelsInfo === 'object' && channelsInfo.creditSummary && selEngine)
+        ? channelsInfo.creditSummary[selEngine]
+        : null;
+      const selCreditBrief = creditBriefOf(selCredit, t);
+
       const switchProvider = (id) => {
         /* ⚠️ ZB-51：必须在**折叠后**的清单里找 —— 折叠条目的 id 是裸引擎名（`opencode` / `qoder`），
          * 原始清单里只有 `opencode/<model>` 形态，直接用 `channels.find` 会找不到 ⇒ **选不中**。
@@ -3840,6 +3855,19 @@ window.__ModuleLoader__.load({
                     },
                   })),
               h('span', { className: 'dsp-note', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' } }, giftText)))
+          : null,
+        /* ── ZB-97：其余引擎的额度（选中即显示；qoder/codebuddy 会明说"官方无接口"） ──
+         * 完整原因（含"日志 N 天前"、"哪个端点 404"）放 title，正文只留一行。 */
+        !giftSel && selCredit && selCreditBrief
+          ? h('div', { className: 'dsp-field' },
+            h('span', { className: 'dsp-field-k' }, t('creditTitle')),
+            h('span', {
+              className: 'dsp-field-v',
+              style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0', cursor: 'help' },
+              title: [selCredit.text ?? '', selCredit.note ?? ''].filter(Boolean).join('\n'),
+              'data-dsp-credit': selEngine ?? '',
+            },
+            h('span', { className: 'dsp-note', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' } }, selCreditBrief)))
           : null,
         /* ── ZB-85：顺序派发列表**已从面板移除**（改由插件设置页的配置卡承载）。
          * 面板只保留"日常派发"需要的东西：通道 / 模型 / 思考强度 / 自动降级目标 / 分流。 ── */

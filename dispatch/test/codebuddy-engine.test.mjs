@@ -429,6 +429,32 @@ console.log('\nG. 登录条位置与数据源（用户要求：只放插件详�
   ok(/available: null/.test(hostSrc), '★ qoder/codebuddy 标 available:null（官方不提供，不是临时故障）');
 }
 
+/* ===== ZB-97：侧栏「选中通道即显示该引擎额度」 ===== */
+{
+  const clientSrc = readFileSync(join(HERE, '..', 'client.js'), 'utf8');
+
+  /* ① 简写函数是**模块级公共**（侧栏额度行与引擎状态条同一口径，不许各写一份） */
+  ok(/function creditBriefOf\(credit, t\)/.test(clientSrc), '★ creditBriefOf 提成模块级公共函数（口径单一）');
+  const briefUses = (clientSrc.match(/creditBriefOf\(/g) ?? []).length;
+  ok(briefUses >= 3, `creditBriefOf 被多处复用（定义 + 引擎条 + 侧栏 = ≥3，实际 ${briefUses}）`);
+
+  /* ② 侧栏按「选中通道的引擎」取额度（而不是写死 zcode） */
+  ok(/const selEngine = engineOf\(sel\?\.engine \?\? channel\?\.provider\)/.test(clientSrc),
+    '★ 侧栏额度按**选中通道的引擎**取（选中谁显示谁）');
+  ok(/channelsInfo\.creditSummary\[selEngine\]/.test(clientSrc), '侧栏读 channelsInfo.creditSummary');
+  ok(/data-dsp-credit/.test(clientSrc), '额度节点带 data-dsp-credit（可被测试/样式钩住）');
+
+  /* ③ ⚠️ 免费额度通道仍走**进度条**（信息最全），不能被通用额度行顶掉 */
+  ok(/!giftSel && selCredit && selCreditBrief/.test(clientSrc),
+    '★ 通用额度行以 `!giftSel` 为前提（免费额度通道保留原有进度条，不重复不冲突）');
+
+  /* ④ 三种引擎的文案不会串（free/unavailable/noApi 必须是不同 key） */
+  const localeSrc = readFileSync(join(HERE, '..', 'locale', 'zh.json'), 'utf8');
+  for (const k of ['creditFree', 'creditUnavailable', 'creditNoApi']) {
+    ok(localeSrc.includes(`"${k}"`), `locale 有 ${k}`);
+  }
+}
+
 cleanup();
 console.log(`\n===== ZB-84 WorkBuddy/CodeBuddy 引擎：${pass} PASS / ${fails.length} FAIL =====`);
 if (fails.length) {
