@@ -256,6 +256,7 @@
     "wbStateAuthed": "已登录",
     "wbStateNotAuthed": "未登录",
     "wbStateResidue": "标记残留（需重登）",
+    "wbStateCredPresent": "凭据在（未验证）",
     "wbStateUnknown": "未知",
     "wbStateDir": "凭据目录",
     "wbStateCred": "凭据文件",

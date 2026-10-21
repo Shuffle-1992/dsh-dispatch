@@ -295,25 +295,33 @@ function loginHint(engine, entry, opts) {
       const cachePath = join(tmpdir(), 'dsh-codebuddy-models-cache.json');
       if (safeIsFile(fs, cachePath) && safeSize(fs, cachePath) > 0) {
         const j = JSON.parse(readFileSync(cachePath, 'utf8'));
-        const fresh = j && typeof j.at === 'number' && Date.now() - j.at < 10 * 60_000;
-        if (fresh && j.ok === true) {
-          return { loggedIn: true, evidence: `模型探测拿到了真实目录（${(j.models ?? []).length} 个模型）⇒ CLI 已登录可用` };
+        /* ZB-99：**过期缓存照样用，只标注陈旧** ——
+         * 真机反馈「登录态会掉」：原逻辑 `fresh = <10 分钟`，一过 10 分钟就返回 null ⇒
+         * 面板从「已登录」直接跳成「未知」，看起来像掉线了（其实只是探测没重跑）。
+         * 探测要 spawn 一个 8 秒的进程，不可能每次都跑；而"上次的结论 + 多久以前"远比
+         * "未知"有用（用户能自己判断要不要点「检查状态」）。
+         * 24 小时是硬上限：再久的状态就别拿来当结论了，老实地报未知。 */
+        const ageMin = typeof j.at === 'number' ? Math.round((Date.now() - j.at) / 60_000) : null;
+        const tooOld = ageMin != null && ageMin > 24 * 60;
+        const staleNote = ageMin != null && ageMin > 10 ? `（${ageMin} 分钟前的探测结果，可能已变化）` : '';
+        if (!tooOld && j.ok === true) {
+          return { loggedIn: true, evidence: `模型探测拿到了真实目录（${(j.models ?? []).length} 个模型）⇒ CLI 已登录可用${staleNote}` };
         }
-        if (fresh && j.ok === false && j.reason === 'not-logged-in') {
-          return { loggedIn: false, evidence: '模型探测报未登录（无头执行会报 Authentication required）⇒ 请在插件详情页点「登录」' };
+        if (!tooOld && j.ok === false && j.reason === 'not-logged-in') {
+          return { loggedIn: false, evidence: `模型探测报未登录（无头执行会报 Authentication required）⇒ 请在插件详情页点「登录」${staleNote}` };
         }
         /* ★ 关键推断：探测**已跑过且没报未登录** ⇒ 鉴权这一关过了 ⇒ 已登录。
          * 真机 2026-10-21：登录后哨兵法拿不到清单（`no-model-list-in-error`），
          * 但 `-p` 真跑已经成功（`assistant: OK` / `is_error=False`）。
          * 若这里仍返回 null，面板就一直显示"登录态未知"—— 同样是误导。 */
-        if (fresh && j.ok === false && typeof j.reason === 'string' && j.reason !== 'not-logged-in') {
-          return { loggedIn: true, evidence: `模型探测已通过鉴权（未报未登录，${j.reason}）⇒ CLI 已登录可用` };
+        if (!tooOld && j.ok === false && typeof j.reason === 'string' && j.reason !== 'not-logged-in') {
+          return { loggedIn: true, evidence: `模型探测已通过鉴权（未报未登录，${j.reason}）⇒ CLI 已登录可用${staleNote}` };
         }
       }
     } catch { /* 缓存损坏/不可读 ⇒ 落到下面的"未知"，绝不猜 */ }
     return {
       loggedIn: null,
-      evidence: '登录态**未知**（CLI 不落明文凭据，且暂无新鲜的模型探测结果）'
+      evidence: '登录态**未知**（CLI 不落明文凭据，且没有可用的模型探测结果）'
         + ' —— 以真实派发结果为准；如派发报 Authentication required，请在插件详情页点「登录」',
     };
   }

@@ -256,6 +256,7 @@
     "wbStateAuthed": "signed in",
     "wbStateNotAuthed": "not signed in",
     "wbStateResidue": "stale logout marker (re-sign-in needed)",
+    "wbStateCredPresent": "credential present (unverified)",
     "wbStateUnknown": "unknown",
     "wbStateDir": "credential dir",
     "wbStateCred": "credential file",

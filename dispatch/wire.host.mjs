@@ -1012,12 +1012,17 @@ export function createRemoteFace(dispatcher, config = {}) {
       }
     },
     async channels() {
-      if (!dispatcher) return { channels: [], warnings: [NOT_READY] };
+      if (!dispatcher) return { ok: false, channels: [], warnings: [NOT_READY] };
       const c = await channelsCached();
       /* ZB-33：免费额度通道带**剩余额度**（只读 ZCode 日志，零网络请求）。
        * 面板据此画额度条；agent 工具 `action=channels` 也返回同一份（同一函数）。
-       * ZB-51（T5）：`engineDetail` 必须一起透传（面板引擎状态条的数据来源）。 */
+       * ZB-51（T5）：`engineDetail` 必须一起透传（面板引擎状态条的数据来源）。
+       * ZB-99：⚠️ **必须带 `ok:true`** —— 客户端是 `if (r && r.ok) setChannelsInfo(...)`，
+       * 之前这里没有 ok ⇒ 面板**从不采用** channels() 的结果（通道列表实际靠 snapshot 撑着），
+       * 于是 `creditSummary` 这类只在这条路径上返回的字段**永远到不了面板**
+       * （真机表现：工具 `action=channels` 有额度数据，面板却显示「额度 —」）。 */
       return {
+        ok: true,
         ...attachGiftQuota(c.channels, config.ledgerPath),
         warnings: c.warnings,
         ...(c.engines ? { engines: c.engines } : {}),

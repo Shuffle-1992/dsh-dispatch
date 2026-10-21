@@ -615,6 +615,7 @@ window.__ModuleLoader__.load({
         /* ZB-95：登录态常显（三态 + 悬浮证据）。 */
         wbStateTitle: '登录态', wbStateAuthed: '已登录', wbStateNotAuthed: '未登录',
         wbStateResidue: '标记残留（需重登）', wbStateUnknown: '未知',
+        wbStateCredPresent: '凭据在（未验证）',
         wbStateDir: '凭据目录', wbStateCred: '凭据文件', wbStateMarker: '登出标记',
         wbStateResidueHint: '⚠ 这是「登录过却一直未登录」最常见的原因：CLI 被强杀（taskkill /F）后会留下 .logged-out 标记，此时凭据文件还在也没用。点「登录」重登一次即可自动撤销该标记；或把上面的标记文件改名备份后重试（不必重登）。',
         wbLoginTitle: 'WorkBuddy 登录', wbLoginBtn: '登录', wbLoginBusy: '登录中…', wbLoginCheck: '检查状态', wbLoginStop: '关闭',
@@ -772,6 +773,7 @@ window.__ModuleLoader__.load({
         /* ZB-95：sign-in state always visible (three states + hover evidence). */
         wbStateTitle: 'Sign-in state', wbStateAuthed: 'signed in', wbStateNotAuthed: 'not signed in',
         wbStateResidue: 'stale logout marker (re-sign-in needed)', wbStateUnknown: 'unknown',
+        wbStateCredPresent: 'credential present (unverified)',
         wbStateDir: 'credential dir', wbStateCred: 'credential file', wbStateMarker: 'logout marker',
         wbStateResidueHint: '⚠ This is the most common cause of "I signed in but it keeps saying not signed in": a forced kill (taskkill /F) left a .logged-out marker, and the credential file is ignored while it exists. Click Sign in once to renew (it removes the marker automatically), or rename that marker file as a backup and retry (no re-sign-in needed).',
         wbLoginTitle: 'WorkBuddy sign-in', wbLoginBtn: 'Sign in', wbLoginBusy: 'Signing in…', wbLoginCheck: 'Check status', wbLoginStop: 'Close',
@@ -2678,15 +2680,20 @@ window.__ModuleLoader__.load({
       const wbAuth = (engineDetail && typeof engineDetail === 'object' && engineDetail.codebuddyAuth) || null;
       const wb = (engineDetail && typeof engineDetail === 'object' && engineDetail.codebuddy) || null;
       const residue = !!(wbAuth && wbAuth.hasResidue);
+      /* ZB-99：`未知` 只在**什么都没证据**时才给 —— 凭据文件在磁盘上就是最强的静态证据
+       * （即使这次探测还没跑完）。真机反馈"登录态会掉"，一半原因就是这里过度保守。 */
+      const credPresent = !!(wbAuth && Array.isArray(wbAuth.liveCredentials) && wbAuth.liveCredentials.length);
       const stateKind = residue ? 'residue'
         : wb && wb.loggedIn === true ? 'authed'
           : wb && wb.loggedIn === false ? 'notAuthed'
-            : 'unknown';
-      const stateMark = { authed: '●', notAuthed: '○', residue: '⚠', unknown: '?' }[stateKind];
+            : credPresent ? 'credPresent'
+              : 'unknown';
+      const stateMark = { authed: '●', notAuthed: '○', residue: '⚠', credPresent: '◐', unknown: '?' }[stateKind];
       const stateText = {
         authed: t('wbStateAuthed'),
         notAuthed: t('wbStateNotAuthed'),
         residue: t('wbStateResidue'),
+        credPresent: t('wbStateCredPresent'),
         unknown: t('wbStateUnknown'),
       }[stateKind];
       /* 悬浮说明给**完整证据**（凭据文件、标记文件），正文只留一行 —— 用户要求"别显示一大段"。 */
@@ -2707,14 +2714,17 @@ window.__ModuleLoader__.load({
       const acct = r && r.account && (r.account.userName || r.account.userId);
       /* 结果区独立成块（`flexBasis:100%` + 上下留白）—— 真机反馈"没看到链接"：
        * 原来它和按钮挤在同一行、紧随其后，很容易被当成按钮的一部分而忽略。 */
+      /* ZB-99：**设计态 ≠ 故障**。「登录服务 15 分钟超时 / 未启动」是预期行为（临时服务就是这个设计），
+       * 真机反馈红色报错让人以为插件坏了。这类信息用中性样式、不加 ⚠。 */
+      const rInfoOnly = !!(r && r.ok === false && /超时|未启动/.test(String(r.error ?? '')));
       const resultNode = r
         ? h('div', {
-          className: r.ok === false ? 'dsp-feedback dsp-err' : 'dsp-note',
+          className: (r.ok === false && !rInfoOnly) ? 'dsp-feedback dsp-err' : 'dsp-note',
           role: 'status',
           style: { flexBasis: '100%', marginTop: '4px', wordBreak: 'break-all' },
         },
         r.ok === false
-          ? `⚠ ${r.error ?? t('wbLoginFail')}`
+          ? `${rInfoOnly ? '' : '⚠ '}${r.error ?? t('wbLoginFail')}`
           : [
             r.authUrl ? h('div', { key: 'a' }, `${t('wbLoginOpen')}：`, h('a', { href: r.authUrl, target: '_blank', rel: 'noreferrer' }, r.authUrl)) : null,
             r.webui ? h('div', { key: 'w' }, `${t('wbLoginWebui')}：`, h('a', { href: r.webui, target: '_blank', rel: 'noreferrer' }, r.webui)) : null,
@@ -4809,7 +4819,11 @@ window.__ModuleLoader__.load({
         let alive = true;
         Promise.resolve(channels()).then((r) => {
           if (!alive) return;
-          if (r && r.ok) {
+          /* ZB-99：判据**放宽**以兼容旧宿主 —— `impl.channels()` 曾经漏了 `ok`，只回
+           * `{channels, warnings, …}`。旧逻辑 `if (r && r.ok)` 会把整份清单丢弃，
+           * 面板只能靠 snapshot 撑（于是 `creditSummary` 这类只在这条路径返回的字段永远到不了）。
+           * 现在：有 ok 就看 ok；没有 ok 但 channels 是数组 ⇒ 也收下。 */
+          if (r && (r.ok || Array.isArray(r.channels))) {
             /* ZB-87：**`engineDetail` 必须收下** —— 它是「引擎状态条」的唯一数据源；
              * 漏了它 `EngineStatus` 直接 `return null`（引擎那行永远不渲染 = 真机"看不到按钮"的根因）。
              * 顺带说明为什么以前没人发现：它缺失是**静默**的（组件返回 null，不报错）。 */
@@ -5060,7 +5074,11 @@ window.__ModuleLoader__.load({
         let alive = true;
         Promise.resolve(channels()).then((r) => {
           if (!alive) return;
-          if (r && r.ok) {
+          /* ZB-99：判据**放宽**以兼容旧宿主 —— `impl.channels()` 曾经漏了 `ok`，只回
+           * `{channels, warnings, …}`。旧逻辑 `if (r && r.ok)` 会把整份清单丢弃，
+           * 面板只能靠 snapshot 撑（于是 `creditSummary` 这类只在这条路径返回的字段永远到不了）。
+           * 现在：有 ok 就看 ok；没有 ok 但 channels 是数组 ⇒ 也收下。 */
+          if (r && (r.ok || Array.isArray(r.channels))) {
             /* ZB-56：`levelsStatus` 也收下（core 挂在 channels() 顶层）—— 逐引擎 pending 时
              * 该引擎的档位下拉显示「档位载入中…」，而不是让人以为这模型没档位。
              * ZB-87：`engineDetail` 同样必须收下 —— 登录条（EngineLoginBar）靠它判断

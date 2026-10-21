@@ -464,6 +464,40 @@ console.log('\nG. 登录条位置与数据源（用户要求：只放插件详�
   }
 }
 
+/* ===== ZB-99：面板路径丢数据 + 登录态"会掉" ===== */
+{
+  const hostSrc = readFileSync(join(HERE, '..', 'wire.host.mjs'), 'utf8');
+  const clientSrc = readFileSync(join(HERE, '..', 'client.js'), 'utf8');
+  const discoverSrc = readFileSync(join(HERE, '..', '..', 'collab-kit', 'engine-discover.mjs'), 'utf8');
+
+  /* ① ★ 真机根因：面板路径 impl.channels() 漏了 ok ⇒ 客户端 `if (r && r.ok)` 把整份清单丢弃，
+   *    通道列表实际靠 snapshot 撑着 ⇒ 只在 channels() 返回的 creditSummary 永远到不了面板。 */
+  const implChannels = hostSrc.match(/async channels\(\) \{[\s\S]*?\n    \},/);
+  ok(!!implChannels, '能取出 impl.channels()');
+  ok(!!implChannels && /\bok: true\b/.test(implChannels[0]),
+    '★ impl.channels() 必须返回 ok:true（漏了 ⇒ 面板永不采用它的结果，creditSummary 到不了）');
+  /* 客户端兼容：旧宿主无 ok 也要收（否则升级不同步时整份清单被丢） */
+  ok(/r\.ok \|\| Array\.isArray\(r\.channels\)/.test(clientSrc),
+    '★ 客户端判据放宽为 `r.ok || Array.isArray(r.channels)`（兼容旧宿主）');
+  ok((clientSrc.match(/r\.ok \|\| Array\.isArray\(r\.channels\)/g) ?? []).length >= 2,
+    '★ 两处 channels 拉取（侧栏 + 详情页）都要放宽');
+
+  /* ② ★ 登录态"会掉"的根因：探测缓存一过 10 分钟就返回 null ⇒ 面板从"已登录"跳"未知" */
+  ok(/tooOld/.test(discoverSrc) && /staleNote/.test(discoverSrc),
+    '★ 探测缓存过期后**仍给结论**并标注陈旧（不再因超时直接变"未知"）');
+  ok(/24 \* 60/.test(discoverSrc), '陈旧上限 24 小时（再久就别当结论）');
+  ok(!/const fresh = .*< 10 \* 60_000/.test(discoverSrc),
+    '★ 不再有"超过 10 分钟即作废"的硬门槛');
+
+  /* ③ 凭据文件在磁盘 = 最强静态证据 ⇒ 不该再显示"未知" */
+  ok(/wbStateCredPresent/.test(clientSrc), '★ 新增「凭据在（未验证）」态（凭据存在时不显示未知）');
+  ok(/credPresent \? 'credPresent'/.test(clientSrc), '判定链里 credPresent 在 unknown 之前');
+
+  /* ④ 设计态 ≠ 故障：登录服务 15 分钟超时是预期行为，不该红色报错 */
+  ok(/rInfoOnly/.test(clientSrc) && /超时\|未启动/.test(clientSrc),
+    '★ 「超时/未启动」按中性提示渲染（不吓人）');
+}
+
 cleanup();
 console.log(`\n===== ZB-84 WorkBuddy/CodeBuddy 引擎：${pass} PASS / ${fails.length} FAIL =====`);
 if (fails.length) {
