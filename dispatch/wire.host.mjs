@@ -344,6 +344,75 @@ export function quotaWindows(ledgerPath) {
  * 纪律：只读 ZCode 客户端日志（零网络请求、零额度消耗）；只有 start-plan 通道才挂 quota。
  * 工具路径（switch 的 channels/quota 分支）与 RemoteFace 路径（impl.*）都走这两个函数，
  * 避免"面板看得到、工具看不到"这类漂移。 */
+/**
+ * ZB-96：**统一的「积分 / 额度」视图**（余额侧）—— 面板与 agent 工具共用这一份。
+ *
+ * 逐引擎真机调研结论（2026-10-21 实测，**不猜**）：
+ *   · zcode     —— **有**：读 ZCode 客户端日志里的 balance 行（giftQuota，只读）。数据可能陈旧。
+ *   · opencode  —— 免费模型，**无额度概念**。
+ *   · qoder     —— **积分制**（result 里 `total_credits` 是真计量，token 全 0），但
+ *                  `qoderclicn status` 与 `status --output json` 只给账号信息，
+ *                  `~/.qoder-cn` 下也没有余额文件 ⇒ **官方无余额查询接口**。
+ *   · codebuddy —— `--serve` REST 只有 auth 端点（usage/credits/quota 全 404），
+ *                  本地存储里的 `balance` 字样是模型图标名（wb-balanced）、`credit` 是配置项
+ *                  （升级引导开关）⇒ **官方无余额查询接口**。
+ *
+ * 故这里严格三态：`available: true`（有余额数据）/ `false`（该有但取不到）/ `null`（官方不提供）。
+ * **绝不编造数字** —— agent 读到 null 就该知道"别指望查余额，只能撞了才知道"。
+ */
+export function buildCreditSummary(quota, channels) {
+  const engines = new Set((Array.isArray(channels) ? channels : []).map((c) => c?.engine).filter(Boolean));
+  const giftOk = !!quota && quota.ok === true;
+  const giftText = formatGiftQuota(quota);
+  const staleDays = Number.isFinite(quota?.logAgeHours) && quota.logAgeHours > 24
+    ? Number((quota.logAgeHours / 24).toFixed(1))
+    : null;
+  const out = {};
+  if (engines.has('zcode')) {
+    out.zcode = {
+      engine: 'zcode',
+      kind: 'gift',
+      available: giftOk,
+      ...(giftText
+        ? { text: giftText }
+        : {
+          /* 没有可用余额时**必须给出可读原因**（而不是让 agent 看到 available:false 一头雾水）：
+           * 最常见的是"ZCode 客户端最近没运行"⇒ 日志陈旧，读不到当前额度。 */
+          text: staleDays
+            ? `免费额度不可用（${quota?.reason ?? 'unavailable'}）；日志是 ${staleDays} 天前的 —— ZCode 客户端最近没运行，启动它跑一次后再看`
+            : `免费额度不可用（${quota?.reason ?? 'unavailable'}）`,
+        }),
+      ...(giftOk
+        ? { state: quota.state, remainingUnits: quota.remainingUnits ?? null, totalUnits: quota.totalUnits ?? null }
+        : { reason: quota?.reason ?? 'unavailable' }),
+      ...(staleDays ? { staleDays } : {}),
+      source: 'ZCode 客户端日志（只读）',
+    };
+  }
+  if (engines.has('opencode')) {
+    out.opencode = { engine: 'opencode', kind: 'free', available: true, text: '免费模型，无额度限制' };
+  }
+  if (engines.has('qoder')) {
+    out.qoder = {
+      engine: 'qoder',
+      kind: 'credits',
+      available: null,
+      text: '积分制；官方 CLI 只给账号信息（status / status --output json），无余额查询接口',
+      note: '单次消耗见 action=quota 台账（total_credits）；额度耗尽由官方直接报错',
+    };
+  }
+  if (engines.has('codebuddy')) {
+    out.codebuddy = {
+      engine: 'codebuddy',
+      kind: 'credits',
+      available: null,
+      text: '官方未提供余额查询接口（--serve REST 无 usage/credits 端点；本地存储无余额数值）',
+      note: '单次消耗见 action=quota 台账（total_cost_usd）',
+    };
+  }
+  return out;
+}
+
 export function attachGiftQuota(channels, ledgerPath) {
   const quota = readGiftQuota();
   const text = formatGiftQuota(quota);
@@ -366,6 +435,9 @@ export function attachGiftQuota(channels, ledgerPath) {
     }),
     giftQuota: quota,
     ...(text ? { giftQuotaText: text } : {}),
+    /* ZB-96：**按引擎**的积分/额度汇总 —— agent 派发前只需看这一个字段就知道
+     * "哪个引擎有额度可参考、哪个查不到"。 */
+    creditSummary: buildCreditSummary(quota, channels),
     ...(Object.keys(exhausted).length ? { recentQuotaExhausted: exhausted } : {}),
   };
 }

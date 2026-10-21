@@ -146,3 +146,46 @@ test('ZB-33 通道形态：account:<family>-start-plan 才算免费额度通道'
   assert.equal(GIFT_CHANNEL_RE.test('builtin:bigmodel-start-plan'), false, 'config.json 里那条不是运行时通道');
   assert.equal(GIFT_CHANNEL_RE.test('account:bigmodel-coding-plan'), false);
 });
+
+/* ===== ZB-96：日志陈旧度 + 按引擎的积分/额度汇总 ===== */
+
+test('ZB-96 formatGiftQuota：日志 >24h 时必须明说"数据 N 天前"', () => {
+  const now = 1_700_000_000_000;
+  const endsAt = Math.floor(now / 1000) + 3600; // 1 小时后结束
+  const q = { ok: true, state: 'active', remainingUnits: 231_400_000, totalUnits: 300_000_000, startsAt: 1, endsAt, logAgeHours: 76.8 };
+  const text = formatGiftQuota(q, now);
+  assert.match(text, /数据 3\.2 天前/, '陈旧数据必须提示（否则用户以为是当下余额）');
+  assert.match(text, /剩余 231\.4M \/ 300\.0M/, '余量本身照常显示');
+  /* 新鲜数据不该加这条噪音 */
+  const fresh = formatGiftQuota({ ...q, logAgeHours: 2 }, now);
+  assert.doesNotMatch(fresh, /天前/);
+});
+
+test('ZB-96 creditSummary：四引擎如实三态（有余额 / 取不到 / 官方无接口 / 免费）', async () => {
+  const { buildCreditSummary } = await import('../wire.host.mjs');
+  const chans = [{ engine: 'zcode' }, { engine: 'opencode' }, { engine: 'qoder' }, { engine: 'codebuddy' }];
+
+  const active = buildCreditSummary(
+    { ok: true, state: 'active', remainingUnits: 231_400_000, totalUnits: 300_000_000, startsAt: 1, endsAt: 2 },
+    chans,
+  );
+  assert.equal(active.zcode.available, true);
+  assert.equal(active.zcode.remainingUnits, 231_400_000);
+  assert.equal(active.opencode.kind, 'free');
+  assert.equal(active.opencode.available, true, '免费模型 = 可用（无额度限制）');
+  /* ⚠️ qoder / codebuddy 必须是 **null**（官方不提供），不能是 false（会让人以为"取不到是临时故障"），
+   *    更不能编一个数字。真机实测：qoderclicn status 只有账号信息；codebuddy --serve 无 usage 端点。 */
+  assert.equal(active.qoder.available, null);
+  assert.equal(active.codebuddy.available, null);
+
+  /* 该有但取不到 ⇒ false + **可读原因**（最常见：ZCode 客户端没运行 ⇒ 日志陈旧） */
+  const none = buildCreditSummary({ ok: false, reason: 'no-start-plan', logAgeHours: 76.8 }, chans);
+  assert.equal(none.zcode.available, false);
+  assert.match(none.zcode.text, /3\.2 天前/);
+  assert.equal(none.zcode.staleDays, 3.2);
+
+  /* 只列**实际出现过的引擎**，不虚构通道 */
+  const onlyZ = buildCreditSummary({ ok: false, reason: 'no-log' }, [{ engine: 'zcode' }]);
+  assert.deepEqual(Object.keys(onlyZ), ['zcode']);
+});
+

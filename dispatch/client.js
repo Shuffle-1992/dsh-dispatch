@@ -609,6 +609,8 @@ window.__ModuleLoader__.load({
         /* ZB-84：第四个引擎（WorkBuddy / CodeBuddy）。 */
         engCodebuddy: 'WorkBuddy', engGroupCodebuddy: 'WorkBuddy 通道',
         /* ZB-87：WorkBuddy 登录助手（面板按钮）。 */
+        /* ZB-96：积分/额度（逐引擎如实：有余额 / 取不到 / 官方无接口 / 免费）。 */
+        creditTitle: '额度', creditFree: '免费', creditUnavailable: '额度不可用', creditNoApi: '无额度接口',
         /* ZB-95：登录态常显（三态 + 悬浮证据）。 */
         wbStateTitle: '登录态', wbStateAuthed: '已登录', wbStateNotAuthed: '未登录',
         wbStateResidue: '标记残留（需重登）', wbStateUnknown: '未知',
@@ -763,6 +765,8 @@ window.__ModuleLoader__.load({
         engZcode: 'ZCode', engOpencode: 'OpenCode', engGroupZcode: 'ZCode channels', engGroupOpencode: 'OpenCode free models',
         engQoder: 'Qoder', engGroupQoder: 'Qoder channels',
         engCodebuddy: 'WorkBuddy', engGroupCodebuddy: 'WorkBuddy channels',
+        /* ZB-96: credits / quota (per engine, honestly). */
+        creditTitle: 'Quota', creditFree: 'free', creditUnavailable: 'quota unavailable', creditNoApi: 'no quota API',
         /* ZB-95：sign-in state always visible (three states + hover evidence). */
         wbStateTitle: 'Sign-in state', wbStateAuthed: 'signed in', wbStateNotAuthed: 'not signed in',
         wbStateResidue: 'stale logout marker (re-sign-in needed)', wbStateUnknown: 'unknown',
@@ -2731,12 +2735,25 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function EngineStatus({ engineDetail }) {
+    function EngineStatus({ engineDetail, creditSummary }) {
       if (!engineDetail || typeof engineDetail !== 'object') return null;
       /* ZB-84/87：**从 KNOWN_ENGINES 生成**（原先写死三引擎 ⇒ 第四引擎的 WorkBuddy
        * 根本不会出现在引擎状态条里，属于"加引擎漏一处"的典型）。 */
       const rows = KNOWN_ENGINES.map((e) => engineDetail[e]).filter(Boolean);
       if (!rows.length) return null;
+      /* ZB-96：**积分/额度**简写 —— 逐引擎如实（有的显示余量、没有的显示"无接口"、免费的显示"免费"）。
+       * 完整原因放 title：正文只留极短，避免把引擎条撑爆（用户明确要求别显示一大段）。 */
+      const creditBrief = (engine) => {
+        const c = creditSummary && typeof creditSummary === 'object' ? creditSummary[engine] : null;
+        if (!c) return null;
+        if (c.kind === 'free') return t('creditFree');
+        if (c.available === true) {
+          const m = (v) => (Number.isFinite(v) ? `${(v / 1e6).toFixed(1)}M` : '?');
+          return `${m(c.remainingUnits)}/${m(c.totalUnits)}`;
+        }
+        if (c.available === false) return t('creditUnavailable');
+        return t('creditNoApi');
+      };
       const FORM_KEY = {
         cli: 'engineFormCli',
         'client-bundled-cli': 'engineFormClientBundled',
@@ -2766,13 +2783,20 @@ window.__ModuleLoader__.load({
             key: d.engine,
             className: 'dsp-badge',
             style: { marginRight: '4px' },
-            title: `${d.summary ?? ''}${d.reason ? `\n${d.reason}` : ''}${d.loginEvidence ? `\n${d.loginEvidence}` : ''}`,
+            title: [
+              d.summary ?? '',
+              d.reason ? `\n${d.reason}` : '',
+              d.loginEvidence ? `\n${d.loginEvidence}` : '',
+              /* ZB-96：额度完整说明（含"日志 N 天前"这类关键限定）只放悬浮。 */
+              creditSummary && creditSummary[d.engine] ? `\n${t('creditTitle')}：${creditSummary[d.engine].text ?? creditBrief(d.engine) ?? '-'}` : '',
+            ].filter(Boolean).join(''),
           },
             h('span', { style: { marginRight: '3px' } }, mark(d)),
             engLabel(d.engine),
             d.form ? ` · ${t(FORM_KEY[d.form] ?? 'engineFormCli')}` : '',
             d.version ? ` · v${d.version}` : '',
-            ` · ${stateText(d)}`))),
+            ` · ${stateText(d)}`,
+            creditBrief(d.engine) ? ` · ${creditBrief(d.engine)}` : ''))),
       );
     }
 
@@ -3654,7 +3678,7 @@ window.__ModuleLoader__.load({
          * 现在：标签 nowrap 定自然宽、下拉 flex:1 等宽撑满 ⇒ 任意面板宽度下版式都一致。 */
         /* ZB-51（T5）：引擎状态条 —— 放在开关/告警之后、两个下拉之前：
          * 用户先看"这台机器上有什么引擎、能不能用"，再看"当前选哪个通道"。 */
-        h(EngineStatus, { engineDetail: channelsInfo?.engineDetail }),
+        h(EngineStatus, { engineDetail: channelsInfo?.engineDetail, creditSummary: channelsInfo?.creditSummary }),
         h('div', { className: 'dsp-field' },
           h('span', { className: 'dsp-field-k' }, t('provider')),
           h('select', {
@@ -4768,6 +4792,8 @@ window.__ModuleLoader__.load({
               warnings: r.warnings ?? [],
               levelsStatus: r.levelsStatus ?? null,
               engineDetail: r.engineDetail ?? null,
+              /* ZB-96：积分/额度汇总必须一起保留 —— 它是"按引擎"的，不能从通道行反推。 */
+              creditSummary: r.creditSummary ?? null,
             });
             setChanError(null);
           } else setChanError(String((r && r.error) || 'channels() 未返回 ok'));
@@ -4806,7 +4832,7 @@ window.__ModuleLoader__.load({
         /* ⚠️ `prev.channels.length === 0 ? { channels: snapChans` 这段**字面形状**被 engine-ui.test.mjs 钉住
          * （ZB-56 曾把它折行 ⇒ 测试红）；新增的 `levelsStatus` 只能加在同一行里。 */
         setChannelsInfo((prev) => (prev.channels.length === 0
-          ? { channels: snapChans, warnings: prev.warnings ?? [], levelsStatus: snapshot?.levelsStatus ?? prev.levelsStatus ?? null, engineDetail: prev.engineDetail ?? null }
+          ? { channels: snapChans, warnings: prev.warnings ?? [], levelsStatus: snapshot?.levelsStatus ?? prev.levelsStatus ?? null, engineDetail: prev.engineDetail ?? null, creditSummary: snapshot?.creditSummary ?? prev.creditSummary ?? null }
           : prev));
         setChanError(null);
       }, [snapshot]);
@@ -5003,6 +5029,8 @@ window.__ModuleLoader__.load({
               warnings: r.warnings ?? [],
               levelsStatus: r.levelsStatus ?? null,
               engineDetail: r.engineDetail ?? null,
+              /* ZB-96：积分/额度汇总必须一起保留 —— 它是"按引擎"的，不能从通道行反推。 */
+              creditSummary: r.creditSummary ?? null,
             });
             setChansState('ready');
           } else { setErr(String((r && r.error) || 'channels() 未返回 ok')); setChansState('error'); }

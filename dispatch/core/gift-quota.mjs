@@ -194,13 +194,22 @@ export function readGiftQuota(io = {}) {
   try {
     const file = newestLogFile(logDir, fsImpl);
     if (file === null) return { ok: false, reason: 'no-log', logDir };
+    /* ZB-96：**日志陈旧度**必须一起返回 —— 真机踩过：ZCode 客户端 3 天没运行，
+     * 读到的还是旧 balance 行，面板却像"当下余额"一样显示（或报 no-start-plan 让人
+     * 以为额度没了）。带上 mtime 让上层能说"数据 N 天前，可能已变化"。
+     * ⚠️ `newestLogFile` 返回的是**路径字符串**（不是 {file,mtimeMs}），故这里自己 stat。 */
+    let logAgeHours = null;
+    try {
+      const st = fsImpl.statSync(file);
+      if (Number.isFinite(st?.mtimeMs)) logAgeHours = Math.max(0, (Date.now() - st.mtimeMs) / 3_600_000);
+    } catch { /* 取不到 mtime 就不标注，不影响余额解析 */ }
     const line = findNewestBalanceLine(file, fsImpl);
-    if (line === null) return { ok: false, reason: 'no-balance-line', logDir };
+    if (line === null) return { ok: false, reason: 'no-balance-line', logDir, logAgeHours };
     const parsed = parseBalanceLine(line);
-    if (parsed === null) return { ok: false, reason: 'bad-json', logDir };
+    if (parsed === null) return { ok: false, reason: 'bad-json', logDir, logAgeHours };
     const quota = normalizeQuota(parsed, Number.isFinite(io.nowMs) ? io.nowMs : Date.now());
-    if (quota.ok !== true) return { ...quota, logDir };
-    return { ...quota, observedAt: parseLineTimestamp(line), logFile: file.split(/[\\/]/).pop(), logDir };
+    if (quota.ok !== true) return { ...quota, logDir, logAgeHours };
+    return { ...quota, observedAt: parseLineTimestamp(line), logFile: file.split(/[\\/]/).pop(), logDir, logAgeHours };
   } catch (error) {
     return { ok: false, reason: `error: ${String(error?.message ?? error).slice(0, 120)}`, logDir };
   }
@@ -239,6 +248,10 @@ export function formatGiftQuota(quota, nowMs = Date.now()) {
   if (Number.isFinite(quota.endsAt) && quota.endsAt * 1000 > nowMs && quota.state === 'active') {
     const hours = (quota.endsAt * 1000 - nowMs) / 3_600_000;
     parts.push(hours < 48 ? `剩 ${hours.toFixed(1)} 小时` : `剩 ${(hours / 24).toFixed(1)} 天`);
+  }
+  /* ZB-96：数据陈旧时**明说**（否则用户会以为这是当下余额）。ZCode 客户端不运行时日志不更新。 */
+  if (Number.isFinite(quota.logAgeHours) && quota.logAgeHours > 24) {
+    parts.push(`⚠ 数据 ${(quota.logAgeHours / 24).toFixed(1)} 天前（ZCode 客户端最近没运行，可能已变化）`);
   }
   return parts.join(' · ');
 }
