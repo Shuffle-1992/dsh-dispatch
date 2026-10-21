@@ -275,6 +275,17 @@ export function createAggregator() {
   let qoderVersion = null;
   let protocolVersion = null;
   let totalCredits = null;
+  /* ZB-101：**result 的 `total_credits` 真机恒为 0**（实测 2026-10-22：一场 7 轮、真实扣了
+   * 0.49 积分的会话，result 里 `total_credits: 0`）。真值只出现在**每条 assistant 的
+   * `message.usage.credits`** 里。所以自己累加：
+   *   · `sumCredits`   —— assistant 逐条累加（按 message.id 去重，否则同一条消息的
+   *                       text / tool_use 多个事件会重复计费）
+   *   · `resultCredits`—— result 若给了**非零**权威值就用它（优先于自算）
+   * 注意：CLI 自报 `billable:false` 的会话也照样有 credits 数字（是"算出来的花费"不是"扣款"），
+   * 这里只做**如实展示**，不推断计费与否。 */
+  let sumCredits = 0;
+  let resultCredits = null;
+  const creditMsgIds = new Set();
   let contextRatio = null;
   let durationMs = null;
   let numTurns = null;
@@ -324,6 +335,18 @@ export function createAggregator() {
 
     /* ---- assistant：thinking / text 内容块（text 才是回答正文） ---- */
     if (type === 'assistant') {
+      /* ZB-101：积分消耗的真值在 `message.usage.credits`（result 的 total_credits 恒 0）。
+       * ⚠️ 同一条消息会派发多个事件（text / tool_use / thinking 各一条，`message.id` 相同），
+       * 每条都带同一个 usage ⇒ **必须按 message.id 去重**，否则会把一场会话算成 3 倍。 */
+      const mu = ev.message && typeof ev.message === 'object' ? ev.message.usage : null;
+      if (mu && mu.credits != null) {
+        const mid = ev.message && ev.message.id ? String(ev.message.id) : null;
+        if (!mid || !creditMsgIds.has(mid)) {
+          if (mid) creditMsgIds.add(mid);
+          const c = num(mu.credits);
+          if (c != null && c > 0) sumCredits += c;
+        }
+      }
       const blocks = Array.isArray(ev.content) ? ev.content
         : (ev.message && Array.isArray(ev.message.content) ? ev.message.content : []);
       for (const b of blocks) {
@@ -345,7 +368,7 @@ export function createAggregator() {
       if (typeof ev.is_error === 'boolean') isError = ev.is_error;
       if (typeof ev.subtype === 'string') stopReason = ev.subtype;
       if (ev.stop_reason) stopReason = String(ev.stop_reason);
-      if (ev.total_credits != null) totalCredits = num(ev.total_credits);
+      if (ev.total_credits != null) resultCredits = num(ev.total_credits);
       if (ev.duration_ms != null) durationMs = num(ev.duration_ms);
       if (ev.num_turns != null) numTurns = num(ev.num_turns);
       if (Array.isArray(ev.permission_denials)) permissionDenials = ev.permission_denials;
@@ -377,6 +400,11 @@ export function createAggregator() {
 
   function summary() {
     const text = resultText != null ? resultText : texts.join('');
+    /* ZB-101：最终积分消耗 —— result 给非零权威值时用它，否则用 assistant 去重累加值。
+     * 两者都没有（老会话 / 引擎没报）⇒ null（绝不用 0 冒充"没花钱"）。 */
+    totalCredits = (resultCredits != null && resultCredits > 0)
+      ? resultCredits
+      : (sumCredits > 0 ? Number(sumCredits.toFixed(6)) : resultCredits);
     return {
       sessionId, model, permissionMode, qoderVersion, protocolVersion,
       totalCredits, contextRatio, durationMs, numTurns, isError, stopReason,

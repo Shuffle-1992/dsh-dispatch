@@ -143,6 +143,43 @@ console.log('\n④ 聚合器：真机抓包结构（7 行事件谱）');
   eq(s.eventCounts['assistant'], 2, 'assistant 计 2 次');
 }
 
+console.log('\n④b ZB-101：result 的 total_credits 恒 0 ⇒ 用 assistant 逐条累加（同 message.id 去重）');
+{
+  /* 真机事实（2026-10-22）：一场 7 轮、真实扣了 0.49 积分的会话，result 里 `total_credits: 0`；
+   * 真值只在每条 assistant 的 `message.usage.credits` 里。而**同一条消息会派发多个事件**
+   * （thinking / text / tool_use 各一条，`message.id` 相同、usage 相同）⇒ 不去重会算成 3 倍。 */
+  const mkAsst = (mid, credits, block) => JSON.stringify({
+    type: 'assistant',
+    session_id: 'ses_c1',
+    message: { id: mid, role: 'assistant', content: [block], usage: { credits, original_credits: credits, billable: false } },
+  });
+  const lines = [
+    JSON.stringify({ type: 'system', subtype: 'init', session_id: 'ses_c1', model: 'DeepSeek-Flash' }),
+    mkAsst('msg_1', 0.4, { type: 'thinking', thinking: '…' }),
+    mkAsst('msg_1', 0.4, { type: 'text', text: '先看看' }),
+    mkAsst('msg_1', 0.4, { type: 'tool_use', name: 'Bash' }),
+    mkAsst('msg_2', 0.094866064, { type: 'text', text: '完成' }),
+    JSON.stringify({ type: 'result', subtype: 'success', session_id: 'ses_c1', total_credits: 0, num_turns: 3 }),
+  ];
+  const agg = createAggregator();
+  for (const l of lines) agg.handleLine(l);
+  eq(agg.summary().totalCredits, 0.494866,
+    '★ 去重累加 = 0.4 + 0.094866（若没去重会变 1.2；若信 result 会变 0）');
+
+  /* 只有 result 且自报 0 ⇒ 如实为 0（UI 层用 >0 过滤，不把它当消耗显示） */
+  const agg2 = createAggregator();
+  agg2.handleLine(JSON.stringify({ type: 'result', subtype: 'success', total_credits: 0 }));
+  eq(agg2.summary().totalCredits, 0, '只有 result 报 0 ⇒ 如实 0（不伪造成 null）');
+
+  /* result 给非零权威值 ⇒ 优先用 result（老会话/未来引擎可能给总账） */
+  const agg3 = createAggregator();
+  for (const l of [
+    mkAsst('msg_x', 0.4, { type: 'text', text: 'a' }),
+    JSON.stringify({ type: 'result', subtype: 'success', total_credits: 2.5 }),
+  ]) agg3.handleLine(l);
+  eq(agg3.summary().totalCredits, 2.5, '★ result 非零时以 result 为准（权威总账优先于自算）');
+}
+
 console.log('\n⑤ 聚合器：坏行与真正未知类型**绝不止损**（硬约束）');
 {
   const agg = createAggregator();

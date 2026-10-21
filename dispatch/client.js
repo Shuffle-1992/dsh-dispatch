@@ -612,6 +612,8 @@ window.__ModuleLoader__.load({
         /* ZB-96：积分/额度（逐引擎如实：有余额 / 取不到 / 官方无接口 / 免费）。 */
         creditTitle: '额度', creditFree: '免费', creditUnavailable: '额度不可用', creditNoApi: '无额度接口',
         creditNoData: '通道清单未返回额度数据（宿主可能还是旧版，重启 DSH 后再看）',
+        /* ZB-101：job 卡片上的真实消耗（Qoder=credits，WorkBuddy=美元）。 */
+        jobCredits: '积分消耗', jobCostUsd: '费用（美元）',
         /* ZB-95：登录态常显（三态 + 悬浮证据）。 */
         wbStateTitle: '登录态', wbStateAuthed: '已登录', wbStateNotAuthed: '未登录',
         wbStateResidue: '标记残留（需重登）', wbStateUnknown: '未知',
@@ -770,6 +772,8 @@ window.__ModuleLoader__.load({
         /* ZB-96: credits / quota (per engine, honestly). */
         creditTitle: 'Quota', creditFree: 'free', creditUnavailable: 'quota unavailable', creditNoApi: 'no quota API',
         creditNoData: 'The channel list returned no quota data (host may be outdated — restart DSH)',
+        /* ZB-101: real spend shown on job cards (Qoder=credits, WorkBuddy=USD). */
+        jobCredits: 'credits spent', jobCostUsd: 'cost (USD)',
         /* ZB-95：sign-in state always visible (three states + hover evidence). */
         wbStateTitle: 'Sign-in state', wbStateAuthed: 'signed in', wbStateNotAuthed: 'not signed in',
         wbStateResidue: 'stale logout marker (re-sign-in needed)', wbStateUnknown: 'unknown',
@@ -4252,6 +4256,28 @@ window.__ModuleLoader__.load({
             h(StatusDot, { state: job.state }),
             h('span', { className: 'dsp-job-tag', title: job.id }, job.tag ?? shortId(job.id)),
             h('span', { className: 'dsp-job-right' },
+              /* ZB-101（用户要求）：**真实消耗**显示在 job 卡片上。
+               * 这是唯一"每次都一定拿得到"的积分证据 —— 余额查不到（qoder/codebuddy 官方无接口），
+               * 但**单次消耗**是引擎自己报的：
+               *   · Qoder      → `credits`（真机 token 恒 0，credits 才是真计量）
+               *   · WorkBuddy  → `costUsd`（result 的 total_cost_usd；商品名是积分但只给美元，不换算）
+               *   · ZCode/OpenCode → 给 token（上下文那一格已经在显示，这里不重复）
+               * 规则同额度行：**有真数据才出现**；0 也不算有数据（`0.00 cr` 是纯噪音）。 */
+              (() => {
+                if (Number.isFinite(job.credits) && job.credits > 0) {
+                  return h('span', {
+                    className: 'dsp-dim',
+                    title: `${t('jobCredits')}：${job.credits}`,
+                  }, `${job.credits.toFixed(2)} cr`);
+                }
+                if (Number.isFinite(job.costUsd) && job.costUsd > 0) {
+                  return h('span', {
+                    className: 'dsp-dim',
+                    title: `${t('jobCostUsd')}：$${job.costUsd}`,
+                  }, `$${job.costUsd.toFixed(4)}`);
+                }
+                return null;
+              })(),
               /* ZB-70b（用户要求）：上下文用量放在**时间左边**（第一行右侧组内），
                * 不再占第三行 —— 第三行只留给会逐秒变化的心跳。 */
               h('span', { className: 'dsp-dim', title: `${job.contextUsed ?? '—'} / ${job.contextWindow ?? '—'} tokens` }, ctxLabel(job)),
