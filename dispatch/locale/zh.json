@@ -251,6 +251,7 @@
     "creditNoData": "通道清单未返回额度数据（宿主可能还是旧版，重启 DSH 后再看）",
     "jobCredits": "积分消耗",
     "jobCostUsd": "费用（美元）",
+    "jobTokens": "Token 用量",
     "creditFree": "免费",
     "creditUnavailable": "额度不可用",
     "creditNoApi": "无额度接口",

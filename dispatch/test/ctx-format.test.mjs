@@ -59,19 +59,23 @@ console.log('\nctxLabel：已用 / 上限');
 ok(ctxLabel({ contextUsed: 180973, contextWindow: 200000 }, fmtCtx) === '180.9k / 200.0k',
   'C1 用户举例形态 = 180.9k / 200.0k');
 ok(ctxLabel({ contextUsed: 28983, contextWindow: 200000 }, fmtCtx) === '28.9k / 200.0k', 'C2 小值也带 k 后缀');
-ok(ctxLabel({ contextUsed: null, contextWindow: 200000 }, fmtCtx) === '—', 'C3 已用缺失 → —');
-ok(ctxLabel({ contextUsed: 180973, contextWindow: null }, fmtCtx) === '—', 'C4 上限缺失 → —');
-ok(ctxLabel({}, fmtCtx) === '—', 'C5 两者都缺 → —');
-ok(ctxLabel(null, fmtCtx) === '—', 'C6 job 为 null → —');
+ok(ctxLabel({ contextUsed: null, contextWindow: 200000 }, fmtCtx) === null,
+  'C3 已用缺失 → null（ZB-102b：调用方不渲染，避免 `—` 占位与看不懂的百分比）');
+ok(ctxLabel({ contextUsed: 180973, contextWindow: null }, fmtCtx) === null, 'C4 上限缺失 → null');
+ok(ctxLabel({}, fmtCtx) === null, 'C5 两者都缺 → null');
+ok(ctxLabel(null, fmtCtx) === null, 'C6 job 为 null → null');
+/* ZB-102b：**不得**退回 contextRatio 百分比（用户明确说看不懂「14.3% ctx」） */
+ok(ctxLabel({ contextRatio: 0.143 }, fmtCtx) === null, 'C7 只有 contextRatio ⇒ null（不显示百分比）');
 
 console.log('\n接线（源码断言）');
 ok(!/ctxPct/.test(code), 'D1 旧函数 ctxPct 已完全移除（无死代码；剥注释后判定，注释里提及不算）');
 ok(/const ctxLabel = \(j\) =>/.test(src), 'D2 新增 ctxLabel');
 /* 不用 `[^)]*` 这类脆弱写法：该行含模板串与 `??`，会让正则提前截断（本文件已踩一次）。
  * 改为分两段独立断言：① 进程行调用 ctxLabel；② title 里带 tokens 单位。 */
-ok(/h\('span', \{ className: 'dsp-dim',[\s\S]{0,200}ctxLabel\(job\)\)/.test(src),
-  'D3 进程行改用 ctxLabel');
-ok(/title: `\$\{job\.contextUsed \?\? '—'\} \/ \$\{job\.contextWindow \?\? '—'\} tokens`/.test(src),
+/* ZB-102b：改为**条件渲染**（拿不到绝对值就整格不渲染）—— 断言结构变了，语义仍锁住。 */
+ok(/const cl = ctxLabel\(job\);/.test(src) && /return cl[\s\S]{0,200}: null;/.test(src),
+  'D3 进程行改用 ctxLabel，且 null 时不渲染整格');
+ok(/title: `\$\{job\.contextUsed\} \/ \$\{job\.contextWindow\} tokens`/.test(src),
   'D4 title 补上 tokens 单位（悬停可看精确值）');
 ok(/const fmtCtx = \(n\) =>/.test(src), 'D5 新增 fmtCtx');
 ok(/Math\.floor\(v \/ 100\) \/ 10/.test(src), 'D6 k 档用 Math.floor 截断（而非 toFixed 四舍五入）');

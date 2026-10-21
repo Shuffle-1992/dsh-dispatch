@@ -614,6 +614,8 @@ window.__ModuleLoader__.load({
         creditNoData: '通道清单未返回额度数据（宿主可能还是旧版，重启 DSH 后再看）',
         /* ZB-101：job 卡片上的真实消耗（Qoder=credits，WorkBuddy=美元）。 */
         jobCredits: '积分消耗', jobCostUsd: '费用（美元）',
+        /* ZB-102：任务累计 token（ZCode/OpenCode/WorkBuddy 有；Qoder 的 CLI 不报）。 */
+        jobTokens: 'Token 用量',
         /* ZB-95：登录态常显（三态 + 悬浮证据）。 */
         wbStateTitle: '登录态', wbStateAuthed: '已登录', wbStateNotAuthed: '未登录',
         wbStateResidue: '标记残留（需重登）', wbStateUnknown: '未知',
@@ -774,6 +776,8 @@ window.__ModuleLoader__.load({
         creditNoData: 'The channel list returned no quota data (host may be outdated — restart DSH)',
         /* ZB-101: real spend shown on job cards (Qoder=credits, WorkBuddy=USD). */
         jobCredits: 'credits spent', jobCostUsd: 'cost (USD)',
+        /* ZB-102: cumulative tokens per job (ZCode/OpenCode/WorkBuddy; Qoder CLI reports none). */
+        jobTokens: 'Token usage',
         /* ZB-95：sign-in state always visible (three states + hover evidence). */
         wbStateTitle: 'Sign-in state', wbStateAuthed: 'signed in', wbStateNotAuthed: 'not signed in',
         wbStateResidue: 'stale logout marker (re-sign-in needed)', wbStateUnknown: 'unknown',
@@ -1060,8 +1064,29 @@ window.__ModuleLoader__.load({
     };
     /** 上下文占用：`已用 / 上限`（如 `180.9k / 200k`）；任一缺失则显示 —。 */
     const ctxLabel = (j) => {
-      if (!j || j.contextUsed == null || !j.contextWindow) return '—';
+      if (!j) return null;
+      /* ZB-102b（用户反馈）：**不显示** `contextRatio` 百分比 —— 用户原话「14.3% ctx 是什么？」，
+       * 这个指标对使用者没有决策价值。只有"绝对值 / 窗口"这种一眼能懂的才显示；
+       * 拿不到绝对值（Qoder 就只报占比）⇒ **整格不渲染**，而不是拿一个看不懂的百分比凑数。 */
+      if (j.contextUsed == null || !j.contextWindow) return null;
       return `${fmtCtx(j.contextUsed)} / ${fmtCtx(j.contextWindow)}`;
+    };
+    /**
+     * ZB-102：**任务累计 token**（input + output + cacheRead）。
+     *
+     * 用户要求「4 个通道都显示派发任务用到的 token」。核对结果：
+     *   · ZCode / OpenCode / WorkBuddy —— 执行器都上报 `usage requests= in= out= cacheRead=` ✅
+     *   · Qoder —— **CLI 根本不报 token**（真机 result 只有 totalCredits + contextRatio），
+     *     所以它这一格永远是空的；面板用 `credits` + `x% ctx` 代替，不伪造 token。
+     * 有真值才显示，0/缺省不占位（同"查不到就不显示"的规则）。
+     */
+    const tokenLabel = (j) => {
+      const u = j && j.usage;
+      if (!u || typeof u !== 'object') return null;
+      const total = ['inputTokens', 'outputTokens', 'cacheReadTokens']
+        .reduce((s, k) => s + (Number.isFinite(u[k]) ? u[k] : 0), 0);
+      if (!(total > 0)) return null;
+      return `${fmtCtx(total)} tok`;
     };
     // Z11：长文本截断展示（详情区 prompt 最多 1200 字符）；时间本地化
     const clampText = (s, n) => {
@@ -4256,6 +4281,17 @@ window.__ModuleLoader__.load({
             h(StatusDot, { state: job.state }),
             h('span', { className: 'dsp-job-tag', title: job.id }, job.tag ?? shortId(job.id)),
             h('span', { className: 'dsp-job-right' },
+              /* ZB-102（用户要求）：**任务累计 token** —— 放在最前，是"这个任务到底花了多少"的直接答案。
+               * 三个引擎有真值；Qoder 的 CLI 不报 token ⇒ 这一格对它是空的（用 credits + ctx% 代替）。 */
+              (() => {
+                const tl = tokenLabel(job);
+                if (!tl) return null;
+                const u = job.usage ?? {};
+                return h('span', {
+                  className: 'dsp-dim',
+                  title: `${t('jobTokens')}：in ${u.inputTokens ?? 0} / out ${u.outputTokens ?? 0} / cacheRead ${u.cacheReadTokens ?? 0}`,
+                }, tl);
+              })(),
               /* ZB-101（用户要求）：**真实消耗**显示在 job 卡片上。
                * 这是唯一"每次都一定拿得到"的积分证据 —— 余额查不到（qoder/codebuddy 官方无接口），
                * 但**单次消耗**是引擎自己报的：
@@ -4279,8 +4315,14 @@ window.__ModuleLoader__.load({
                 return null;
               })(),
               /* ZB-70b（用户要求）：上下文用量放在**时间左边**（第一行右侧组内），
-               * 不再占第三行 —— 第三行只留给会逐秒变化的心跳。 */
-              h('span', { className: 'dsp-dim', title: `${job.contextUsed ?? '—'} / ${job.contextWindow ?? '—'} tokens` }, ctxLabel(job)),
+               * 不再占第三行 —— 第三行只留给会逐秒变化的心跳。
+               * ZB-102b：拿不到绝对值时**整格不渲染**（不显示 `—`、也不显示看不懂的百分比）。 */
+              (() => {
+                const cl = ctxLabel(job);
+                return cl
+                  ? h('span', { className: 'dsp-dim', title: `${job.contextUsed} / ${job.contextWindow} tokens` }, cl)
+                  : null;
+              })(),
               h('span', { className: 'dsp-dim' }, fmtSec(job.elapsedSec)),
               job.exitCode != null ? h('span', { className: 'dsp-dim' }, `${t('exit')} ${job.exitCode}`) : null,
             ),

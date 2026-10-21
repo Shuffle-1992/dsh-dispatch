@@ -251,6 +251,7 @@
     "creditNoData": "The channel list returned no quota data (host may be outdated — restart DSH)",
     "jobCredits": "credits spent",
     "jobCostUsd": "cost (USD)",
+    "jobTokens": "Token usage",
     "creditFree": "free",
     "creditUnavailable": "quota unavailable",
     "creditNoApi": "no quota API",
