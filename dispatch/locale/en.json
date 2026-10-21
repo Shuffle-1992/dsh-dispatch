@@ -259,6 +259,7 @@
     "wbLoginWebui": "Open Web UI",
     "wbLoginAuthed": "signed in",
     "wbLoginNotAuthed": "not signed in",
-    "wbLoginFail": "sign-in service unavailable"
+    "wbLoginFail": "sign-in service unavailable",
+    "chanInfoTitle": "Channel list notes (hover to view)"
   }
 }

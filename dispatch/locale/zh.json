@@ -259,6 +259,7 @@
     "wbLoginWebui": "打开 Web UI",
     "wbLoginAuthed": "已登录",
     "wbLoginNotAuthed": "未登录",
-    "wbLoginFail": "登录服务不可用"
+    "wbLoginFail": "登录服务不可用",
+    "chanInfoTitle": "通道清单说明（悬停查看）"
   }
 }

@@ -634,7 +634,7 @@ window.__ModuleLoader__.load({
         filtHiddenB: ' 个通道（共 ',
         filtHiddenC: ' 个）',
         chanLoading: '通道清单加载中…（宿主刚启动或首次探测中；失败会自动重试，无需刷新）',
-        chanLoadRetry: '会自动重试', chanInfoPrefix: '通道清单说明：',  zcRoutePlan: 'BigModel(Plan)', zcRouteFree: 'Start Plan(免费)', zcFreeSuffix: '免费',
+        chanLoadRetry: '会自动重试', chanInfoPrefix: '通道清单说明：', chanInfoTitle: '通道清单说明（悬停查看）',  zcRoutePlan: 'BigModel(Plan)', zcRouteFree: 'Start Plan(免费)', zcFreeSuffix: '免费',
         autoApproved: '已放行权限', autoApprovedHint: '该任务派发时显式开启了 OpenCode 的 --auto：放行了所有未显式拒绝的权限（默认不开启，仅调用方显式指定时生效）',
         giftQuota: '免费额度剩余', giftQuotaUnavailable: '免费额度余量不可用', chanQuotaExhausted: '5 小时窗口已满',
         jobCurrent: '当前：', jobLastBeat: '最近心跳', jobStalled: '可能卡住',
@@ -779,7 +779,7 @@ window.__ModuleLoader__.load({
         filtHiddenB: ' of ',
         filtHiddenC: ' channels',
         chanLoading: 'Loading channel list… (host just started or first probe in flight; failures retry automatically, no refresh needed)',
-        chanLoadRetry: 'will retry automatically', chanInfoPrefix: 'Channel notes: ',  zcRoutePlan: 'BigModel (Plan)', zcRouteFree: 'Start Plan (free)', zcFreeSuffix: 'free',
+        chanLoadRetry: 'will retry automatically', chanInfoPrefix: 'Channel notes: ', chanInfoTitle: 'Channel list notes (hover to view)',  zcRoutePlan: 'BigModel (Plan)', zcRouteFree: 'Start Plan (free)', zcFreeSuffix: 'free',
         autoApproved: 'auto-approved', autoApprovedHint: 'This job explicitly enabled OpenCode --auto: all permissions not explicitly denied were allowed (off by default; only takes effect when the caller sets it explicitly)',
         giftQuota: 'Free quota left', giftQuotaUnavailable: 'Free-quota balance unavailable', chanQuotaExhausted: '5h window full',
         jobCurrent: 'Now: ', jobLastBeat: 'last heartbeat', jobStalled: 'possibly stuck',
@@ -3510,8 +3510,19 @@ window.__ModuleLoader__.load({
           const info = warnings.filter((w) => String(w).startsWith('[info]'));
           const errs = warnings.filter((w) => !String(w).startsWith('[info]'));
           if (!errs.length) {
-            return h('div', { className: 'dsp-note', role: 'status', title: info.join('\n') },
-              `${t('chanInfoPrefix')}${info.map((w) => String(w).replace(/^\[info\]\s*/, '')).join('；')}`);
+            /* ZB-88（用户要求 2026-10-21）：这一大段说明**不要直接铺在面板上** ——
+             * 改成一个 `?` 图标，**悬浮才显示**（title）。
+             * 理由（用户真机截图）：它占地三四行、把真正要操作的通道/模型下拉挤了下去，
+             * 而内容属于"看一次就够"的解释性信息。错误（errs）仍然直接可见，不受影响。
+             * 悬浮文本：去掉 `[info]` 前缀，**逐条换行**（比原来用「；」连成一段好读）。 */
+            const detail = info.map((w) => String(w).replace(/^\[info\]\s*/, '')).join('\n');
+            return h('span', {
+              className: 'dsp-badge',
+              role: 'img',
+              'aria-label': t('chanInfoTitle'),
+              title: `${t('chanInfoTitle')}\n\n${detail}`,
+              style: { cursor: 'help', marginLeft: '4px', alignSelf: 'flex-start' },
+            }, '?');
           }
           return h('div', { className: 'dsp-feedback dsp-err' },
             `${t('chanLoadFail')}: ${errs[0]}${errs.length > 1 ? `（+${errs.length - 1}）` : ''}`);
