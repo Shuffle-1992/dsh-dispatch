@@ -3587,8 +3587,10 @@ export function createDispatcher(options = {}) {
             /* 找不到引擎 ≠ 插件坏了：把原因与修法一起说出来（reason 里已含查过多少处 + 怎么修） */
             warnings.push(`未检测到 ${e} 引擎：${d.reason}`);
           } else if (d.loggedIn === false) {
-            /* 有 CLI 但未登录是**最容易被误判成"执行器坏了"**的状态 —— 显式提示登录方式 */
-            warnings.push(`${e} 已找到但未登录（${d.loginEvidence ?? ''}）：${(d.warnings ?? [])[0] ?? '请先登录'}`);
+            /* 有 CLI 但未登录是**最容易被误判成"执行器坏了"**的状态 —— 显式提示登录方式。
+             * ZB-87：加 `[info]` 前缀 —— 这是**预期/可修状态**（点插件详情页的「登录」即可），
+             * 不是故障；不带前缀会被客户端渲染成红色「通道清单加载失败」，把用户吓一跳（真机反馈）。 */
+            warnings.push(`[info] ${e} 已找到但未登录（${d.loginEvidence ?? ''}）：${(d.warnings ?? [])[0] ?? '请先登录'}`);
           }
         }
       }

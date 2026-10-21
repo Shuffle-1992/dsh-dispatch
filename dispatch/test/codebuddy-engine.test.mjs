@@ -19,7 +19,7 @@
  *   E. core 集成：路由到 codebuddy、`done` 解析、暂停分类 `not-logged-in`、
  *      validateSpec 拒 mode / 收 auto、独立并发上限默认 2 且可配。
  */
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -306,6 +306,32 @@ for (const d of dispatchers) {
     await sleep(50);
   }
 }
+/* ─────────────── G. 插件详情页登录条（源码级回归锁，ZB-87） ─────────────── */
+console.log('\nG. 登录条位置与数据源（用户要求：只放插件详情页）');
+{
+  const clientSrc = readFileSync(join(HERE, '..', 'client.js'), 'utf8');
+
+  ok(/function EngineLoginBar\(\{ engineDetail \}\)/.test(clientSrc), '定义了**自包含**组件 EngineLoginBar（自己用 useWire，不靠 props 层层传）');
+  ok(/h\(EngineLoginBar, \{ engineDetail: channelsInfo\?\.engineDetail \}\)/.test(clientSrc),
+    '★ 插件详情页（DispatchConfigCard）渲染登录条');
+
+  /* 用户明确要求：**侧栏面板不放按钮**（它的职责是"当下在跑什么"，不是"去设置"）。 */
+  const iSec = clientSrc.indexOf('function ChannelSection(');
+  const iCard = clientSrc.indexOf('function DispatchConfigCard(');
+  ok(iSec > 0 && iCard > iSec, '能定位 ChannelSection 与 DispatchConfigCard 的函数体');
+  const chanSecBody = iSec > 0 && iCard > iSec ? clientSrc.slice(iSec, iCard) : '';
+  /* 判据只看**渲染点**（`h(EngineLoginBar`）—— 注释里提到组件名不算渲染。 */
+  ok(!/h\(EngineLoginBar/.test(chanSecBody), '★ 侧栏面板（ChannelSection）**不**渲染登录条（用户要求）');
+
+  /* ★ 真机"看不到按钮"的根因：`setChannelsInfo` 把 `engineDetail` 丢了 ⇒ 组件静默 return null。
+   * 这条锁防止它再次被丢掉（缺失是**静默**的，不报错，只能靠锁）。 */
+  const literalCalls = [...clientSrc.matchAll(/setChannelsInfo\(\{[^}]*\}\)/g)].map((m) => m[0]);
+  ok(literalCalls.length >= 2, `找到 ${literalCalls.length} 处 setChannelsInfo 对象字面量调用（App + 配置卡）`);
+  ok(literalCalls.every((s) => /engineDetail/.test(s)),
+    '★ 每处 setChannelsInfo 都保留 engineDetail（漏了它引擎状态条/登录条会静默消失）');
+  ok(/engineDetail: prev\.engineDetail \?\? null/.test(clientSrc), '★ snapshot 兜底分支同样保留 engineDetail');
+}
+
 cleanup();
 console.log(`\n===== ZB-84 WorkBuddy/CodeBuddy 引擎：${pass} PASS / ${fails.length} FAIL =====`);
 if (fails.length) {

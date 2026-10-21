@@ -2572,7 +2572,57 @@ window.__ModuleLoader__.load({
      *
      * 数据来源：core `listChannels()` 的 `engineDetail`（T2 交付）。缺失时**整条不渲染**
      * （向后兼容旧宿主：没有这个字段就当没有这条 UI，绝不显示空壳）。 */
-    function EngineStatus({ engineDetail, loginState, onLogin }) {
+    /**
+     * ZB-87：WorkBuddy **登录条**（只在**插件详情页**出现，用户明确要求：侧栏面板不放按钮）。
+     *
+     * 为什么必须有它：`/login` 是 **CLI 界面里的斜杠命令**（在 shell 里敲会报"无法识别"），
+     * 而 CLI 无参数启动在非 TTY 下会静默退出 ⇒ 用户没有任何可点的自助入口。
+     * 这里通过官方 `--serve` 的 REST 直接生成**登录链接**，点开浏览器即可。
+     *
+     * **自包含**（自己用 useWire + 自己管状态）：这样任何页面只要有 `engineDetail` 就能放一份，
+     * 不需要从 App 一层层传 props（传 props 的版本第一版就漏了插件详情页）。
+     */
+    function EngineLoginBar({ engineDetail }) {
+      const { login } = useWire();
+      const [st, setSt] = useState({ busy: false, result: null });
+      const run = (sub) => {
+        setSt({ busy: true, result: null });
+        Promise.resolve(login({ sub })).then((r) => setSt({ busy: false, result: r ?? null }))
+          .catch((e) => setSt({ busy: false, result: { ok: false, error: e?.message ?? String(e) } }));
+      };
+      if (!engineDetail || typeof engineDetail !== 'object' || !engineDetail.codebuddy) return null;
+      const r = st.result;
+      const acct = r && r.account && (r.account.userName || r.account.userId);
+      return h('div', { className: 'dsp-field', style: { marginTop: '4px', flexWrap: 'wrap', gap: '4px' } },
+        h('span', { style: { opacity: 0.75 }, title: t('wbLoginHint') }, `${t('wbLoginTitle')}：`),
+        h('button', {
+          className: 'dsp-switch dsp-toggle', type: 'button', disabled: st.busy,
+          title: t('wbLoginHint'), onClick: () => run('start'),
+        }, st.busy ? t('wbLoginBusy') : t('wbLoginBtn')),
+        h('button', {
+          className: 'dsp-switch dsp-toggle', type: 'button', disabled: st.busy,
+          title: t('wbLoginCheckHint'), onClick: () => run('status'),
+        }, t('wbLoginCheck')),
+        h('button', {
+          className: 'dsp-switch dsp-toggle', type: 'button', disabled: st.busy,
+          title: t('wbLoginStopHint'), onClick: () => run('stop'),
+        }, t('wbLoginStop')),
+        /* 结果区：可点链接（登录链接 / Web UI）+ 账号态 + 说明；失败给可读原因。 */
+        r
+          ? (r.ok === false
+            ? h('span', { className: 'dsp-note', role: 'status', style: { flexBasis: '100%' } }, `⚠ ${r.error ?? t('wbLoginFail')}`)
+            : h('span', { className: 'dsp-note', role: 'status', style: { flexBasis: '100%' } },
+              r.authUrl ? h('a', { key: 'auth', href: r.authUrl, target: '_blank', rel: 'noreferrer' }, `${t('wbLoginOpen')} `) : null,
+              r.webui ? h('a', { key: 'ui', href: r.webui, target: '_blank', rel: 'noreferrer' }, `${t('wbLoginWebui')} `) : null,
+              h('span', { key: 'stt' }, r.authenticated === true
+                ? `${t('wbLoginAuthed')}${acct ? `（${r.account.userName || r.account.userId}）` : ''}`
+                : r.authenticated === false ? t('wbLoginNotAuthed') : ''),
+              r.hint ? h('span', { key: 'hint', style: { marginLeft: '6px', opacity: 0.8 } }, r.hint) : null))
+          : null,
+      );
+    }
+
+    function EngineStatus({ engineDetail }) {
       if (!engineDetail || typeof engineDetail !== 'object') return null;
       /* ZB-84/87：**从 KNOWN_ENGINES 生成**（原先写死三引擎 ⇒ 第四引擎的 WorkBuddy
        * 根本不会出现在引擎状态条里，属于"加引擎漏一处"的典型）。 */
@@ -2584,7 +2634,7 @@ window.__ModuleLoader__.load({
         'ide-bundled': 'engineFormIde',
         'ide-entry': 'engineFormIdeEntry',
       };
-      /* ⚠️ 纪律：client.js **不得写字面色值**（必须走主题令牌，verify-plugin.mjs 会拦）。
+      /* ⚠️ 纪律：client.js **不得写字面值色**（必须走主题令牌，verify-plugin.mjs 会拦）。
        * 故这里不用彩色圆点，改用**形状 + 状态文字**区分（信息量不减少，且自动适配明暗主题）：
        *   可用/已登录 = ● ；找到但未登录 = ○（空心）；未找到 = × */
       const mark = (d) => {
@@ -2598,45 +2648,8 @@ window.__ModuleLoader__.load({
         if (d.loggedIn === false) return t('engineNotLoggedIn');
         return t('engineLoginUnknown');
       };
-      /* ZB-87：WorkBuddy 登录助手的结果块（登录链接 / Web UI / 账号态 / 错误）。
-       * 为什么必须给"可点链接"：`/login` 是 CLI 界面里的斜杠命令，在 shell 里敲会报"无法识别"；
-       * 面板按钮走官方 `--serve` 的 REST 直接生成登录链接，用户点开浏览器即可。 */
-      const loginResultNode = (r) => {
-        if (!r) return null;
-        if (r.ok === false) {
-          return h('span', { className: 'dsp-note', role: 'status', style: { flexBasis: '100%' } }, `⚠ ${r.error ?? t('wbLoginFail')}`);
-        }
-        const acct = r.account && (r.account.userName || r.account.userId);
-        return h('span', { className: 'dsp-note', role: 'status', style: { flexBasis: '100%' } },
-          r.authUrl ? h('a', { key: 'auth', href: r.authUrl, target: '_blank', rel: 'noreferrer' }, `${t('wbLoginOpen')} `) : null,
-          r.webui ? h('a', { key: 'ui', href: r.webui, target: '_blank', rel: 'noreferrer' }, `${t('wbLoginWebui')} `) : null,
-          h('span', { key: 'st' }, r.authenticated === true
-            ? `${t('wbLoginAuthed')}${acct ? `（${r.account.userName || r.account.userId}）` : ''}`
-            : r.authenticated === false ? t('wbLoginNotAuthed') : ''),
-          r.hint ? h('span', { key: 'hint', style: { marginLeft: '6px', opacity: 0.8 } }, r.hint) : null);
-      };
-      /* ZB-87：WorkBuddy 专属操作区（登录 / 检查登录态 / 关闭登录服务）。
-       * 只在**该引擎被探测到**时渲染 —— 没装 WorkBuddy 的机器不该出现这个按钮。 */
-      const loginTools = engineDetail.codebuddy
-        ? h('div', { className: 'dsp-field', style: { marginTop: '2px', flexWrap: 'wrap', gap: '4px' } },
-          h('span', { style: { opacity: 0.75 }, title: t('wbLoginHint') }, `${t('wbLoginTitle')}：`),
-          h('button', {
-            className: 'dsp-switch dsp-toggle', type: 'button', disabled: !!loginState?.busy,
-            title: t('wbLoginHint'),
-            onClick: () => onLogin && onLogin({ sub: 'start' }),
-          }, loginState?.busy ? t('wbLoginBusy') : t('wbLoginBtn')),
-          h('button', {
-            className: 'dsp-switch dsp-toggle', type: 'button', disabled: !!loginState?.busy,
-            title: t('wbLoginCheckHint'),
-            onClick: () => onLogin && onLogin({ sub: 'status' }),
-          }, t('wbLoginCheck')),
-          h('button', {
-            className: 'dsp-switch dsp-toggle', type: 'button', disabled: !!loginState?.busy,
-            title: t('wbLoginStopHint'),
-            onClick: () => onLogin && onLogin({ sub: 'stop' }),
-          }, t('wbLoginStop')),
-          loginResultNode(loginState?.result))
-        : null;
+      /* ZB-87：**登录条只放插件详情页**（用户明确要求：侧栏面板不放按钮）。
+       * 侧栏只显示状态（●/○/×）—— 它的职责是"当下在跑什么"，不是"去设置"。 */
       return h('div', { className: 'dsp-dim', style: { fontSize: '11px', marginTop: '2px' } },
         h('div', { style: { marginBottom: '3px' } },
           h('span', { style: { opacity: 0.75 }, title: t('enginesHint') }, `${t('enginesTitle')}：`),
@@ -2651,7 +2664,6 @@ window.__ModuleLoader__.load({
             d.form ? ` · ${t(FORM_KEY[d.form] ?? 'engineFormCli')}` : '',
             d.version ? ` · v${d.version}` : '',
             ` · ${stateText(d)}`))),
-        loginTools,
       );
     }
 
@@ -3072,7 +3084,7 @@ window.__ModuleLoader__.load({
     /* ⚠️ ZB-52：新增的 `sequential` / `onSequentialSet` **追加在 `sw` 之后** ——
      * `frozen-probe.test.mjs` F 段钉住了 `… offline, offlineReason, sw` 这段**参数顺序**
      * （它用"包含"而非全等来防漏传，故插入到中间会误报）。 */
-    function ChannelSection({ channelsInfo, channel, fallback, split, onSwitch, onFallbackSet, onSplitSet, offline, offlineReason, sw, chanError, sequential, onSequentialSet, disabledModels, onToggleModel, loginState, onLogin }) {
+    function ChannelSection({ channelsInfo, channel, fallback, split, onSwitch, onFallbackSet, onSplitSet, offline, offlineReason, sw, chanError, sequential, onSequentialSet, disabledModels, onToggleModel }) {
       const [fbFeedback, setFbFeedback] = useState(null);
       const [splitFeedback, setSplitFeedback] = useState(null);
       const [busy, setBusy] = useState(false);
@@ -3522,7 +3534,7 @@ window.__ModuleLoader__.load({
          * 现在：标签 nowrap 定自然宽、下拉 flex:1 等宽撑满 ⇒ 任意面板宽度下版式都一致。 */
         /* ZB-51（T5）：引擎状态条 —— 放在开关/告警之后、两个下拉之前：
          * 用户先看"这台机器上有什么引擎、能不能用"，再看"当前选哪个通道"。 */
-        h(EngineStatus, { engineDetail: channelsInfo?.engineDetail, loginState, onLogin }),
+        h(EngineStatus, { engineDetail: channelsInfo?.engineDetail }),
         h('div', { className: 'dsp-field' },
           h('span', { className: 'dsp-field-k' }, t('provider')),
           h('select', {
@@ -4580,7 +4592,6 @@ window.__ModuleLoader__.load({
       const {
         conn, snapshot, quota, planQuota, dispatch, kill, dismiss, tail,
         channels, channelGet, channelSet, retry, fallbackGet, fallbackSet, splitGet, splitSet,
-        login,
         sequentialGet, sequentialSet,
         modelSwitchesGet, modelSwitchSet,
         switchSet,
@@ -4629,7 +4640,15 @@ window.__ModuleLoader__.load({
         Promise.resolve(channels()).then((r) => {
           if (!alive) return;
           if (r && r.ok) {
-            setChannelsInfo({ channels: r.channels ?? [], warnings: r.warnings ?? [], levelsStatus: r.levelsStatus ?? null });
+            /* ZB-87：**`engineDetail` 必须收下** —— 它是「引擎状态条」的唯一数据源；
+             * 漏了它 `EngineStatus` 直接 `return null`（引擎那行永远不渲染 = 真机"看不到按钮"的根因）。
+             * 顺带说明为什么以前没人发现：它缺失是**静默**的（组件返回 null，不报错）。 */
+            setChannelsInfo({
+              channels: r.channels ?? [],
+              warnings: r.warnings ?? [],
+              levelsStatus: r.levelsStatus ?? null,
+              engineDetail: r.engineDetail ?? null,
+            });
             setChanError(null);
           } else setChanError(String((r && r.error) || 'channels() 未返回 ok'));
         }).catch((e) => { if (alive) setChanError(String(e?.message ?? e)); });
@@ -4666,7 +4685,9 @@ window.__ModuleLoader__.load({
         if (!snapChans || snapChans.length === 0) return;
         /* ⚠️ `prev.channels.length === 0 ? { channels: snapChans` 这段**字面形状**被 engine-ui.test.mjs 钉住
          * （ZB-56 曾把它折行 ⇒ 测试红）；新增的 `levelsStatus` 只能加在同一行里。 */
-        setChannelsInfo((prev) => (prev.channels.length === 0 ? { channels: snapChans, warnings: prev.warnings ?? [], levelsStatus: snapshot?.levelsStatus ?? prev.levelsStatus ?? null } : prev));
+        setChannelsInfo((prev) => (prev.channels.length === 0
+          ? { channels: snapChans, warnings: prev.warnings ?? [], levelsStatus: snapshot?.levelsStatus ?? prev.levelsStatus ?? null, engineDetail: prev.engineDetail ?? null }
+          : prev));
         setChanError(null);
       }, [snapshot]);
 
@@ -4703,20 +4724,9 @@ window.__ModuleLoader__.load({
           return r;
         });
       }, [splitSet]);
-      /* ZB-87：WorkBuddy 登录助手（面板按钮）。三种子动作：start（起 --serve 拿登录链接）/
-       * status（查账号登录态）/ stop（关服务）。**不落库、不占并发**，纯 UI 交互态。 */
-      const [loginState, setLoginState] = useState({ busy: false, result: null });
-      const onLogin = useCallback((opts) => {
-        setLoginState((prev) => ({ ...prev, busy: true }));
-        return Promise.resolve(login(opts ?? { sub: 'start' })).then((r) => {
-          setLoginState({ busy: false, result: r ?? null });
-          return r;
-        }).catch((e) => {
-          const r = { ok: false, error: e?.message ?? String(e) };
-          setLoginState({ busy: false, result: r });
-          return r;
-        });
-      }, [login]);
+      /* ZB-87：登录条已抽成**自包含组件** `EngineLoginBar`（自己用 useWire），
+       * 只挂在**插件详情页**（用户明确要求：侧栏面板不放按钮）—— 故这里不再需要
+       * 登录状态与处理器，也不需要往下传 props。 */
       /* ZB-52：顺序派发写入（**只发 `{order}`** —— core 已废弃 `enabled`，传它会**抛 TypeError**；
        * 顺序派发由「模型」值表达，不再有开关）。
        * 乐观回显：面板先按用户操作渲染，wire 返回权威值后校正（与 fallback 同款）。
@@ -4806,7 +4816,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsp-body' },
           h(Section, { id: SEC.channel, title: t('secChannel'), collapsible: true },
             /* 离线说明只在 body 首行渲染一处（去重）：这里不再重复同一句话。 */
-            h(ChannelSection, { channelsInfo, channel, fallback, split, onSwitch, onFallbackSet, onSplitSet, sequential, onSequentialSet, offline: conn !== 'live', offlineReason, sw: dispatchSwitch, chanError, loginState, onLogin,
+            h(ChannelSection, { channelsInfo, channel, fallback, split, onSwitch, onFallbackSet, onSplitSet, sequential, onSequentialSet, offline: conn !== 'live', offlineReason, sw: dispatchSwitch, chanError,
               /* ZB-58：逐模型开关 —— 「模型」下拉据此过滤已关闭项；顺序列表里可原地重开。 */
               disabledModels: modelSw && Array.isArray(modelSw.disabled) ? modelSw.disabled : null,
               onToggleModel: onModelToggle })),
@@ -4865,8 +4875,15 @@ window.__ModuleLoader__.load({
           if (!alive) return;
           if (r && r.ok) {
             /* ZB-56：`levelsStatus` 也收下（core 挂在 channels() 顶层）—— 逐引擎 pending 时
-             * 该引擎的档位下拉显示「档位载入中…」，而不是让人以为这模型没档位。 */
-            setChannelsInfo({ channels: r.channels ?? [], warnings: r.warnings ?? [], levelsStatus: r.levelsStatus ?? null });
+             * 该引擎的档位下拉显示「档位载入中…」，而不是让人以为这模型没档位。
+             * ZB-87：`engineDetail` 同样必须收下 —— 登录条（EngineLoginBar）靠它判断
+             * "这台机器有没有 WorkBuddy"；漏了它按钮永远不渲染（第一版真机就踩到）。 */
+            setChannelsInfo({
+              channels: r.channels ?? [],
+              warnings: r.warnings ?? [],
+              levelsStatus: r.levelsStatus ?? null,
+              engineDetail: r.engineDetail ?? null,
+            });
             setChansState('ready');
           } else { setErr(String((r && r.error) || 'channels() 未返回 ok')); setChansState('error'); }
         }).catch((e) => { if (alive) { setErr(String(e?.message ?? e)); setChansState('error'); } });
@@ -4979,6 +4996,9 @@ window.__ModuleLoader__.load({
         style: cardStyle,
         'data-dsp-bundle-config': BUNDLE_CONFIG_KEY, 'data-dsp-seq-state': 'ready',
       },
+        /* ⓿ ZB-87：WorkBuddy **登录条**（用户要求：只放插件详情页，侧栏面板不放按钮）。
+         * 自包含组件：登录 / 检查状态 / 关闭 + 登录链接（点开浏览器即可完成授权）。 */
+        h(EngineLoginBar, { engineDetail: channelsInfo?.engineDetail }),
         /* ① 引擎选择：ZCode / OpenCode / Qoder（小切换控件，沿用 dsp-btn2 + 主题令牌高亮） */
         h('div', { className: 'dsp-field' },
           h('span', { className: 'dsp-field-k' }, t('enginesTitle')),
