@@ -1477,8 +1477,13 @@ window.__ModuleLoader__.load({
         /* ZB-82：分流模式（读/写同一方法，patch = `{enabled?, minFreeSlots?}`）。 */
         splitGet: () => splitSetImpl({}),
         splitSet: (patch) => splitSetImpl(patch),
-        /* ZB-87：WorkBuddy 登录助手（扩展 wire 走 action 通道；与 split 同形）。 */
-        login: (opts) => call('login', opts ?? {}),
+        /* ZB-87/90：WorkBuddy 登录助手。
+         * ⚠️ 真机报错 `call is not defined` 就出在这一行：本对象里的方法走 **`remote.call(...)`**
+         * （见上面 sequentialGet 等），而 `call` 是**另一个 wire 变体**里的局部函数 ——
+         * 抄错了作用域 ⇒ 点击时抛 ReferenceError。
+         * 教训：给多个 wire 变体加同一个方法时，必须逐个确认该变体的调用约定
+         * （这里三套分别是 `remote.call` / `call` / `face.*Impl`）。 */
+        login: (opts) => remote.call('login', opts ?? {}),
         /* ZB-52：顺序派发读/写。读值经 `normSeqShape` 归一（三引擎键恒在、只留非空字符串）——
          * 与 ext / demo 两条路径**同一形状**，面板不必按数据源分支。 */
         async sequentialGet() {

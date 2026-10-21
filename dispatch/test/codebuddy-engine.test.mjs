@@ -333,6 +333,18 @@ console.log('\nG. 登录条位置与数据源（用户要求：只放插件详�
   ok(literalCalls.every((s) => /engineDetail/.test(s)),
     '★ 每处 setChannelsInfo 都保留 engineDetail（漏了它引擎状态条/登录条会静默消失）');
   ok(/engineDetail: prev\.engineDetail \?\? null/.test(clientSrc), '★ snapshot 兜底分支同样保留 engineDetail');
+
+  /* ★ ZB-90 真机 bug：`call is not defined` —— 三套 wire 变体的**调用约定不同**
+   * （face 变体 `remote.call(...)` / ext 变体 `call(...)` / 另一支 `face.*Impl(...)`），
+   * 我把 ext 的写法抄进了 face 变体 ⇒ 点击时抛 ReferenceError、按钮"没反应"。
+   * 锁法：**顺序锁** —— face 变体在前（文件里先出现），ext 变体在后；
+   * 两种写法各自只能出现一次，且裸 `call` 版必须在 `remote.call` 版**之后**。 */
+  const iRemoteLogin = clientSrc.indexOf("remote.call('login'");
+  const iBareLogin = clientSrc.search(/login: \(opts\) => call\('login'/);
+  ok(iRemoteLogin > 0, '★ face 变体的 login 走 `remote.call(...)`（真机曾误写成裸 call 报错）');
+  ok(iBareLogin > iRemoteLogin, '★ 裸 `call` 版只出现在**后面的** ext 变体里（顺序锁，防抄错作用域）');
+  ok((clientSrc.match(/remote\.call\('login'/g) ?? []).length === 1, 'remote.call 版 login 恰好 1 处');
+  ok((clientSrc.match(/login: \(opts\) => call\('login'[^)]*\)/g) ?? []).length === 1, '裸 call 版 login 恰好 1 处');
 }
 
 cleanup();
