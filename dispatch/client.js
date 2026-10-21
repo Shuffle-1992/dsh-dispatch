@@ -2667,26 +2667,52 @@ window.__ModuleLoader__.load({
        * （首次拉取时探测还没完成 / 被快照兜底路径覆盖）。这个组件自己再拉一次自愈 ——
        * 只在 props 缺数据时才拉，避免多余请求；失败就保持原样（不覆盖成错误）。 */
       const [selfDetail, setSelfDetail] = useState(null);
+      /* ZB-99d：再加一层 —— `login({sub:'status'})` 的返回里也带**凭据诊断**（`artifacts`，
+       * ZB-94 加的：即使登录服务没在跑也会返回）。它只够判「凭据在不在」，
+       * 但足以把"未知"变成「◐ 凭据在（未验证）」。 */
+      const [statusArtifacts, setStatusArtifacts] = useState(null);
       const hasPropsDetail = !!(engineDetail && typeof engineDetail === 'object'
         && (engineDetail.codebuddy || engineDetail.codebuddyAuth));
       /* ⚠️ `useWire()` 每次渲染返回**新对象** ⇒ `channelsApi` 引用每次都变，
-       * 不给守卫的话 effect 会反复拉取（每个渲染周期一次）。用 ref 保证**只拉一次**。 */
+       * 不给守卫的话 effect 会反复拉取（每个渲染周期一次）。 */
       const triedSelfRef = useRef(false);
       useEffect(() => {
         if (hasPropsDetail || triedSelfRef.current) return undefined;
         triedSelfRef.current = true;
         let alive = true;
+        let tries = 0;
+        const timers = [];
+        /* ZB-99d：**可重试** —— 详情页首次渲染时 discovery 往往还没跑完，
+         * 只试一次就会永久停在"未知"（上一版就是这个毛病）。最多 3 次、间隔 1.5s。 */
+        const fetchDetail = () => {
+          if (!alive) return;
+          tries += 1;
+          const retry = () => { if (alive && tries < 3) timers.push(setTimeout(fetchDetail, 1500)); };
+          try {
+            Promise.resolve(typeof channelsApi === 'function' ? channelsApi() : null)
+              .then((r) => {
+                if (!alive) return;
+                const d = r && r.engineDetail;
+                if (d && (d.codebuddy || d.codebuddyAuth)) { setSelfDetail(d); return; }
+                retry();
+              })
+              .catch(retry);
+          } catch { retry(); }
+        };
+        fetchDetail();
+        /* 并行：拿凭据诊断（它的 `artifacts` 与服务是否在跑无关）。 */
         try {
-          Promise.resolve(typeof channelsApi === 'function' ? channelsApi() : null)
-            .then((r) => { if (alive && r && r.engineDetail) setSelfDetail(r.engineDetail); })
-            .catch(() => { /* 尽力：失败就保持"未知" */ });
-        } catch { /* 同步抛错也不影响渲染 */ }
-        return () => { alive = false; };
+          Promise.resolve(typeof login === 'function' ? login({ sub: 'status' }) : null)
+            .then((r) => { if (alive && r && r.artifacts) setStatusArtifacts(r.artifacts); })
+            .catch(() => { /* 尽力 */ });
+        } catch { /* 同步抛错不影响渲染 */ }
+        return () => { alive = false; for (const t of timers) clearTimeout(t); };
         /* 依赖只放 hasPropsDetail：channelsApi 引用每次渲染都变，放进来会无限触发。 */
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [hasPropsDetail]);
-      /* 合并：props 优先，缺则用自拉的结果。 */
+      /* 合并：props 优先 → 自拉的 engineDetail → login status 的凭据诊断。 */
       const ed = hasPropsDetail ? engineDetail : (selfDetail ?? engineDetail);
+      const effectiveAuth = (ed && ed.codebuddyAuth) || statusArtifacts || null;
 
       /* ZB-89（真机 bug：点「登录/检查状态」后按钮**永远停在「登录中…」**）：
        * 旧实现 `Promise.resolve(login({sub}))` 有三个洞：
@@ -2731,7 +2757,7 @@ window.__ModuleLoader__.load({
        *      且这是"登录过却一直未登录"最常见的原因（CLI 被强杀留下）——必须优先报出来；
        *   ② engineDetail.codebuddy.loggedIn === true / false ⇒ 有明确结论；
        *   ③ 其它 ⇒ 未知（探测未完成/不适用），不猜。 */
-      const wbAuth = (ed && typeof ed === 'object' && ed.codebuddyAuth) || null;
+      const wbAuth = effectiveAuth;
       const wb = (ed && typeof ed === 'object' && ed.codebuddy) || null;
       const residue = !!(wbAuth && wbAuth.hasResidue);
       /* ZB-99：`未知` 只在**什么都没证据**时才给 —— 凭据文件在磁盘上就是最强的静态证据
