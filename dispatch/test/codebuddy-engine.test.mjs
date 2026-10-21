@@ -311,9 +311,12 @@ console.log('\nG. 登录条位置与数据源（用户要求：只放插件详�
 {
   const clientSrc = readFileSync(join(HERE, '..', 'client.js'), 'utf8');
 
-  ok(/function EngineLoginBar\(\{ engineDetail \}\)/.test(clientSrc), '定义了**自包含**组件 EngineLoginBar（自己用 useWire，不靠 props 层层传）');
-  ok(/h\(EngineLoginBar, \{ engineDetail: channelsInfo\?\.engineDetail \}\)/.test(clientSrc),
+  ok(/function EngineLoginBar\(\{ engineDetail, channels \}\)/.test(clientSrc), '定义了**自包含**组件 EngineLoginBar（自己用 useWire，不靠 props 层层传）');
+  ok(/h\(EngineLoginBar, \{ engineDetail: channelsInfo\?\.engineDetail, channels: channelsInfo\?\.channels \}\)/.test(clientSrc),
     '★ 插件详情页（DispatchConfigCard）渲染登录条');
+  /* ZB-88：判据必须**双保险** —— 只靠 engineDetail 会静默消失（真机连查三轮才定位）。 */
+  ok(/hasWbEngine/.test(clientSrc) && /some\(\(c\) => engineOf\(c\.engine\) === 'codebuddy'\)/.test(clientSrc),
+    '★ 登录条判据双保险：engineDetail.codebuddy 或「通道清单里出现 codebuddy」任一成立就渲染');
 
   /* 用户明确要求：**侧栏面板不放按钮**（它的职责是"当下在跑什么"，不是"去设置"）。 */
   const iSec = clientSrc.indexOf('function ChannelSection(');

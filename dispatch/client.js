@@ -2582,7 +2582,7 @@ window.__ModuleLoader__.load({
      * **自包含**（自己用 useWire + 自己管状态）：这样任何页面只要有 `engineDetail` 就能放一份，
      * 不需要从 App 一层层传 props（传 props 的版本第一版就漏了插件详情页）。
      */
-    function EngineLoginBar({ engineDetail }) {
+    function EngineLoginBar({ engineDetail, channels }) {
       const { login } = useWire();
       const [st, setSt] = useState({ busy: false, result: null });
       const run = (sub) => {
@@ -2590,7 +2590,15 @@ window.__ModuleLoader__.load({
         Promise.resolve(login({ sub })).then((r) => setSt({ busy: false, result: r ?? null }))
           .catch((e) => setSt({ busy: false, result: { ok: false, error: e?.message ?? String(e) } }));
       };
-      if (!engineDetail || typeof engineDetail !== 'object' || !engineDetail.codebuddy) return null;
+      /* ZB-88：判据**双保险** —— 只依赖 `engineDetail` 太脆：它来自 discovery，
+       * 一旦宿主某次没带上（旧版 wire / 探测尚未完成），按钮就**静默消失**，
+       * 而用户完全无法察觉（真机连查了三轮）。故改为：
+       *   ① `engineDetail.codebuddy` 存在，**或**
+       *   ② 通道清单里出现了 codebuddy 通道（有通道 ⇒ 必有该引擎）。
+       * 两者任一成立就渲染。 */
+      const hasWbEngine = !!(engineDetail && typeof engineDetail === 'object' && engineDetail.codebuddy)
+        || (Array.isArray(channels) && channels.some((c) => engineOf(c.engine) === 'codebuddy'));
+      if (!hasWbEngine) return null;
       const r = st.result;
       const acct = r && r.account && (r.account.userName || r.account.userId);
       return h('div', { className: 'dsp-field', style: { marginTop: '4px', flexWrap: 'wrap', gap: '4px' } },
@@ -5009,7 +5017,7 @@ window.__ModuleLoader__.load({
       },
         /* ⓿ ZB-87：WorkBuddy **登录条**（用户要求：只放插件详情页，侧栏面板不放按钮）。
          * 自包含组件：登录 / 检查状态 / 关闭 + 登录链接（点开浏览器即可完成授权）。 */
-        h(EngineLoginBar, { engineDetail: channelsInfo?.engineDetail }),
+        h(EngineLoginBar, { engineDetail: channelsInfo?.engineDetail, channels: channelsInfo?.channels }),
         /* ① 引擎选择：ZCode / OpenCode / Qoder（小切换控件，沿用 dsp-btn2 + 主题令牌高亮） */
         h('div', { className: 'dsp-field' },
           h('span', { className: 'dsp-field-k' }, t('enginesTitle')),
