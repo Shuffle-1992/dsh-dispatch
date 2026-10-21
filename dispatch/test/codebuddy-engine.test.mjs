@@ -445,8 +445,17 @@ console.log('\nG. 登录条位置与数据源（用户要求：只放插件详�
   ok(/data-dsp-credit/.test(clientSrc), '额度节点带 data-dsp-credit（可被测试/样式钩住）');
 
   /* ③ ⚠️ 免费额度通道仍走**进度条**（信息最全），不能被通用额度行顶掉 */
-  ok(/!giftSel && selCredit && selCreditBrief/.test(clientSrc),
+  ok(/!giftSel[\s\S]{0,140}?data-dsp-credit/.test(clientSrc),
     '★ 通用额度行以 `!giftSel` 为前提（免费额度通道保留原有进度条，不重复不冲突）');
+  /* ZB-98：额度行**始终渲染**（缺数据显 `—`）—— 否则真机"没看到额度"时分不清是没数据还是没生效 */
+  ok(/selCreditBrief \?\? '—'/.test(clientSrc),
+    '★ 额度行始终渲染（无数据时显示占位符，便于区分"没数据"与"没渲染"）');
+
+  /* ④ ZB-98：`?` 说明图标移到 Section 标题右侧（原先独占一行） */
+  ok(/titleExtra/.test(clientSrc) && /defaultOpen, titleExtra, children/.test(clientSrc),
+    '★ Section 支持 titleExtra 槽（`?` 放在标题右侧）');
+  ok(/onClick: \(e\) => e\.stopPropagation\(\)/.test(clientSrc),
+    '★ `?` 必须 stopPropagation（标题整行是折叠按钮，不拦就点一下把分区收起）');
 
   /* ④ 三种引擎的文案不会串（free/unavailable/noApi 必须是不同 key） */
   const localeSrc = readFileSync(join(HERE, '..', 'locale', 'zh.json'), 'utf8');

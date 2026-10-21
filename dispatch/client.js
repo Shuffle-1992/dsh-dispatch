@@ -611,6 +611,7 @@ window.__ModuleLoader__.load({
         /* ZB-87：WorkBuddy 登录助手（面板按钮）。 */
         /* ZB-96：积分/额度（逐引擎如实：有余额 / 取不到 / 官方无接口 / 免费）。 */
         creditTitle: '额度', creditFree: '免费', creditUnavailable: '额度不可用', creditNoApi: '无额度接口',
+        creditNoData: '通道清单未返回额度数据（宿主可能还是旧版，重启 DSH 后再看）',
         /* ZB-95：登录态常显（三态 + 悬浮证据）。 */
         wbStateTitle: '登录态', wbStateAuthed: '已登录', wbStateNotAuthed: '未登录',
         wbStateResidue: '标记残留（需重登）', wbStateUnknown: '未知',
@@ -767,6 +768,7 @@ window.__ModuleLoader__.load({
         engCodebuddy: 'WorkBuddy', engGroupCodebuddy: 'WorkBuddy channels',
         /* ZB-96: credits / quota (per engine, honestly). */
         creditTitle: 'Quota', creditFree: 'free', creditUnavailable: 'quota unavailable', creditNoApi: 'no quota API',
+        creditNoData: 'The channel list returned no quota data (host may be outdated — restart DSH)',
         /* ZB-95：sign-in state always visible (three states + hover evidence). */
         wbStateTitle: 'Sign-in state', wbStateAuthed: 'signed in', wbStateNotAuthed: 'not signed in',
         wbStateResidue: 'stale logout marker (re-sign-in needed)', wbStateUnknown: 'unknown',
@@ -2566,9 +2568,14 @@ window.__ModuleLoader__.load({
      * localStorage['dispatch:section:<id>']。默认开闭表见 SEC_DEFAULT_OPEN。
      * Z9 教训回扣：本标题栏不挂拖拽手势、head 内也不放 button——若将来加手势/按钮，
      * 必须先 isInteractive()（closest）守卫并在按钮 onPointerDown 停冒泡，否则点击会被吃掉。 */
-    function Section({ id, title, collapsible, defaultOpen, children }) {
+    /* ZB-98：Section 增加 `titleExtra` 槽 —— 用户要求把「通道」清单的 `?` 说明图标放到**标题右侧**
+     * （原先是 body 里一个 `alignSelf:flex-start` 的独立 badge，独占一行、很碍眼）。
+     * 设计：标题文字 + 弹性空隙 + titleExtra + 折叠箭头，保证箭头始终最右。 */
+    function Section({ id, title, collapsible, defaultOpen, titleExtra, children }) {
       if (!collapsible) {
-        return h('div', { className: 'dsp-sec' }, h('div', { className: 'dsp-sec-title' }, title), children);
+        return h('div', { className: 'dsp-sec' },
+          h('div', { className: 'dsp-sec-title' }, title, titleExtra),
+          children);
       }
       const [open, setOpen] = useState(() => {
         const saved = loadJson(secKey(id), undefined);
@@ -2591,6 +2598,8 @@ window.__ModuleLoader__.load({
           },
         },
           h('span', { className: 'dsp-sec-title' }, title),
+          /* titleExtra 放在弹簧**之前**：这样它在标题右侧、且不会被推到最右（箭头仍在最右）。 */
+          titleExtra ?? null,
           h('span', { className: 'dsp-spring' }),
           h('span', { className: 'dsp-sec-caret', 'aria-hidden': true }, h(IconChevron, { up: open })),
         ),
@@ -3655,23 +3664,11 @@ window.__ModuleLoader__.load({
          * 两类都要显示 —— 只是不能把信息渲染成故障。 */
         (() => {
           if (!warnings.length) return null;
-          const info = warnings.filter((w) => String(w).startsWith('[info]'));
           const errs = warnings.filter((w) => !String(w).startsWith('[info]'));
-          if (!errs.length) {
-            /* ZB-88（用户要求 2026-10-21）：这一大段说明**不要直接铺在面板上** ——
-             * 改成一个 `?` 图标，**悬浮才显示**（title）。
-             * 理由（用户真机截图）：它占地三四行、把真正要操作的通道/模型下拉挤了下去，
-             * 而内容属于"看一次就够"的解释性信息。错误（errs）仍然直接可见，不受影响。
-             * 悬浮文本：去掉 `[info]` 前缀，**逐条换行**（比原来用「；」连成一段好读）。 */
-            const detail = info.map((w) => String(w).replace(/^\[info\]\s*/, '')).join('\n');
-            return h('span', {
-              className: 'dsp-badge',
-              role: 'img',
-              'aria-label': t('chanInfoTitle'),
-              title: `${t('chanInfoTitle')}\n\n${detail}`,
-              style: { cursor: 'help', marginLeft: '4px', alignSelf: 'flex-start' },
-            }, '?');
-          }
+          /* ZB-98（用户要求 2026-10-21）：`[info]` 那条中性说明**已移到 Section 标题右侧的 `?`**
+           * （原先它是 body 里一个 `alignSelf:flex-start` 的独立 badge，独占一行很碍眼）。
+           * 这里只负责**真错误**（探测不到引擎、执行器缺失等），仍然直接可见。 */
+          if (!errs.length) return null;
           return h('div', { className: 'dsp-feedback dsp-err' },
             `${t('chanLoadFail')}: ${errs[0]}${errs.length > 1 ? `（+${errs.length - 1}）` : ''}`);
         })(),
@@ -3857,17 +3854,18 @@ window.__ModuleLoader__.load({
               h('span', { className: 'dsp-note', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' } }, giftText)))
           : null,
         /* ── ZB-97：其余引擎的额度（选中即显示；qoder/codebuddy 会明说"官方无接口"） ──
+         * ZB-98：改为**始终渲染**（缺数据时显示 `—`）—— 真机反馈"没看到额度"时，
+         * 若整行干脆不渲染就无法区分"没数据"还是"没生效"，留一行空值最省事。
          * 完整原因（含"日志 N 天前"、"哪个端点 404"）放 title，正文只留一行。 */
-        !giftSel && selCredit && selCreditBrief
-          ? h('div', { className: 'dsp-field' },
+        !giftSel
+          ? h('div', { className: 'dsp-field', 'data-dsp-credit': selEngine ?? '' },
             h('span', { className: 'dsp-field-k' }, t('creditTitle')),
             h('span', {
               className: 'dsp-field-v',
               style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0', cursor: 'help' },
-              title: [selCredit.text ?? '', selCredit.note ?? ''].filter(Boolean).join('\n'),
-              'data-dsp-credit': selEngine ?? '',
+              title: selCredit ? [selCredit.text ?? '', selCredit.note ?? ''].filter(Boolean).join('\n') : t('creditNoData'),
             },
-            h('span', { className: 'dsp-note', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' } }, selCreditBrief)))
+            h('span', { className: 'dsp-note', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' } }, selCreditBrief ?? '—')))
           : null,
         /* ── ZB-85：顺序派发列表**已从面板移除**（改由插件设置页的配置卡承载）。
          * 面板只保留"日常派发"需要的东西：通道 / 模型 / 思考强度 / 自动降级目标 / 分流。 ── */
@@ -4988,7 +4986,22 @@ window.__ModuleLoader__.load({
         /* ZB-29c：派发表单移除后，feedback 仍承载总开关切换失败的错误显示（挂在 body 首行）。 */
         feedback ? h('div', { className: `dsp-feedback${feedback.kind === 'err' ? ' dsp-err' : ''}`, role: 'status' }, feedback.text) : null,
         h('div', { className: 'dsp-body' },
-          h(Section, { id: SEC.channel, title: t('secChannel'), collapsible: true },
+          h(Section, { id: SEC.channel, title: t('secChannel'), collapsible: true,
+            /* ZB-98（用户要求）：把通道清单的 `[info]` 说明从 body 里挪到**标题右侧**的 `?`。
+             * ⚠️ 必须 stopPropagation —— 标题整行是折叠按钮，不拦的话点 `?` 会把分区收起来。 */
+            titleExtra: (() => {
+              const ws = Array.isArray(channelsInfo?.warnings) ? channelsInfo.warnings : [];
+              const info = ws.filter((w) => String(w).startsWith('[info]'));
+              if (!info.length) return null;
+              const detail = info.map((w) => String(w).replace(/^\[info\]\s*/, '')).join('\n');
+              return h('span', {
+                className: 'dsp-badge', role: 'img',
+                'aria-label': t('chanInfoTitle'),
+                title: `${t('chanInfoTitle')}\n\n${detail}`,
+                style: { cursor: 'help', marginLeft: '4px' },
+                onClick: (e) => e.stopPropagation(),
+              }, '?');
+            })() },
             /* 离线说明只在 body 首行渲染一处（去重）：这里不再重复同一句话。 */
             h(ChannelSection, { channelsInfo, channel, fallback, split, onSwitch, onFallbackSet, onSplitSet, sequential, onSequentialSet, offline: conn !== 'live', offlineReason, sw: dispatchSwitch, chanError,
               /* ZB-58：逐模型开关 —— 「模型」下拉据此过滤已关闭项；顺序列表里可原地重开。 */
