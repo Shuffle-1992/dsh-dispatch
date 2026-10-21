@@ -29,7 +29,7 @@ dispatch action=status
 
 ---
 
-## 2. 三个引擎：装什么、怎么登、在哪
+## 2. 四个引擎：装什么、怎么登、在哪
 
 | 引擎 | 形态 | 可执行文件（真机落点） | 登录态判据 | env 覆盖 |
 |---|---|---|---|---|
@@ -37,6 +37,7 @@ dispatch action=status
 | **OpenCode** | npm 全局 CLI | `%APPDATA%\npm\opencode.cmd` | `~/.local/share/opencode/auth.json`（**注意：通常没有**，见 §4 第 4 条） | `OPENCODE_CLI` / `OPENCODE_BIN` |
 | **Qoder CN** | IDE + 独立 CLI | `~/.qoder-cn/bin/qoderclicn/qoderclicn.exe` | **`--list-models` 能否成功**（不是看 `.auth/`） | `QODERCN_CLI_BIN` |
 | Qoder 全球版 | 同上 | `~/.qoder/bin/qoder` | 同上 | `QODER_CLI_BIN` |
+| **WorkBuddy / CodeBuddy** | Electron 客户端**自带** CLI（`@genie/agent-cli`） | `%LOCALAPPDATA%\Programs\WorkBuddy\resources\app.asar.unpacked\cli\bin\codebuddy`（**不在 PATH**） | `~/.codebuddy-session.json` 或 `~/.codebuddy-global-session.json` 存在且非空 | `CODEBUDDY_CLI` / `CODEBUDDY_HOME` / `WORKBUDDY_HOME` |
 
 安装命令（**CN 与全球版是不同域名，别搞混**）：
 
@@ -93,6 +94,90 @@ qoderclicn --list-models   # 登录成功的权威验证（未登录会报 Not l
 
 **排查口诀**：任务回答里出现 `Allow …?` / `Error: Fetch …` / "未获授权" 字样
 ⇒ **权限问题**（加 `auto:true`），**不是**沙箱限制，**也不是**网络故障。
+
+---
+
+## 2.6 WorkBuddy / CodeBuddy 引擎（ZB-84，2026-10-21 真机实测）
+
+### 为什么走**官方 CLI**，不走反代（用户决策）
+
+WorkBuddy 已开始限制"把账号登录态反代成 OpenAI / Anthropic 兼容接口"这类用法
+（社区里 `workbuddy2api` / `workbuddy-gateway` 那一类项目的做法）。
+**官方 CLI 是产品自身的入口**，不受这类限制影响，也不会因为后续进一步封禁而失效。
+本引擎因此**只 spawn 官方进程，绝不读写任何 WorkBuddy 凭据**。
+
+### 启动（有个必踩的坑）
+
+WorkBuddy 的内置 CLI 是 `@genie/agent-cli`（真机版本 **2.161.0**），入口 `cli/bin/codebuddy`
+是**无扩展名的 node 脚本**。默认它会 `require('../dist/codebuddy')` ——
+**但 asar 解包里只有 lite 包** `dist/codebuddy-lite-wb.mjs`（ESM，9.4 MB），
+
+```
+不设环境变量直接跑 ⇒ Error: Cannot find module '../dist/codebuddy'
+```
+
+执行器已**自动注入** `CODEBUDDY_FORCE_LITE_WB_BUNDLE=1`（启动器据此加载 lite 包，
+内置逐级回退 `lite-wb → headless → full`）。手动验证：
+
+```powershell
+$env:CODEBUDDY_FORCE_LITE_WB_BUNDLE='1'
+& "$env:LOCALAPPDATA\Programs\WorkBuddy\resources\app.asar.unpacked\cli\bin\codebuddy" --version
+# 2.161.0
+```
+
+### 登录：CLI 与桌面应用**互相独立**（和 Qoder 同一类坑）
+
+桌面 WorkBuddy 登录着，**不代表 CLI 登录了**。未登录时无头执行的结果是：
+
+```json
+{"type":"result","subtype":"error_during_execution","is_error":true,
+ "errors":["Authentication required. Please use /login command to sign in to your account"]}
+```
+
+CLI **没有** `login` 子命令 —— 登录是在**交互会话**里敲斜杠命令 `/login`（浏览器 OAuth）：
+
+```powershell
+$env:CODEBUDDY_FORCE_LITE_WB_BUNDLE='1'
+& "$env:LOCALAPPDATA\Programs\WorkBuddy\resources\app.asar.unpacked\cli\bin\codebuddy"
+# 在交互界面里输入： /login
+# 成功后确认 ~/.codebuddy-session.json（国内）或 ~/.codebuddy-global-session.json（--global）存在
+```
+
+派发台会把这种情况归为 **`CLI 未登录`（`not-logged-in`）暂停态**（不是"失败/未知原因"），
+并在进程 stderr 里直接给出上面的三步指引。
+
+### ⚠️ 这个 CLI 的进程**退出码恒为 0**，即使任务失败
+
+真机实测：`result.is_error=true`（未登录 / 模型报错）时，进程 `exit code` 仍然是 **0**。
+若照抄别的引擎`exit = code`，core 会把失败当成功收尾 —— 用户看到"完成"，实际什么都没做。
+执行器已把 `is_error` **并入 done 的 exit 码**（`exit=1`），所以：
+
+> **别只看 `exit=0` 判断成功**；看 `done exit=` 这一行。这是"静默假成功"的新变种。
+
+### 模型清单与思考档位：**探测 CLI 自己的声明**，不写死
+
+CLI 没有 `--list-models` 子命令；而且**鉴权先于参数校验**（用非法 `--model` 逼"合法值清单"
+只会得到 `Authentication required`）。但 `--help` 里 CLI 自己声明了：
+
+```
+--model <model> … Currently supported: (auto, glm-5v-turbo, glm-5.1, …, deepseek-v3-2-volc)
+--effort <level>  Reasoning effort level (minimal, low, medium, high, xhigh, max)
+```
+
+执行器就**解析这段 help 文本**（`parseHelpModels` / `parseHelpEfforts`）——
+既不是我们写死的枚举，也会随 CLI 升级自动跟随。
+
+两条**如实标注的局限**（不要当成 bug）：
+
+1. **模型清单是 CLI 的静态声明**，登录后账号**实际可用**集合可能因套餐/额度而不同；
+2. 逐**模型**的档位子集 CLI 未声明 ⇒ 面板给的是**引擎级**集合（6 档），
+   通道上标 `thinkingLevelsScope: 'engine'`。档位与模型不匹配时由 CLI 自行报错。
+
+### 并发上限：默认 2 是**保守默认**，不是实测结论
+
+它比纯 CLI 重（Electron 客户端内置 bundle + `daemon-supervisor` + `Sandbox: true`），
+而接入时 CLI 恰好未登录、**无法跑并发对照实验**。故 `maxConcurrentCodebuddy` 先给 2，
+用户实测后可自行调高（对照：OpenCode 的 2 与 Qoder 的 3 都是有实测依据的）。
 
 ---
 
@@ -182,19 +267,20 @@ qoder:    cli · cn · v1.1.73 · 已登录 · ~\.qoder-cn\bin\qoderclicn\qoderc
 
 ---
 
-## 5. 三个引擎的能力差异（速查）
+## 5. 四个引擎的能力差异（速查）
 
-| 维度 | ZCode | OpenCode | Qoder |
-|---|---|---|---|
-| 思考强度旗标 | `--reasoning-level` | `--variant` | `--reasoning-effort` |
-| 档位表事件 | `reasoning-levels` | `variants` | `reasoning-efforts` |
-| 生效确认行 | `reasoning-level=<lv> target=<p>/<m>` | `variant=<v> model=<id>` | `reasoning-effort=<lv> model=<id>` |
-| 不支持 | — | `mode` / `memoryBench` | `mode` / `memoryBench` |
-| 权限放行 | 无（不需要） | `--auto`（默认关） | `--permission-mode`（默认 `accept_edits`） |
-| 续会话 | `--resume` | `-s <id>`（同 cwd） | `--session-id`（按项目隔离） |
-| 并发上限 | `maxConcurrent` | `maxConcurrentOpenCode`（默认 2） | `maxConcurrentQoder`（默认 3） |
-| 通道 id 形态 | `plan` / `account:<family>-start-plan` | `opencode/<model>` | `qoder/<model>` |
-| 档位探测开关 | `--list-providers` 自带 | `--list-models --with-variants` | `--list-models --with-efforts` |
+| 维度 | ZCode | OpenCode | Qoder | WorkBuddy/CodeBuddy |
+|---|---|---|---|---|
+| 思考强度旗标 | `--reasoning-level` | `--variant` | `--reasoning-effort` | **`--effort`** |
+| 档位表事件 | `reasoning-levels` | `variants` | `reasoning-efforts` | `reasoning-efforts` |
+| 生效确认行 | `reasoning-level=<lv> target=<p>/<m>` | `variant=<v> model=<id>` | `reasoning-effort=<lv> model=<id>` | `effort=<lv> model=<id>` |
+| 不支持 | — | `mode` / `memoryBench` | `mode` / `memoryBench` | `mode` / `memoryBench` |
+| 权限放行 | 无（不需要） | `--auto`（默认关） | `--permission-mode`（默认 `accept_edits`） | `--permission-mode`（默认 `acceptEdits`，**驼峰**） |
+| 续会话 | `--resume` | `-s <id>`（同 cwd） | `--session-id`（按项目隔离） | `--session-id` |
+| 并发上限 | `maxConcurrent` | `maxConcurrentOpenCode`（默认 2） | `maxConcurrentQoder`（默认 3） | `maxConcurrentCodebuddy`（默认 2，**保守未实测**） |
+| 通道 id 形态 | `plan` / `account:<family>-start-plan` | `opencode/<model>` | `qoder/<model>` | `codebuddy/<model>` |
+| 档位探测开关 | `--list-providers` 自带 | `--list-models --with-variants` | `--list-models --with-efforts` | `--list-models --with-efforts`（解析 help） |
+| 进程退出码可信 | 是 | 是 | 是 | **否**（失败也可能 exit 0，执行器已并入 `is_error`） |
 
 ---
 

@@ -15,6 +15,10 @@ import { readFileSync } from 'node:fs';
 import { strict as assert } from 'node:assert';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+/* ZB-84：引擎集合的**唯一权威**是协议层的 `ENGINES` —— 这里直接引用它做比对，
+ * 不再把三/四个引擎名**写死**在断言里（写死的话，下次加引擎又要手工改测试，
+ * 而"忘了改"恰恰是最该被测出来的回归）。 */
+import { ENGINES } from '../../collab-kit/run-line-protocol.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = join(HERE, '..');
@@ -60,8 +64,13 @@ console.log('\n② 通道下拉按引擎分组（单一源 + optgroup）');
     '分组表按 zcode → opencode → qoder 顺序声明（与 core 的 listChannels 顺序一致）');
   /* ZB-51：归属判据从"二元（非 opencode 即 zcode）"升级为**单一权威归一函数**。
    * 理由是那个二元写法会让第三个引擎（qoder）被静默归进 ZCode 组 —— 分组/徽标/提示全错且不报错。 */
-  ok(/const KNOWN_ENGINES = \['zcode', 'opencode', 'qoder'\]/.test(src),
-    '★ 客户端有引擎白名单 KNOWN_ENGINES（与协议层 ENGINES 同集合）');
+  /* ZB-84：与协议层 `ENGINES` **逐元素**比对（不再写死字面量）。 */
+  const knownEnginesSrc = src.match(/const KNOWN_ENGINES = \[([^\]]*)\]/);
+  const knownEngines = knownEnginesSrc
+    ? knownEnginesSrc[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean)
+    : null;
+  ok(knownEngines != null && JSON.stringify(knownEngines) === JSON.stringify([...ENGINES]),
+    `★ 客户端有引擎白名单 KNOWN_ENGINES（与协议层 ENGINES 同集合；实际 ${JSON.stringify(knownEngines)} / 期望 ${JSON.stringify([...ENGINES])}）`);
   ok(/const engineOf = \(v\) => \{[\s\S]{0,200}\}/.test(src), '★ 有归一函数 engineOf（唯一权威，不再各处二元判断）');
   ok(/const items = list\.filter\(\(c\) => engineOf\(c\.engine\) === g\.key\)/.test(src),
     '★ 组内归属判据走 engineOf（未知值归 zcode，向后兼容既有行为）');

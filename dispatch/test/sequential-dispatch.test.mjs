@@ -174,11 +174,11 @@ function armSequential(d, provider, order) {
   return d.setSequential({ order });
 }
 
-const EMPTY_ORDER = () => ({ zcode: [], opencode: [], qoder: [] });
+const EMPTY_ORDER = () => ({ zcode: [], opencode: [], qoder: [], codebuddy: [] });
 /* ZB-52（第二轮，用户要求「顺序思考强度档位设置」）：`getSequential()` 多了 `levels` ——
  * 与 `order` **同序**的逐模型档位数组（null = 该模型用引擎默认）；
  * 落盘 `sequential.json` 的 order 项也随之升级成 `{route, reasoningLevel}`（见对应断言）。 */
-const EMPTY_LEVELS = () => ({ zcode: [], opencode: [], qoder: [] });
+const EMPTY_LEVELS = () => ({ zcode: [], opencode: [], qoder: [], codebuddy: [] });
 /* 第三轮：`enabled` 已从 API 移除（顺序派发由「模型为空」表达）⇒ 默认形状不再有它。 */
 const DEFAULT_SEQ = () => ({ order: EMPTY_ORDER(), levels: EMPTY_LEVELS(), sequentialCount: 0 });
 
@@ -278,12 +278,12 @@ function makeOpenCodeProbeRunner(dir, markerPath) {
 /* ═══════════════════════════ A. 状态与 API ═══════════════════════════ */
 
 async function scenarioA() {
-  await scenario('A1 初始状态：三引擎键恒在 + 没有 enabled 开关 + sequentialCount=0', async () => {
+  await scenario('A1 初始状态：各引擎键恒在 + 没有 enabled 开关 + sequentialCount=0', async () => {
     const d = makeDispatcher();
     const s = d.getSequential();
-    eq(s.order, EMPTY_ORDER(), '初始 order = 三个引擎的空数组（客户端据此渲染）');
-    eq(s.levels, EMPTY_LEVELS(), '初始 levels = 三个引擎的平行空数组');
-    eq(Object.keys(s.order).sort(), ['opencode', 'qoder', 'zcode'], '*三个引擎键永远都在*');
+    eq(s.order, EMPTY_ORDER(), '初始 order = 各引擎的空数组（客户端据此渲染）');
+    eq(s.levels, EMPTY_LEVELS(), '初始 levels = 各引擎的平行空数组');
+    eq(Object.keys(s.order).sort(), ['codebuddy', 'opencode', 'qoder', 'zcode'], '*所有已知引擎键永远都在*（ZB-84 起为四个）');
     eq(s.sequentialCount, 0, '初始 sequentialCount=0');
     ok(!('enabled' in s), '*★ 不再有 enabled 字段*（第三轮用户要求去掉全局开关：模型为空即顺序派发）');
     eq(Object.keys(s).sort(), ['levels', 'order', 'sequentialCount'], 'API 对外形状 = {order, levels, sequentialCount}');
@@ -329,7 +329,7 @@ async function scenarioA() {
     const s1 = d.setSequential({ order: { bogus: ['x'] } });
     eq(s1.order.zcode, [], '*★ 未知引擎键必须丢弃*：normalizeEngine("bogus") 会回退 zcode，但顺序配置不能因此写进 zcode');
     eq(s1.sequentialCount, 0, '未知引擎不产生任何条目');
-    eq(Object.keys(s1.order).sort(), ['opencode', 'qoder', 'zcode'], 'order 仍只有三个已知引擎键');
+    eq(Object.keys(s1.order).sort(), ['codebuddy', 'opencode', 'qoder', 'zcode'], 'order 仍只有已知引擎键（ZB-84 起为四个）');
     const s2 = d.setSequential({ order: { bogus2: ['y'], opencode: ['opencode/a'] } });
     eq(s2.order.opencode, ['opencode/a'], '同一 patch 里的合法引擎照常生效');
     eq(s2.order.zcode, [], '合法引擎生效时 zcode 仍为空（bogus2 没被写进去）');
@@ -422,8 +422,8 @@ async function scenarioA() {
     );
     const d = createDispatcher({ runnerPath: process.execPath, workRoot });
     const s = d.getSequential();
-    eq(s.order, { zcode: ['plan::GLM-5.3'], opencode: ['opencode/a'], qoder: [] }, 'v1 文件的 order 直接可用（向后兼容）');
-    eq(s.levels, { zcode: [null], opencode: [null], qoder: [] }, 'v1 字符串项 ⇒ 档位 null（引擎默认，不猜）');
+    eq(s.order, { zcode: ['plan::GLM-5.3'], opencode: ['opencode/a'], qoder: [], codebuddy: [] }, 'v1 文件的 order 直接可用（向后兼容）');
+    eq(s.levels, { zcode: [null], opencode: [null], qoder: [], codebuddy: [] }, 'v1 字符串项 ⇒ 档位 null（引擎默认，不猜）');
     ok(!('enabled' in s), 'v1 的 mode 不会复活成 enabled 字段');
   });
 

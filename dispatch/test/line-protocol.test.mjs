@@ -117,9 +117,11 @@ console.log(`[行协议契约锁] 模式=${STRICT ? '严格（SKIP 即失败）'
 /* ================= ① 协议模块自身（硬断言：已冻结、已存在） ================= */
 section('① run-line-protocol.mjs 自身（硬断言）');
 
-check('①-1 ENGINES 恰好是 [zcode, opencode, qoder] 且顺序固定', () => {
-  /* ZB-51：加入第三个引擎 qoder（通道形态 `qoder/<model>`）。顺序即优先级，末尾追加不改既有语义。 */
-  deep([...P.ENGINES], ['zcode', 'opencode', 'qoder'], 'ENGINES 必须恰好是这三台引擎（顺序即优先级）');
+check('①-1 ENGINES 恰好是 [zcode, opencode, qoder, codebuddy] 且顺序固定', () => {
+  /* ZB-51：加入第三个引擎 qoder（通道形态 `qoder/<model>`）。
+   * ZB-84：加入第四个引擎 codebuddy（通道形态 `codebuddy/<model>`）。
+   * 顺序即优先级，**末尾追加**不改既有语义（默认引擎仍是 zcode）。 */
+  deep([...P.ENGINES], ['zcode', 'opencode', 'qoder', 'codebuddy'], 'ENGINES 必须恰好是这四台引擎（顺序即优先级）');
   ok(Array.isArray(P.ENGINES), 'ENGINES 必须是数组');
 });
 check('①-2 DEFAULT_ENGINE 是 zcode', () => eq(P.DEFAULT_ENGINE, 'zcode', '默认引擎必须保持 zcode'));

@@ -606,6 +606,9 @@ window.__ModuleLoader__.load({
         /* ZB-51（T5）：第三个引擎（Qoder）+ 引擎状态条文案。
          * ⚠️ 这几把键必须与 locale/zh.json **逐键一致**（single-source.test.mjs 守门）。 */
         engQoder: 'Qoder', engGroupQoder: 'Qoder 通道',
+        /* ZB-84：第四个引擎（WorkBuddy / CodeBuddy）。 */
+        engCodebuddy: 'WorkBuddy', engGroupCodebuddy: 'WorkBuddy 通道',
+        chanEngineHintCodebuddy: 'WorkBuddy / CodeBuddy 引擎（走**官方 CLI**，不依赖任何反代）：不支持 mode / memoryBench；思考强度映射为 CodeBuddy 的 --effort（档位值由 CLI 自身 --help 声明，minimal→max，共 6 档）。执行器默认带 --permission-mode acceptEdits（能改工作目录内的文件）；需要全放行时由派发方**显式**传 auto=true（映射为 bypassPermissions）。⚠️ **CLI 的登录态与 WorkBuddy 桌面应用互相独立** —— 桌面用得好好的，CLI 仍可能在无头执行时报 “Authentication required”；此时任务会停在 `未登录` 暂停态，需交互启动 CLI 后输入 /login（一次性）。该 CLI 的进程退出码**恒为 0 即使任务失败**，执行器已把它并入 done exit 码，故别只看 exit=0 判断成功。',
         enginesTitle: '引擎',
         enginesHint: '本机自动探测到的执行引擎（形态 / 版本 / 登录态）。插件按「环境变量 → 配置 → PATH → 已知安装位置（含跨盘符）」五级查找，无需手填路径。',
         engineNotFound: '未找到', engineNotLoggedIn: '未登录', engineLoggedIn: '已登录', engineLoginUnknown: '登录态未知',
@@ -676,7 +679,7 @@ window.__ModuleLoader__.load({
          * `modelAvailCount` 含 `{n}` / `{total}` 占位符，由 `tFmt()` 填充（t() 本身只做静态查表）。
          * ⚠️ 与 locale/zh.json、locale/en.json **逐键逐值一致**（single-source ⑤ 守门）。 */
         modelSwitchCol: '可用', modelDisabledTag: '已关闭', modelAvailCount: '可用 {n}/{total}',
-        paused: '已暂停', pQuota: '额度耗尽', pEntitled: '未开通', pSigning: '需签名', pConfig: '配置错误', pBlocked: '免费模型被封锁', pPerm: '工具权限未放行', pUnknown: '未知原因',
+        paused: '已暂停', pQuota: '额度耗尽', pEntitled: '未开通', pSigning: '需签名', pConfig: '配置错误', pBlocked: '免费模型被封锁', pPerm: '工具权限未放行', pNotLoggedIn: 'CLI 未登录', pUnknown: '未知原因',
         lockWait: '排队等待', timedOut: '超时终止',
         timedOutRunner: 'runner 超时（exit 124，--timeout-min 到点）', timedOutWatchdog: '看门狗强制终止（timeoutMin+120s 宽限后未退出）',
         resumeSame: '同通道续跑', retryHandoff: '换通道重跑', noSession: '无会话，不能同通道续跑',
@@ -744,6 +747,8 @@ window.__ModuleLoader__.load({
         secChannel: 'Channels', chanNewTask: 'New tasks will use: ', chanDisabled: 'unavailable', chanLoadFail: 'Failed to load channels',
         engZcode: 'ZCode', engOpencode: 'OpenCode', engGroupZcode: 'ZCode channels', engGroupOpencode: 'OpenCode free models',
         engQoder: 'Qoder', engGroupQoder: 'Qoder channels',
+        engCodebuddy: 'WorkBuddy', engGroupCodebuddy: 'WorkBuddy channels',
+        chanEngineHintCodebuddy: 'WorkBuddy / CodeBuddy engine (runs the **official CLI**; no reverse proxy involved): no mode / memoryBench; thinking maps to CodeBuddy --effort (the level set is declared by the CLI itself in --help: minimal→max, 6 levels). The executor defaults to --permission-mode acceptEdits (can edit files inside the working directory); to allow everything the dispatcher must pass auto=true explicitly (mapped to bypassPermissions). Note: the CLI login is **independent of the WorkBuddy desktop app** — the desktop can be signed in while headless runs still report "Authentication required"; the job then pauses as `not logged in` and you need to start the CLI interactively once and run /login. This CLI exits with code 0 even when the task fails, and the executor folds that into the done exit code — so do not judge success from exit=0 alone.',
         enginesTitle: 'Engines',
         enginesHint: 'Execution engines auto-detected on this machine (form / version / login). The plugin searches in five levels — env var → config → PATH → known install locations (incl. other drives) — so no path needs to be filled in by hand.',
         engineNotFound: 'not found', engineNotLoggedIn: 'not signed in', engineLoggedIn: 'signed in', engineLoginUnknown: 'login unknown',
@@ -812,7 +817,7 @@ window.__ModuleLoader__.load({
         seqLoading: 'Loading channels and models…', seqSaving: 'Saving…', seqSortCol: 'Order',
         /* ZB-58: per-model enable switch column + "off" tag + available counter in the block header. */
         modelSwitchCol: 'Available', modelDisabledTag: 'Off', modelAvailCount: '{n}/{total} available',
-        paused: 'Paused', pQuota: 'Quota exhausted', pEntitled: 'Not entitled', pSigning: 'Signing required', pConfig: 'Config error', pBlocked: 'Free models blocked', pPerm: 'Tool permission not granted', pUnknown: 'Unknown',
+        paused: 'Paused', pQuota: 'Quota exhausted', pEntitled: 'Not entitled', pSigning: 'Signing required', pConfig: 'Config error', pBlocked: 'Free models blocked', pPerm: 'Tool permission not granted', pNotLoggedIn: 'CLI not signed in', pUnknown: 'Unknown',
         lockWait: 'Queue wait', timedOut: 'Timed out',
         timedOutRunner: 'runner timeout (exit 124, --timeout-min elapsed)', timedOutWatchdog: 'watchdog kill (still running after timeoutMin+120s grace)',
         resumeSame: 'Resume (same channel)', retryHandoff: 'Rerun on new channel', noSession: 'No session to resume',
@@ -870,12 +875,12 @@ window.__ModuleLoader__.load({
      *   `foldChannels`（通道折叠）在 `ChannelSection` 里用到它们，而组件内的 `const` 有 TDZ ——
      *   曾把 `engineOf` 留在组件函数里 ⇒ 真渲染时 `ReferenceError: Cannot access 'engineOf'
      *   before initialization`（`node --check` 查不出来，靠 fallback-ui 的真 DOM 渲染才暴露）。 */
-    const KNOWN_ENGINES = ['zcode', 'opencode', 'qoder'];
+    const KNOWN_ENGINES = ['zcode', 'opencode', 'qoder', 'codebuddy'];
     const engineOf = (v) => {
       const s = typeof v === 'string' ? v.trim().toLowerCase() : '';
       return KNOWN_ENGINES.includes(s) ? s : 'zcode';
     };
-    const ENG_LABEL_KEY = { zcode: 'engZcode', opencode: 'engOpencode', qoder: 'engQoder' };
+    const ENG_LABEL_KEY = { zcode: 'engZcode', opencode: 'engOpencode', qoder: 'engQoder', codebuddy: 'engCodebuddy' };
     const engLabel = (e) => t(ENG_LABEL_KEY[engineOf(e)]);
     /* ZB-51：ZCode 的「模型」下拉里其实列的是**路由**（Plan / 免费额度）——
      * 因为它们提供同样的模型名，按模型名去重会互相覆盖（真机反馈"ZCode 怎么剩 1 个？"）。
@@ -914,6 +919,7 @@ window.__ModuleLoader__.load({
         if (!p) continue;
         if (p.startsWith('opencode/') || p === 'opencode') return 'opencode';
         if (p.startsWith('qoder/') || p === 'qoder' || p === 'qoder-cn' || p === 'qoder-global') return 'qoder';
+        if (p.startsWith('codebuddy/') || p === 'codebuddy' || p === 'workbuddy') return 'codebuddy';
       }
       return 'zcode';
     };
@@ -2380,7 +2386,7 @@ window.__ModuleLoader__.load({
      * 另含 config-error（不降级、但同样要显示）；cross-check.test.mjs 守门。 */
     /* ZB-71：新增 `provider-blocked`（OpenCode 免费模型按 IP 封锁）—— 客户端必须同步，
      * 否则卡片上只会显示"未知原因"（cross-check.test.mjs 会因此变红，正是它该做的）。 */
-    const PAUSE_LABEL_KEY = { 'quota-exhausted': 'pQuota', 'plan-not-entitled': 'pEntitled', 'provider-signing': 'pSigning', 'config-error': 'pConfig', 'provider-blocked': 'pBlocked', 'permission-blocked': 'pPerm' };
+    const PAUSE_LABEL_KEY = { 'quota-exhausted': 'pQuota', 'plan-not-entitled': 'pEntitled', 'provider-signing': 'pSigning', 'config-error': 'pConfig', 'provider-blocked': 'pBlocked', 'permission-blocked': 'pPerm', 'not-logged-in': 'pNotLoggedIn' };
     const pauseLabel = (r) => t(PAUSE_LABEL_KEY[r] ?? 'pUnknown');
     /* ZB-29e（用户要求）：思考强度档位**中文显示** —— 值与传输一律用原始字符串（disabled/enabled/
      * low/high/max），只在显示层映射中文标签；未知档位（上游新增）原样显示，绝不隐藏、不猜语义。
@@ -2830,38 +2836,6 @@ window.__ModuleLoader__.load({
     const foldedEntryFor = (channels, provider) => (provider
       ? resolveFoldedChannel(foldChannels(Array.isArray(channels) ? channels : []), provider) ?? null
       : null);
-    /** 顺序派发的"两块列表"（**浮窗**用）：
-     *  · 主通道模型为空 ⇒ 主块；
-     *  · 降级目标模型为空 ⇒ 降级块（与主块**同一引擎**时去重 —— 列表按引擎存，重复显示会误导成两份）。 */
-    const buildSeqBlocks = ({ channels, channel, fallback, sequential, onSet, levelsStatusByEngine, disabledSet, onToggleModel }) => {
-      const list = Array.isArray(channels) ? channels : [];
-      const provider = channel?.provider;
-      const sel = foldedEntryFor(list, provider) ?? list.find((c) => c.id === provider) ?? null;
-      const fbTarget = fallback?.target ?? null;
-      const fbProvider = fbTarget?.provider ?? '';
-      const fbSel = foldedEntryFor(list, fbProvider);
-      const fbModel = fbModelValue(fbSel, fbProvider, fbTarget);
-      const seqEnabled = channel?.model == null || channel?.model === '';
-      const seqFbOn = !!fallback?.enabled && fbTarget != null && fbSel != null && fbModel === '';
-      /* ZB-56：逐引擎档位探测状态（core 的 `channels().levelsStatus`）—— 缺省 null = 未知（正常列档位） */
-      const lvStatusOf = (agg) => (agg ? (levelsStatusByEngine?.[engineOf(agg.engine)] ?? null) : null);
-      const blocks = [];
-      if (seqEnabled) {
-        blocks.push(makeSeqBlock({
-          owner: 'main', agg: sel, candidates: seqCandidatesOf(sel, provider, channel?.model),
-          channels: list, sequential, onSet, levelsStatus: lvStatusOf(sel),
-          disabledSet, onToggleModel, // ZB-58：逐模型开关（列表显示禁用态、可原地重开）
-        }));
-      }
-      if (seqFbOn && (!seqEnabled || !sel || engineOf(fbSel.engine) !== engineOf(sel.engine))) {
-        blocks.push(makeSeqBlock({
-          owner: 'fallback', agg: fbSel, candidates: seqCandidatesOf(fbSel, fbProvider, fbTarget?.model),
-          channels: list, sequential, onSet, levelsStatus: lvStatusOf(fbSel),
-          disabledSet, onToggleModel,
-        }));
-      }
-      return blocks;
-    };
     /** 某引擎的折叠条目（候选模型 + 路由表）；该引擎没有任何通道 ⇒ null。 */
     const foldEngineAgg = (channels, engine) => foldChannels(Array.isArray(channels) ? channels : [])
       .find((c) => engineOf(c.engine) === engineOf(engine)) ?? null;
@@ -3173,12 +3147,13 @@ window.__ModuleLoader__.load({
        * 原先到处写 `c.engine === 'opencode' ? 'opencode' : 'zcode'` —— 二元判断，第三个引擎
        * （qoder）一来就会被**错误地归进 ZCode 组**（下拉分组、徽标、提示全错），且不会报错。
        * 这里统一成一个函数，所有需要"引擎名"的地方都走它。 */
-      const ENG_GROUP_KEY = { zcode: 'engGroupZcode', opencode: 'engGroupOpencode', qoder: 'engGroupQoder' };
+      const ENG_GROUP_KEY = { zcode: 'engGroupZcode', opencode: 'engGroupOpencode', qoder: 'engGroupQoder', codebuddy: 'engGroupCodebuddy' };
 
       const ENGINE_GROUPS = [
         { key: 'zcode', label: t(ENG_GROUP_KEY.zcode) },
         { key: 'opencode', label: t(ENG_GROUP_KEY.opencode) },
         { key: 'qoder', label: t(ENG_GROUP_KEY.qoder) },
+        { key: 'codebuddy', label: t(ENG_GROUP_KEY.codebuddy) },
       ];
       /* ── 通道过滤开关（用户要求）：两个独立开关，作用于「通道」与「自动降级目标」两处下拉 ──
        * 「仅看可用」默认**开**：与改造前的既有行为一致（下拉只列可用通道，ZB-33b）。
@@ -3281,7 +3256,7 @@ window.__ModuleLoader__.load({
       const chanEngineNote = chanEngine
         ? h('div', { className: 'dsp-dim', style: { fontSize: '11px' } },
           h('span', { className: 'dsp-badge' }, `${t('engBadge')}：${engLabel(chanEngine)}`),
-          h('span', { style: { marginLeft: '6px' } }, t(chanEngine === 'opencode' ? 'chanEngineHintOpencode' : chanEngine === 'qoder' ? 'chanEngineHintQoder' : 'chanEngineHintZcode')))
+          h('span', { style: { marginLeft: '6px' } }, t({ opencode: 'chanEngineHintOpencode', qoder: 'chanEngineHintQoder', codebuddy: 'chanEngineHintCodebuddy' }[chanEngine] ?? 'chanEngineHintZcode')))
         : null;
 
       /* 降级目标（单目标；core 仍支持多目标列表供 CLI 使用）。targets[0] 为准，旧 chain 兜底。 */
@@ -3433,19 +3408,13 @@ window.__ModuleLoader__.load({
       const fbSwitchThinking = (lv) => saveTarget({ reasoningLevel: lv || 'agent' });
       const fbUnknown = fbEnabled && fbProvider && !resolveFoldedChannel(fbFolded, fbProvider);
 
-      /* ── ZB-52d：顺序派发（**没有开关**；主通道与降级目标**各自一块列表、同屏显示**）──
-       * 唯一真相 = 该通道的 model 是否为空：主通道模型为空 ⇒ 主块；降级目标模型为空 ⇒ 降级块。
-       * ⚠️ 块的构造已**上提为共用件** `buildSeqBlocks()`（ZB-53：浮窗「通道」分区与插件详情页配置卡
-       * 共用同一套实现，见上面的注释）。这里只保留"主通道是否顺序派发"这一个派生量 ——
-       * 主「思考强度」下拉要用它来决定"禁用 + 显示设置默认"。 */
+      /* ── ZB-52d 顺序派发：**面板不再渲染**（ZB-85，用户 2026-10-21 明确要求）──
+       * 顺序派发列表属于"设置"类内容，统一收进**插件设置页的配置卡**（`DispatchConfigCard`，
+       * 用 `makeEngineSeqBlock` 按引擎展示）。侧边栏面板是**日常派发**用的，塞进模式/开关
+       * 只会把主操作挤下去（真机反馈：主通道选了 Qoder，面板里却列着 11 条 OpenCode 模型，
+       * 而且那是**降级目标**的表 —— 看起来完全像主通道配错了引擎）。
+       * 唯一保留的派生量 = 主通道是否顺序派发（主「思考强度」下拉要用它决定"禁用+显示默认"）。 */
       const seqEnabled = channel.model == null || channel.model === '';
-      const seqBlocks = buildSeqBlocks({
-        channels, channel, fallback, sequential, onSet: onSequentialSet,
-        /* ZB-56：逐引擎档位探测状态（`channelsInfo.levelsStatus`）⇒ 浮窗的档位下拉同样能显示「载入中」 */
-        levelsStatusByEngine: channelsInfo?.levelsStatus ?? null,
-        /* ZB-58：逐模型开关 —— 浮窗列表里显示已关闭态并可原地重开；与配置卡同一口径 */
-        disabledSet, onToggleModel,
-      });
 
       return h('div', { className: 'dsp-stack' },
         /* ZB-42（用户现场报告）：总开关关闭时**必须在通道分区里明说**。
@@ -3643,12 +3612,8 @@ window.__ModuleLoader__.load({
                   })),
               h('span', { className: 'dsp-note', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' } }, giftText)))
           : null,
-        /* ── ZB-52d/ZB-53：顺序派发列表（**没有开关**；主通道与降级目标**各自一块、同屏显示**） ──
-         * 位置刻意放在「自动降级」之前：顺序派发是**同一引擎内**换模型，自动降级是**跨通道**续命，
-         * core 的执行次序也是"先顺序、后降级"（顺序列表用尽 ⇒ 交回降级链）。
-         * 渲染已抽成**共用件** `SeqBlocksView`（浮窗与插件详情页配置卡同一套 UI，见上面的注释）；
-         * 无块时它返回 null ⇒ 这里什么也不渲染（与"关闭不显示"同一纪律）。 */
-        h(SeqBlocksView, { blocks: seqBlocks, offline, busy }),
+        /* ── ZB-85：顺序派发列表**已从面板移除**（改由插件设置页的配置卡承载）。
+         * 面板只保留"日常派发"需要的东西：通道 / 模型 / 思考强度 / 自动降级目标 / 分流。 ── */
         /* ── ZB-30：自动降级（开关 + 开启后的目标三下拉） ── */
         h('div', { className: 'dsp-field' },
           h('button', {

@@ -557,3 +557,53 @@ DSH 自带的后台任务完成时会自动把会话拉起来，派发台也应�
   再校验 `Target` 是否存在（本次另发现 `node_modules/@deepseek-ai/{cosmokit,schemastery}` 悬空）。
 - **附带教训（验收标准）**：改名后实测面板派发成功（exit 0）**不足以**作为验收 —— 依赖/link 类改动
   必须**跑一次 install + 重启一次**；故障可能延迟到下次启动才暴露。
+
+---
+
+## 2026-10-21 ZB-84：接入 WorkBuddy 官方 CLI（第四引擎）踩到的四件事
+
+### 1. 产品限制反代 ⇒ 改走官方 CLI（决策，不是技术问题）
+
+社区那批"把 WorkBuddy 账号登录态反代成 OpenAI/Anthropic 兼容接口"的项目
+（`workbuddy2api` / `workbuddy-gateway` 等）**开始被产品限制**。
+用户决策：**走官方 CLI 派发** —— 合法合规，且不会因后续进一步封禁而失效。
+教训：**依赖"绕过产品正常入口"的方案，要预留"被官方收紧"的风险**；
+优先选产品自己提供的入口（哪怕多写一个执行器）。
+
+### 2. `dist/codebuddy` 在 asar 解包里**不存在** —— 不设 env 直接 MODULE_NOT_FOUND
+
+WorkBuddy 内置 CLI 的入口 `cli/bin/codebuddy` 默认 `require('../dist/codebuddy')`，
+但解包目录里**只有 lite 包**：`dist/codebuddy-lite-wb.mjs`（ESM, 9.4 MB）。
+
+```
+Error: Cannot find module '../dist/codebuddy'   ← 不设环境变量就是这样
+```
+
+**正确做法**：设 `CODEBUDDY_FORCE_LITE_WB_BUNDLE=1`（启动器据此 `await import` lite 包，
+内置 `lite-wb → headless → full` 逐级回退）。执行器已自动注入；手工验证也要带。
+
+**判别手法**（可复用）：跑不起来时**先读入口脚本里 `--help` 之前的 require 链**，
+确认它到底加载哪个产物，别照着印象假设"CLI 装好就能跑"。
+
+### 3. 进程退出码**恒为 0**，即使 `result.is_error = true`
+
+真机实测：未登录 / 模型报错时，`result` 事件是 `is_error:true`，但**进程 exit code 还是 0**。
+若照抄其它引擎的 `exit = childExitCode`，core 会把失败当成功收尾 —— 这是
+**"静默假成功"的新变种**（比 ZB-72 那两类更隐蔽：连 `permission_denials` 都是空的）。
+
+**正确做法**：执行器把 `is_error` 并入 done 的 exit 码；core 侧仍以 `done exit=` 为准。
+**教训推广**：接新引擎时"退出码可信度"必须**单独验证一次**（跑一个必然失败的任务看 exit），
+不能假定"非 0 = 失败"。
+
+### 4. 两个**静默**的路径/正则坑
+
+- **shebang 正则写成 `^#!\s*\S*\bnode\b` 会永远失配**：真实样本是
+  `#!/usr/bin/env node` —— `\S*` 把 `/usr/bin/env` 整个吃掉后，`\bnode\b` 面对的是**空格**。
+  写 `^#!.*\bnode\b` 才对。表现：入口被判成 `exe`，Windows 下直接 spawn 失败。
+- **`new URL(x, import.meta.url).pathname` 给的是 URL 编码路径**：
+  仓库路径含空格时得到 `F:\My%20Code\...` ⇒ `existsSync` 永远 false
+  ⇒ 报"执行器不存在 ⇒ 通道为空"，而文件明明在那儿。
+  **必须用 `fileURLToPath(new URL(...))`**。
+
+**教训**：这两个坑都不抛异常，只让功能"看起来没配好" —— 排查时优先怀疑
+**路径字符串的编码/形态**与**正则能否匹配真实样本**（拿真实样本跑一次正则，别靠眼过）。

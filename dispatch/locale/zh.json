@@ -242,6 +242,10 @@
     "splitMainHint": "主通道实时名额",
     "splitLimit": "上限",
     "splitRunning": "在途",
-    "splitFree": "剩余"
+    "splitFree": "剩余",
+    "engCodebuddy": "WorkBuddy",
+    "engGroupCodebuddy": "WorkBuddy 通道",
+    "pNotLoggedIn": "CLI 未登录",
+    "chanEngineHintCodebuddy": "WorkBuddy / CodeBuddy 引擎（走**官方 CLI**，不依赖任何反代）：不支持 mode / memoryBench；思考强度映射为 CodeBuddy 的 --effort（档位值由 CLI 自身 --help 声明，minimal→max，共 6 档）。执行器默认带 --permission-mode acceptEdits（能改工作目录内的文件）；需要全放行时由派发方**显式**传 auto=true（映射为 bypassPermissions）。⚠️ **CLI 的登录态与 WorkBuddy 桌面应用互相独立** —— 桌面用得好好的，CLI 仍可能在无头执行时报 “Authentication required”；此时任务会停在 `未登录` 暂停态，需交互启动 CLI 后输入 /login（一次性）。该 CLI 的进程退出码**恒为 0 即使任务失败**，执行器已把它并入 done exit 码，故别只看 exit=0 判断成功。"
   }
 }

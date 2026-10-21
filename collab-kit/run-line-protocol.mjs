@@ -5,8 +5,10 @@
  * `[zcode-run] …`。接入第二个执行器（OpenCode）时，如果让 OpenCode 执行器也打印
  * `[zcode-run]` 字样，日志与面板会把两个引擎混为一谈 —— 所以这里把「行前缀」参数化：
  *
- *   引擎 zcode     → 前缀 `[zcode-run]`（ZCode 器 `collab-kit/zcode-run.mjs` 的本名，不变）
+ *  引擎 zcode     → 前缀 `[zcode-run]`（ZCode 器 `collab-kit/zcode-run.mjs` 的本名，不变）
  *   引擎 opencode  → 前缀 `[opencode-run]`（`collab-kit/opencode-run.mjs`）
+ *   引擎 qoder     → 前缀 `[qoder-run]`（`collab-kit/qoder-run.mjs`）
+ *   引擎 codebuddy → 前缀 `[codebuddy-run]`（`collab-kit/codebuddy-run.mjs`，ZB-84）
  *
  * 除前缀与下面标注的**引擎差异字段**外，两种引擎的行语法**逐字相同** ——
  * core 的解析、暂停分类、进度心跳、思考强度回显因此对两个引擎同时生效，不需要分叉实现。
@@ -20,7 +22,7 @@
  *  ⚠️ 注意：加进这个清单意味着 `engine:'qoder'` 会被**如实采纳**，而不再静默回落成 zcode。
  *  执行器尚未落地时，core 的引擎路由会给出**可读的"执行器未配置"失败**（见 startJob 的 engineRunner 判定），
  *  而不是"派给 Qoder 却实际跑了 ZCode"这种无声错误。 */
-export const ENGINES = Object.freeze(['zcode', 'opencode', 'qoder']);
+export const ENGINES = Object.freeze(['zcode', 'opencode', 'qoder', 'codebuddy']);
 
 /** 默认引擎 —— 未显式指定、也推断不出时用它（＝接入 OpenCode 前的既有语义）。 */
 export const DEFAULT_ENGINE = 'zcode';
@@ -30,6 +32,7 @@ export const RUN_PREFIX = Object.freeze({
   zcode: '[zcode-run]',
   opencode: '[opencode-run]',
   qoder: '[qoder-run]',
+  codebuddy: '[codebuddy-run]',
 });
 
 /** 引擎 → runner 脚本的**候选文件名**（core 只作日志/自检提示用，不参与解析）。 */
@@ -37,6 +40,7 @@ export const RUNNER_BASENAME = Object.freeze({
   zcode: 'zcode-run.mjs',
   opencode: 'opencode-run.mjs',
   qoder: 'qoder-run.mjs',
+  codebuddy: 'codebuddy-run.mjs',
 });
 
 /** 规范化引擎名：非字符串/未知值 → 默认引擎（永不抛）。 */
@@ -90,6 +94,33 @@ export function isQoderModelName(name) {
 }
 
 /**
+ * WorkBuddy / CodeBuddy 的**通道 id / 模型 id** 形状：`codebuddy/<model>`。
+ *
+ * 真机 `--help` 声明的模型名形如 `auto` / `glm-5v-turbo` / `glm-5.1` / `glm-5.0-turbo` /
+ * `kimi-k2.5` / `minimax-m2.7` / `deepseek-v3-2-volc` —— 含点，**不含空格**。
+ * 仍按 Qoder 的宽字符集放行（空格/点），理由是**未来兼容**：CLI 升级后若出现带空格的
+ * 显示名，宁可让它通过也不要把真机模型名判成"非法通道"而静默消失（ZB-51 的教训）。
+ */
+export const CODEBUDDY_ID_RE = /^codebuddy\/[A-Za-z0-9._:\- ]+$/;
+
+/** 给定 provider/model id 是否是 CodeBuddy 通道形态。 */
+export function isCodebuddyId(id) {
+  return typeof id === 'string' && CODEBUDDY_ID_RE.test(id.trim());
+}
+
+/**
+ * 给定一个**裸模型名**是否是合法的 CodeBuddy 模型名（用于把 `--list-models` 的输出过滤成模型清单）。
+ * 与 Qoder 同套最小校验：非空、无控制字符、长度合理、不含路径分隔符（防把日志行当模型名）。
+ */
+export function isCodebuddyModelName(name) {
+  if (typeof name !== 'string') return false;
+  const s = name.trim();
+  if (!s || s.length > 64) return false;
+  if (/[\\/\u0000-\u001f]/.test(s)) return false;
+  return /^[A-Za-z0-9][A-Za-z0-9._+\- ]*$/.test(s);
+}
+
+/**
  * 由 spec 推断引擎（纯函数、无副作用；core 与 CLI 共用，避免两处判据不一致）。
  *
  * 判据顺序（先显式后推断，绝不猜）：
@@ -106,6 +137,7 @@ export function inferEngine(spec) {
   if (ENGINES.includes(explicit)) return explicit;
   if (isOpenCodeId(spec?.provider)) return 'opencode';
   if (isQoderId(spec?.provider)) return 'qoder';
+  if (isCodebuddyId(spec?.provider)) return 'codebuddy';
   /* ⚠️ 真机踩到的坑（ZB-51）：**裸引擎名**也是有效判据 —— 规整后的 spec 里
    * provider 就是裸 `'opencode'` / `'qoder'`（不再带 `/model`）。若不认它们，
    * 一个**已经规整过**的 spec 再进来（`normalizeEngineSpec` 幂等性、或调用方直接构造）
@@ -115,6 +147,7 @@ export function inferEngine(spec) {
   const bare = typeof spec?.provider === 'string' ? spec.provider.trim().toLowerCase() : '';
   if (bare === 'opencode') return 'opencode';
   if (bare === 'qoder' || bare === 'qoder-cn' || bare === 'qoder-global') return 'qoder';
+  if (bare === 'codebuddy' || bare === 'workbuddy') return 'codebuddy';
   return DEFAULT_ENGINE;
 }
 
@@ -157,6 +190,20 @@ export function normalizeEngineSpec(spec) {
     if (typeof out.model === 'string' && /^qoder\//i.test(out.model.trim())) {
       out.model = out.model.trim().slice('qoder/'.length);
     }
+  } else if (engine === 'codebuddy') {
+    /* 与 Qoder 同形：`codebuddy/<model>` ⇒ provider='codebuddy'，model 取**裸模型名**。
+     * CodeBuddy 的 `--model` 同样要裸名（真机 help：`auto, glm-5.1, kimi-k2.5, …`），
+     * 故与 Qoder 一样**无条件**剥 `codebuddy/` 前缀（两种传法都覆盖 —— 直接传
+     * `model:'codebuddy/glm-5.1'` 也常见）。 */
+    if (isCodebuddyId(out.provider)) {
+      const id = String(out.provider).trim();
+      if (!out.model) out.model = id.slice('codebuddy/'.length);
+      out.provider = 'codebuddy';
+    }
+    if (out.provider == null) out.provider = 'codebuddy';
+    if (typeof out.model === 'string' && /^codebuddy\//i.test(out.model.trim())) {
+      out.model = out.model.trim().slice('codebuddy/'.length);
+    }
   }
   return out;
 }
@@ -184,6 +231,9 @@ export function normalizeEngineSpec(spec) {
  *     variants <model>=<a,b>                模型变体（OpenCode 的 --variant）表
  *     variant=<v> model=<modelId>           实际生效确认（OpenCode 无需 provider 注入，
  *                                           故不带 target=，以 model= 代替）
+ *   codebuddy 前缀 `[codebuddy-run]`
+ *     reasoning-efforts <model>=<a,b>       思考档位表（CodeBuddy 的 --effort；值由 CLI --help 声明）
+ *     effort=<lv> model=<modelId>           请求档位回显（照 qoder 同形；CLI 不回报实际档位）
  *
  * 新增引擎时的义务：① 在 RUN_PREFIX 加前缀 ② 若思考强度命名不同，在上面加一条差异行
  * ③ 在 core 的 RES 里加镜像正则 ④ 在 core 测试里加该前缀的解析断言。
@@ -197,12 +247,15 @@ export default {
   RUNNER_BASENAME,
   OPENCODE_ID_RE,
   QODER_ID_RE,
+  CODEBUDDY_ID_RE,
   LINE_GRAMMAR_NOTE,
   normalizeEngine,
   prefixFor,
   isOpenCodeId,
   isQoderId,
+  isCodebuddyId,
   isQoderModelName,
+  isCodebuddyModelName,
   inferEngine,
   normalizeEngineSpec,
 };

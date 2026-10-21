@@ -25,6 +25,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDispatcher } from '../core/dispatch-core.mjs';
+import { ENGINES } from '../../collab-kit/run-line-protocol.mjs';
 
 const tempDirs = [];
 function newDir(prefix) {
@@ -317,7 +318,7 @@ test('⑨ 通道清单：OpenCode 探测失败 ⇒ zcode 照常 + warnings 可�
   });
   const a = await dA.listChannels();
   const aIds = a.channels.map((c) => c.id);
-  assert.deepEqual(a.engines, ['zcode', 'opencode', 'qoder'], '顶层 engines 恒定给出（供客户端分组）');
+  assert.deepEqual(a.engines, [...ENGINES], '顶层 engines 恒定给出（供客户端分组；与协议层 ENGINES 同集合）');
   /* ZB-51：ZCode 通道走**白名单**（用户决定只留 plan 与免费额度）⇒ 其余一律剔除。
    * ⚠️ 不硬性要求"恰好两条"：本 fixture 的精简探测样例里没有免费额度行，
    * 故实际只有 plan。用**不变式**断言（所有 zcode 通道都在白名单内）比数数更稳。 */
@@ -371,7 +372,7 @@ test('⑨ 通道清单：OpenCode 探测失败 ⇒ zcode 照常 + warnings 可�
   assert.equal(snap1.engineById.plan, 'zcode');
   /* ZB-51：白名单外的 personal 已剔除 ⇒ 快照里也不该有它（快照来自同一份清单）。 */
   assert.equal(snap1.engineById.personal, undefined, '★ 快照里也没有白名单外的 personal');
-  assert.deepEqual(snap1.engines, ['zcode', 'opencode', 'qoder']);
+  assert.deepEqual(snap1.engines, [...ENGINES]);
   assert.ok(Number.isFinite(snap1.updatedAt), 'updatedAt 是 ms 数值');
   await sleep(30);
   await dB.listChannels();
@@ -434,12 +435,12 @@ test('⑩ ZB-45 auto：默认 argv 不带 --auto；auto:true ⇒ 带 --auto 且 
   /* (c) auto:true + 不支持 auto 的引擎（zcode）⇒ 可读 TypeError（不静默失效） */
   assert.throws(
     () => d.dispatch({ kind: 'prompt', prompt: 'x', auto: true }),
-    /auto 仅对 engine=opencode \/ engine=qoder 有意义/,
+    /auto 仅对 engine=opencode \/ engine=qoder \/ engine=codebuddy 有意义/,
     '★ zcode（默认引擎）不接受 auto:true',
   );
   assert.throws(
     () => d.dispatch({ kind: 'prompt', prompt: 'x', provider: 'plan', auto: true }),
-    /auto 仅对 engine=opencode \/ engine=qoder 有意义/,
+    /auto 仅对 engine=opencode \/ engine=qoder \/ engine=codebuddy 有意义/,
     '显式 provider=plan 同理',
   );
   /* 非布尔值也拒（否则 auto:"true" 会被静默当成不放行） */

@@ -13,12 +13,12 @@
 //
 // 硬约束：零依赖（只用 node 内置）；**只读**探测（凭据只判存在性，绝不解析内容）；
 // 任何失败都不抛到调用方；所有子进程探测都带超时。
-import { existsSync, statSync, readdirSync } from 'node:fs';
+import { existsSync, statSync, readdirSync, openSync, readSync, closeSync } from 'node:fs';
 import { join, delimiter, basename, extname, isAbsolute, resolve } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
-export const ENGINES = ['zcode', 'opencode', 'qoder'];
+export const ENGINES = ['zcode', 'opencode', 'qoder', 'codebuddy'];
 
 const IS_WIN = platform() === 'win32';
 const HOME = homedir();
@@ -61,8 +61,29 @@ export function classifyEntry(entry) {
   if (ext === '.cmd' || ext === '.bat') return 'cmd';
   if (ext === '.ps1') return 'ps1';
   if (ext === '.exe') return 'exe';
+  /* ⚠️ 无扩展名的文件**不一定是原生可执行**：WorkBuddy 自带 CLI 的入口就是
+   * `<cli>/bin/codebuddy`（无扩展名，内容 `#!/usr/bin/env node`）——Windows 下直接 spawn
+   * 会失败，必须前置 `process.execPath`。用 shebang 判定（只看头 128 字节，读失败当普通可执行）。
+   * 只认 `node`：`~/.local/bin/opencode` 这类 POSIX 安装脚本也可能是无扩展名的 shell 脚本，
+   * 一律前置 node 会把它们跑坏。 */
+  if (ext === '' && hasNodeShebang(entry)) return 'js';
   // 无扩展名的可执行（*nix 安装脚本落点）
   return IS_WIN ? 'exe' : 'exe';
+}
+
+/** 该文件是否以 `#!…node` 开头（读失败 ⇒ false，绝不抛）。 */
+function hasNodeShebang(p) {
+  let fd;
+  try {
+    fd = openSync(p, 'r');
+    const buf = Buffer.alloc(128);
+    const n = readSync(fd, buf, 0, 128, 0);
+    return /^#!.*\bnode\b/.test(buf.slice(0, n).toString('utf8'));
+  } catch {
+    return false;
+  } finally {
+    if (fd != null) { try { closeSync(fd); } catch { /* 尽力 */ } }
+  }
 }
 
 /** 跑一个探测命令（带超时，绝不抛）。返回 {code, stdout, stderr}。
@@ -138,6 +159,36 @@ function candidatesFor(engine, { fs, env, knownRoots = [] }) {
     return out;
   }
 
+  if (engine === 'codebuddy') {
+    /* WorkBuddy（腾讯）内置 CodeBuddy CLI：入口在客户端 asar 解包里，无扩展名的 node 脚本：
+     *   <安装根>/resources/app.asar.unpacked/cli/bin/codebuddy      ← 官方入口（推荐）
+     *   <安装根>/resources/app.asar.unpacked/cli/bin/codebuddy-lowmem  ← 低内存 wrapper
+     * 另认 npm 全局安装形态（官方也支持独立分发 CLI）。
+     * ⚠️ 目录名大小写两种都真实存在过（`Programs\WorkBuddy` 与 junction 的 `Programs\workbuddy`），都要试。 */
+    const relBin = join('resources', 'app.asar.unpacked', 'cli', 'bin', 'codebuddy');
+    const roots = [
+      ...knownRoots,
+      env.CODEBUDDY_HOME, env.WORKBUDDY_HOME, env.WORKBUDDY_INSTALL_DIR,
+      localAppData && join(localAppData, 'Programs', 'WorkBuddy'),
+      localAppData && join(localAppData, 'Programs', 'workbuddy'),
+      localAppData && join(localAppData, 'WorkBuddy'),
+      programFiles && join(programFiles, 'WorkBuddy'),
+      programFiles && join(programFiles, 'workbuddy'),
+      programFilesX86 && join(programFilesX86, 'WorkBuddy'),
+      programFilesX86 && join(programFilesX86, 'workbuddy'),
+      programData && join(programData, 'WorkBuddy'),
+      ...driveRoots(fs).map((d) => join(d, 'Program Files', 'WorkBuddy')),
+      ...driveRoots(fs).map((d) => join(d, 'Program Files', 'workbuddy')),
+      ...driveRoots(fs).map((d) => join(d, 'Program Files (x86)', 'WorkBuddy')),
+    ].filter((x) => typeof x === 'string' && x.length > 0);
+    for (const r of roots) push(join(r, relBin), 'client-bundled-cli');
+    /* npm 全局分发形态（Windows shim + 无扩展名 POSIX 入口）。 */
+    push(appData && join(appData, 'npm', 'codebuddy.cmd'), 'npm-shim');
+    push(appData && join(appData, 'npm', 'cbc.cmd'), 'npm-shim');
+    push(join(HOME, '.local', 'bin', 'codebuddy'), 'install-script');
+    return out;
+  }
+
   /* Qoder：CN 与全球版两套（可共存，分别上报 variant）。 */
   // CN：用户级 CLI 稳定入口（安装器版本化放置 + 稳定入口 qoderclicn.exe）
   push(join(HOME, '.qoder-cn', 'bin', 'qoderclicn', 'qoderclicn.exe'), 'cn-cli');
@@ -206,6 +257,24 @@ function loginHint(engine, entry, opts) {
     }
     return { loggedIn: null, evidence: `未发现数据目录（${dataDir}）` };
   }
+  /* CodeBuddy / WorkBuddy：**CLI 登录态与桌面应用互相独立**（真机 2026-10-21 实测）。
+   * 证据链：桌面 app 装着且在用，但① 两个候选会话文件都不存在 ② `-p` 直接返回
+   * `Authentication required. Please use /login command to sign in` ⇒ "会话文件缺失"与
+   * "未登录"在这个引擎上是**同一条事实**，可以据此判定（不同于 OpenCode 那个"缺 auth.json
+   * 却用得挺好"的反例；两者区别：CodeBuddy 的 CLI 无凭据**必然**报错）。
+   * 只判存在性与大小，**绝不解析内容**。 */
+  if (engine === 'codebuddy') {
+    const files = [
+      env.CODEBUDDY_SESSION_FILE || join(HOME, '.codebuddy-session.json'),
+      join(HOME, '.codebuddy-global-session.json'),
+    ];
+    const hit = files.find((p) => safeIsFile(fs, p) && safeSize(fs, p) > 0);
+    if (hit) return { loggedIn: true, evidence: `会话文件存在（${hit}）` };
+    return {
+      loggedIn: false,
+      evidence: `未发现会话文件（${files.join(' / ')}）—— CLI 登录态与桌面应用互相独立`,
+    };
+  }
   /* Qoder：**不能用 `.auth/` 目录判登录** —— 实测 IDE 登录着、CLI 仍报 Not logged in，
    * 且 `~/.qoder-cn/.auth/` 里只有 machine_id（不是凭据）。
    * 唯一可靠判据：`--list-models` 能否成功（未登录时 exit=1 且 stderr 含 "Not logged in"）。 */
@@ -256,7 +325,9 @@ export async function discoverEngine(engine, opts = {}) {
     ? ['ZCODE_CLI']
     : engine === 'opencode'
       ? ['OPENCODE_CLI', 'OPENCODE_BIN']
-      : ['QODERCN_CLI_BIN', 'QODER_CLI_BIN'];
+      : engine === 'codebuddy'
+        ? ['CODEBUDDY_CLI', 'CODEBUDDY_CLI_BIN', 'WORKBUDDY_CLI']
+        : ['QODERCN_CLI_BIN', 'QODER_CLI_BIN'];
   for (const n of envNames) {
     const v = env[n];
     if (!v) continue;
@@ -283,7 +354,9 @@ export async function discoverEngine(engine, opts = {}) {
     ? ['zcode']
     : engine === 'opencode'
       ? ['opencode']
-      : ['qoderclicn', 'qoder-cn', 'qodercn', 'qoder'];
+      : engine === 'codebuddy'
+        ? ['codebuddy', 'cbc']
+        : ['qoderclicn', 'qoder-cn', 'qodercn', 'qoder'];
   const onPath = findOnPath(pathNames, { fs, env });
   /* ⚠️ 不逐条记 PATH 候选：目录数 × 扩展名会产出几百条噪声，反而让"查过哪里"不可读。
    * 只记一条汇总（命中则附带真实路径）。 */
@@ -316,7 +389,10 @@ export async function discoverEngine(engine, opts = {}) {
     ? '可设 ZCODE_HOME 指向 ZCode 安装根，或 ZCODE_CLI 指向 <安装根>\\resources\\glm\\zcode.cjs'
     : engine === 'opencode'
       ? '可设 OPENCODE_CLI 指向 opencode 可执行文件'
-      : '可设 QODERCN_CLI_BIN（CN）指向 qoderclicn.exe';
+      : engine === 'codebuddy'
+        ? '可设 CODEBUDDY_HOME 指向 WorkBuddy 安装根，或 CODEBUDDY_CLI 指向 '
+          + '<安装根>\\resources\\app.asar.unpacked\\cli\\bin\\codebuddy'
+        : '可设 QODERCN_CLI_BIN（CN）指向 qoderclicn.exe';
   return {
     ...base,
     reason: `未找到 ${engine} 的可执行文件（已查 ${candidatesTried.length} 处：env/PATH/已知安装位置）。${hint}`,
@@ -334,18 +410,30 @@ function guessForm(engine, entry) {
     if (/qoderclicn/.test(p)) return 'cli';
     return 'ide-bundled';
   }
+  if (engine === 'codebuddy') {
+    /* 客户端自带 CLI（asar 解包） vs npm 全局 shim vs POSIX 安装脚本。 */
+    if (/app\.asar\.unpacked/.test(p)) return 'client-bundled-cli';
+    if (/\.cmd$/.test(p)) return 'npm-shim';
+    return 'cli';
+  }
   return 'cli';
 }
 
 /** 补版本与登录态，然后返回（探测失败不影响 found）。 */
 async function finalize(res, reason, { fs, env, timeoutMs, runProbe }) {
   res.reason = reason;
+  /* ⚠️ CodeBuddy 的探测**必须带启动环境**：入口是无扩展名的 node 脚本，且默认 require 的
+   * `dist/codebuddy` 在 WorkBuddy 的解包里不存在 —— 不设 `CODEBUDDY_FORCE_LITE_WB_BUNDLE=1`
+   * 会直接 MODULE_NOT_FOUND（`--version` 也就拿不到）。其它引擎不需要，传 undefined 走默认 env。 */
+  const probeEnv = res.engine === 'codebuddy'
+    ? { ...env, CODEBUDDY_FORCE_LITE_WB_BUNDLE: env.CODEBUDDY_FORCE_LITE_WB_BUNDLE || '1' }
+    : undefined;
   // 版本
   try {
     const isScript = res.entryKind === 'cjs' || res.entryKind === 'js';
     const cmd = isScript ? process.execPath : res.entry;
     const args = isScript ? [res.entry, '--version'] : ['--version'];
-    const r = runProbe(cmd, args, { timeoutMs, cwd: undefined });
+    const r = runProbe(cmd, args, { timeoutMs, cwd: undefined, env: probeEnv });
     const v = parseVersion(`${r.stdout}\n${r.stderr}`);
     if (v) res.version = v;
     else res.warnings.push('--version 未返回可识别版本号');
@@ -360,7 +448,11 @@ async function finalize(res, reason, { fs, env, timeoutMs, runProbe }) {
     if (loggedIn === false) {
       res.warnings.push(res.engine === 'qoder'
         ? 'Qoder CLI 存在但**未登录**：运行 `qoderclicn login`（浏览器设备码）或设 QODER_PERSONAL_ACCESS_TOKEN'
-        : `${res.engine} 未登录`);
+        : res.engine === 'codebuddy'
+          ? 'CodeBuddy CLI 存在但**未登录**（CLI 登录态与 WorkBuddy 桌面应用互相独立）：'
+            + '交互启动 CLI 后在界面里输入 /login（浏览器 OAuth）。'
+            + `交互启动命令：set CODEBUDDY_FORCE_LITE_WB_BUNDLE=1 && "${res.entry}"`
+          : `${res.engine} 未登录`);
     }
   } catch (e) {
     res.loggedIn = null;

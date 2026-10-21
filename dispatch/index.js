@@ -44,8 +44,14 @@ const FIELDS = [
    * 且结果正确（耗时 10–20s，无明显劣化）⇒ **Qoder 可以并发**。
    * 故默认提到 3（与全局默认一致），并**补上配置字段**让用户可自行调整。 */
   { name: 'maxConcurrentQoder', type: 'number', def: 3, min: 1, max: 8, desc: 'Qoder 引擎的**独立**并发上限（与其它引擎分开计数）；**实测依据**：同时起 3/5 个 qoderclicn 进程全部 exit=0 且结果正确（2026-10-20 实测，旧默认 1 的依据是猜测且从未实测）⇒ 默认 3；maxConcurrent 仍是全局上限（实际并发 = min(两者)）' },
+  /* ZB-84（2026-10-21）：WorkBuddy / CodeBuddy 引擎接入。
+   * ⚠️ 并发默认 2 是**保守默认**、**不是实测结论**（接入时 CLI 未登录，无法跑并发对照）；
+   * 依据是它比纯 CLI 重（Electron 客户端内置 bundle + daemon-supervisor + Sandbox）。
+   * 用户实测后可自行调高 —— teaching 里已如实标注依据强弱。 */
+  { name: 'maxConcurrentCodebuddy', type: 'number', def: 2, min: 1, max: 8, desc: 'WorkBuddy/CodeBuddy 引擎的**独立**并发上限（与其它引擎分开计数）；默认 2 是**保守默认**（未做并发实测：该 CLI 是 Electron 客户端内置 bundle，比纯 CLI 重）；用户可自行调高；maxConcurrent 仍是全局上限（实际并发 = min(两者)）' },
   { name: 'runnerPath', type: 'string', def: '', desc: 'runner 脚本绝对路径（通用工具仓库 dispatch/collab-kit/zcode-run.mjs，只读使用）；留空则不创建 dispatcher' },
   { name: 'opencodeRunnerPath', type: 'string', def: '', desc: 'OpenCode 执行器脚本绝对路径（<本仓库>/collab-kit/opencode-run.mjs，只读使用，兼作 --list-models / --version 只读探测）；留空则用默认推断（env DSP_OPENCODE_RUNNER → 仓库内 collab-kit/opencode-run.mjs）' },
+  { name: 'codebuddyRunnerPath', type: 'string', def: '', desc: 'WorkBuddy/CodeBuddy 执行器脚本绝对路径（<本仓库>/collab-kit/codebuddy-run.mjs，只读使用，兼作 --list-models / --version 只读探测）；留空则用默认推断（env DSP_CODEBUDDY_RUNNER → 仓库内 collab-kit/codebuddy-run.mjs）' },
   { name: 'ledgerPath', type: 'string', def: '', desc: '台账 dispatch-runs.jsonl 绝对路径；留空则跳过台账回读与用量聚合' },
   { name: 'workRoot', type: 'string', def: '', desc: '派发器工作根目录（locks/、state/jobs.json、logs/ 落在这里）；留空则不创建 dispatcher' },
   { name: 'runnerCwd', type: 'string', def: '', desc: 'runner 子进程工作目录（通常设为宿主项目根，如 F:\\My Code\\keysion dac vue）；留空 = 用 DSH 进程 cwd' },
@@ -338,12 +344,14 @@ const TOOL_PARAMETERS = {
    * 却撞上 `invalid arguments: "provider" must be one of ["plan","personal"]` ⇒ 被迫用 `plan`
    * （付费套餐，5h 窗口已满）⇒ 三个作业全部 429 ⇒ 它转而用后台 pwsh 直跑 runner 绕过派发台。 */
   model: { type: 'string', description: 'dispatch：模型（如 GLM-5.3 / GLM-5.3-Flash / deepseek-flash；实际可用值以 action=channels 清单为准，其它模型经 action=channel 设默认后使用）' },
-  provider: { type: 'string', description: 'dispatch：通道 id。**通常不要传** —— 不传 = 用用户在面板 / `action=channel` 选定的默认通道（推荐做法）；只有确实要临时换通道时才传。可用值：`plan` 套餐 / `personal` 个人 Key / `account:<family>-start-plan` 免费额度 / **OpenCode 免费模型通道 id 形如 `opencode/deepseek-v4.1-flash-free`、Qoder 通道形如 `qoder/Qwen3.8-Max`（清单以 `action=channels` 为准）** / 清单里任意真实 id。传入的通道若"最近撞过额度"，派发会**自动改派**到你选定的可用通道并在返回里说明（`redirectedFrom`）' },
-  /* 引擎（ZCode / OpenCode / Qoder）：`engine` 同样**不用 enum** —— 与 model/provider 同一条纪律
+  provider: { type: 'string', description: 'dispatch：通道 id。**通常不要传** —— 不传 = 用用户在面板 / `action=channel` 选定的默认通道（推荐做法）；只有确实要临时换通道时才传。可用值：`plan` 套餐 / `personal` 个人 Key / `account:<family>-start-plan` 免费额度 / **OpenCode 免费模型通道 id 形如 `opencode/deepseek-v4.1-flash-free`、Qoder 通道形如 `qoder/Qwen3.8-Max`、WorkBuddy 通道形如 `codebuddy/glm-5.1`（清单以 `action=channels` 为准）** / 清单里任意真实 id。传入的通道若"最近撞过额度"，派发会**自动改派**到你选定的可用通道并在返回里说明（`redirectedFrom`）' },
+  /* 引擎（ZCode / OpenCode / Qoder / WorkBuddy）：`engine` 同样**不用 enum** —— 与 model/provider 同一条纪律
    * （ZB-37 真机事故：enum 会挡住清单里枚举外的真实取值），权威来源是 action=channels 的
-   * channels[].engine。通常也不必传：provider 传 `opencode/<model>` / `qoder/<model>` 会被 core
-   * 自动识别（ZB-63 修：原 desc 只写两引擎，Qoder 通道会让 agent 以为没有这个引擎）。 */
-  engine: { type: 'string', description: 'dispatch：执行引擎（`zcode` | `opencode` | `qoder`）。**通常不用传** —— 传 `provider: "opencode/<model>"` 或 `qoder/<model>` 即自动识别为对应引擎；权威来源是 action=channels 返回的 `channels[].engine`（不用 enum 限制：合法值随清单/版本变，加入新引擎不必改 schema）' },
+   * channels[].engine。通常也不必传：provider 传 `opencode/<model>` / `qoder/<model>` /
+   * `codebuddy/<model>` 会被 core 自动识别
+   * （ZB-63 修：原 desc 只写两引擎，Qoder 通道会让 agent 以为没有这个引擎；
+   *  ZB-84 同理补 WorkBuddy —— 描述里漏掉某个引擎，会让 agent 以为它不存在，从而弃用）。 */
+  engine: { type: 'string', description: 'dispatch：执行引擎（`zcode` | `opencode` | `qoder` | `codebuddy`）。**通常不用传** —— 传 `provider: "opencode/<model>"` / `qoder/<model>` / `codebuddy/<model>` 即自动识别为对应引擎；权威来源是 action=channels 返回的 `channels[].engine`（不用 enum 限制：合法值随清单/版本变，加入新引擎不必改 schema）。注意 `codebuddy` 走 WorkBuddy 官方 CLI，**需要 CLI 单独登录一次**（与桌面应用登录态独立），未登录会停在 `not-logged-in` 暂停态' },
   /* ZB-45 / ZB-63：`auto` = **显式**放行引擎未显式拒绝的权限（默认关，安全默认）。
    * ⚠️ ZB-63 修：core 的 validateSpec 已放宽到 opencode **与 qoder**（两者都有等价旗标：
    * `--auto` / `--permission-mode bypass_permissions`），原 desc 只写 opencode 是事实错误。
@@ -621,6 +629,9 @@ export function apply(ctx, config = {}) {
     if (config.opencodeRunnerPath && !existsSync(config.opencodeRunnerPath)) {
       log('warn', `opencodeRunnerPath 指向的文件不存在：${config.opencodeRunnerPath}（OpenCode 通道将为空，ZCode 通道不受影响；留空本配置可改用默认推断）`);
     }
+    if (config.codebuddyRunnerPath && !existsSync(config.codebuddyRunnerPath)) {
+      log('warn', `codebuddyRunnerPath 指向的文件不存在：${config.codebuddyRunnerPath}（CodeBuddy 通道将为空，其它引擎不受影响；留空本配置可改用默认推断）`);
+    }
     dispatcher = createDispatcher({
       runnerPath: config.runnerPath,
       ledgerPath: config.ledgerPath || undefined,
@@ -630,13 +641,16 @@ export function apply(ctx, config = {}) {
       /* ZB-79：Qoder 独立并发上限**必须在这里透传** —— 否则新加的配置字段是**摆设**
        * （core 会用自己的默认值，用户改配置根本不生效）。 */
       maxConcurrentQoder: config.maxConcurrentQoder,
+      /* ZB-84：CodeBuddy 独立并发上限同样**必须透传**（否则新配置字段是摆设，同 ZB-79 的教训）。 */
+      maxConcurrentCodebuddy: config.maxConcurrentCodebuddy,
       ...(config.runnerCwd ? { runnerCwd: config.runnerCwd } : {}),
       /* 空串**不传**（而不是传 ''）：core 对「未配置」与「配了但为空」的处理不同 ——
        * 不传 ⇒ core 自行推断（env DSP_OPENCODE_RUNNER → 仓库内 collab-kit/opencode-run.mjs）；
        * 传空串 ⇒ core 认为"配了但没有"，通道为空。 */
       ...(config.opencodeRunnerPath ? { opencodeRunnerPath: config.opencodeRunnerPath } : {}),
+      ...(config.codebuddyRunnerPath ? { codebuddyRunnerPath: config.codebuddyRunnerPath } : {}),
     });
-    log('info', `dispatcher 就绪：work=${dispatcher.workRoot} maxConcurrent=${config.maxConcurrent ?? 3} maxConcurrentOpenCode=${config.maxConcurrentOpenCode ?? 2} maxConcurrentQoder=${config.maxConcurrentQoder ?? 3}`);
+    log('info', `dispatcher 就绪：work=${dispatcher.workRoot} maxConcurrent=${config.maxConcurrent ?? 3} maxConcurrentOpenCode=${config.maxConcurrentOpenCode ?? 2} maxConcurrentQoder=${config.maxConcurrentQoder ?? 3} maxConcurrentCodebuddy=${config.maxConcurrentCodebuddy ?? 2}`);
   } else {
     log('warn', '缺少 runnerPath / workRoot 配置，dispatcher 未创建（UI 将进入 demo 降级；工具动作返回可读错误）');
   }
