@@ -266,6 +266,37 @@ const dispatchers = [];
   }
 }
 
+/* ─────────────────── F. ZB-87：登录助手（协议面 + 可读错误） ─────────────────── */
+console.log('\nF. 登录助手（ZB-87）');
+{
+  /* ① 参数解析：`--login-serve` / `--port`（登录服务的启动契约）。 */
+  const o = R.parseArgs(['--login-serve', '--port', '12345']);
+  ok(o.loginServe === true && o.port === 12345, 'parseArgs 支持 --login-serve / --port');
+
+  /* ② core 暴露三件套；**未启动时 status 必须给可读错误**（不是抛、不是假装已登录）。 */
+  const dir = mkdtempSync(join(tmpdir(), 'dsp-cblogin-'));
+  roots.push(dir);
+  const noop = join(dir, 'noop.mjs');
+  writeFileSync(noop, 'process.exit(0);\n', 'utf8');
+  const disc = createDispatcher({
+    runnerPath: noop, codebuddyRunnerPath: noop, opencodeRunnerPath: '', qoderRunnerPath: '',
+    workRoot: dir,
+    channelsImpl: async () => ({ channels: [], warnings: [] }),
+  });
+  dispatchers.push(disc);
+  ok(typeof disc.startCodebuddyLogin === 'function', 'dispatcher 暴露 startCodebuddyLogin');
+  ok(typeof disc.codebuddyLoginStatus === 'function', 'dispatcher 暴露 codebuddyLoginStatus');
+  ok(typeof disc.stopCodebuddyLogin === 'function', 'dispatcher 暴露 stopCodebuddyLogin');
+  const st = await disc.codebuddyLoginStatus();
+  ok(st.ok === false && /未启动/.test(String(st.error ?? '')), '★ 未启动时 status 给可读错误（不抛、不假装已登录）');
+  eq(disc.stopCodebuddyLogin(), { ok: true, stopped: false }, 'stop 幂等（没会话也不报错）');
+
+  /* ③ 宿主协议面：action 与 face 方法都必须登记（否则面板按钮调不到）。 */
+  const wire = await import('../wire.host.mjs');
+  ok(wire.ACTIONS.includes('login'), '★ ACTIONS 含 login（否则 wire 直接报"未知 action"）');
+  ok(Array.isArray(wire.REMOTE_METHODS) && wire.REMOTE_METHODS.includes('login'), '★ REMOTE_METHODS 含 login（否则客户端 wire 调不到）');
+}
+
 /* 收尾：等所有在途 job 落地，再删临时目录（否则异步 finalize 会写到已删目录）。 */
 for (const d of dispatchers) {
   const deadline = Date.now() + 15000;

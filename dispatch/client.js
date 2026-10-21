@@ -608,6 +608,13 @@ window.__ModuleLoader__.load({
         engQoder: 'Qoder', engGroupQoder: 'Qoder 通道',
         /* ZB-84：第四个引擎（WorkBuddy / CodeBuddy）。 */
         engCodebuddy: 'WorkBuddy', engGroupCodebuddy: 'WorkBuddy 通道',
+        /* ZB-87：WorkBuddy 登录助手（面板按钮）。 */
+        wbLoginTitle: 'WorkBuddy 登录', wbLoginBtn: '登录', wbLoginBusy: '登录中…', wbLoginCheck: '检查状态', wbLoginStop: '关闭',
+        wbLoginHint: '起一个来自 WorkBuddy 官方 CLI 的本地登录服务（codebuddy --serve），并生成**登录链接**。注意：/login 是 CLI 界面里的斜杠命令，在 PowerShell 里敲会报「无法识别」；CLI 的登录态与桌面应用**互相独立**。派发台不读不写任何凭据，只驱动官方进程。',
+        wbLoginCheckHint: '查询账号登录态（官方 REST：/api/v1/auth/account/status）',
+        wbLoginStopHint: '关闭登录服务（连带结束 CLI 子进程）',
+        wbLoginOpen: '打开登录链接', wbLoginWebui: '打开 Web UI',
+        wbLoginAuthed: '已登录', wbLoginNotAuthed: '未登录', wbLoginFail: '登录服务不可用',
         chanEngineHintCodebuddy: 'WorkBuddy / CodeBuddy 引擎（走**官方 CLI**，不依赖任何反代）：不支持 mode / memoryBench；思考强度映射为 CodeBuddy 的 --effort（档位值由 CLI 自身 --help 声明，minimal→max，共 6 档）。执行器默认带 --permission-mode acceptEdits（能改工作目录内的文件）；需要全放行时由派发方**显式**传 auto=true（映射为 bypassPermissions）。⚠️ **CLI 的登录态与 WorkBuddy 桌面应用互相独立** —— 桌面用得好好的，CLI 仍可能在无头执行时报 “Authentication required”；此时任务会停在 `未登录` 暂停态，需交互启动 CLI 后输入 /login（一次性）。该 CLI 的进程退出码**恒为 0 即使任务失败**，执行器已把它并入 done exit 码，故别只看 exit=0 判断成功。',
         enginesTitle: '引擎',
         enginesHint: '本机自动探测到的执行引擎（形态 / 版本 / 登录态）。插件按「环境变量 → 配置 → PATH → 已知安装位置（含跨盘符）」五级查找，无需手填路径。',
@@ -748,6 +755,12 @@ window.__ModuleLoader__.load({
         engZcode: 'ZCode', engOpencode: 'OpenCode', engGroupZcode: 'ZCode channels', engGroupOpencode: 'OpenCode free models',
         engQoder: 'Qoder', engGroupQoder: 'Qoder channels',
         engCodebuddy: 'WorkBuddy', engGroupCodebuddy: 'WorkBuddy channels',
+        wbLoginTitle: 'WorkBuddy sign-in', wbLoginBtn: 'Sign in', wbLoginBusy: 'Signing in…', wbLoginCheck: 'Check status', wbLoginStop: 'Close',
+        wbLoginHint: 'Starts a local sign-in service from the official WorkBuddy CLI (codebuddy --serve) and returns a **sign-in link**. Note: /login is a slash command inside the CLI UI — typing it in PowerShell fails with "not recognized"; CLI sign-in is **independent of the desktop app**. This plugin never reads or writes credentials; it only drives the official process.',
+        wbLoginCheckHint: 'Query account sign-in state (official REST: /api/v1/auth/account/status)',
+        wbLoginStopHint: 'Stop the sign-in service (also ends the CLI child process)',
+        wbLoginOpen: 'Open sign-in link', wbLoginWebui: 'Open Web UI',
+        wbLoginAuthed: 'signed in', wbLoginNotAuthed: 'not signed in', wbLoginFail: 'sign-in service unavailable',
         chanEngineHintCodebuddy: 'WorkBuddy / CodeBuddy engine (runs the **official CLI**; no reverse proxy involved): no mode / memoryBench; thinking maps to CodeBuddy --effort (the level set is declared by the CLI itself in --help: minimal→max, 6 levels). The executor defaults to --permission-mode acceptEdits (can edit files inside the working directory); to allow everything the dispatcher must pass auto=true explicitly (mapped to bypassPermissions). Note: the CLI login is **independent of the WorkBuddy desktop app** — the desktop can be signed in while headless runs still report "Authentication required"; the job then pauses as `not logged in` and you need to start the CLI interactively once and run /login. This CLI exits with code 0 even when the task fails, and the executor folds that into the done exit code — so do not judge success from exit=0 alone.',
         enginesTitle: 'Engines',
         enginesHint: 'Execution engines auto-detected on this machine (form / version / login). The plugin searches in five levels — env var → config → PATH → known install locations (incl. other drives) — so no path needs to be filled in by hand.',
@@ -1102,6 +1115,7 @@ window.__ModuleLoader__.load({
       ['fallbackChain', [], []],
       /* ZB-82：分流模式（读/写同一方法）。 */
       ['split', ['patch'], []],
+  ['login', ['opts'], []],
       /* ZB-52：顺序派发读/写（面板入口）。⚠️ 本表与 host 面 `REMOTE_METHODS`、
        * `wire.client.mjs` 的 descriptors **方法集必须逐字相等** —— 由
        * `test/single-source.test.mjs` ③ 守门（历史上曾漏 dismiss 造成三表漂移）。 */
@@ -1457,6 +1471,8 @@ window.__ModuleLoader__.load({
         /* ZB-82：分流模式（读/写同一方法，patch = `{enabled?, minFreeSlots?}`）。 */
         splitGet: () => splitSetImpl({}),
         splitSet: (patch) => splitSetImpl(patch),
+        /* ZB-87：WorkBuddy 登录助手（扩展 wire 走 action 通道；与 split 同形）。 */
+        login: (opts) => call('login', opts ?? {}),
         /* ZB-52：顺序派发读/写。读值经 `normSeqShape` 归一（三引擎键恒在、只留非空字符串）——
          * 与 ext / demo 两条路径**同一形状**，面板不必按数据源分支。 */
         async sequentialGet() {
@@ -1576,6 +1592,7 @@ window.__ModuleLoader__.load({
         /* ZB-82：分流（外部源经 `split` 动作；写把 patch 原样透传）。 */
         splitGet: () => call('split', {}),
         splitSet: (patch) => call('split', patch ?? {}),
+        login: (opts) => call('login', opts ?? {}),
         /* ZB-52：外部源未提供 `sequential()` 时 call() 返回 {ok:false,error}，UI 自行降级为只读
          * （与 fallback 同范式：读传空对象、写把 patch 原样透传）。 */
         sequentialGet: () => call('sequential', {}),
@@ -1639,6 +1656,7 @@ window.__ModuleLoader__.load({
         /* ZB-82：离线无真值可读 ⇒ 分流模式读写一律拒绝（与 fallback 同纪律：不假装成功）。 */
         splitGet: denied,
         splitSet: denied,
+        login: denied,
         // ZB-52：离线无真值可读（浏览器读不到宿主文件），顺序派发读写一律拒绝 ⇒ UI 只读 + 提示走终端
         sequentialGet: denied,
         sequentialSet: denied,
@@ -2187,6 +2205,8 @@ window.__ModuleLoader__.load({
       /* ZB-82：分流模式（读给出诚实空形状 = 关；写报错）。 */
       splitGet: async () => ({ ok: true, split: { enabled: false, minFreeSlots: 1, main: null, targets: [], distinctTargets: [], active: false, reason: 'disabled' } }),
       splitSet: async () => ({ ok: false, error: 'wire 不可用' }),
+      /* ZB-87：demo/无 wire 下不假装能登录（如实报不可用，而不是给假登录链接）。 */
+      login: async () => ({ ok: false, error: 'wire 不可用：无法启动 WorkBuddy 登录服务' }),
       // ZB-52：顺序派发（读给出诚实空形状，写报错）。ZB-52c：无 enabled（模型为空即顺序派发）
       sequentialGet: async () => ({
         order: { zcode: [], opencode: [], qoder: [] },
@@ -2334,6 +2354,7 @@ window.__ModuleLoader__.load({
         channels: wire.channels, channelGet: wire.channelGet, channelSet: wire.channelSet,
         retry: wire.retry, fallbackGet: wire.fallbackGet, fallbackSet: wire.fallbackSet,
         splitGet: wire.splitGet, splitSet: wire.splitSet,
+        login: wire.login,
         sequentialGet: wire.sequentialGet, sequentialSet: wire.sequentialSet,
         /* ZB-58：逐模型开关（面板「可用」开关 + 「模型」下拉过滤）。 */
         modelSwitchesGet: wire.modelSwitchesGet, modelSwitchSet: wire.modelSwitchSet,
@@ -2551,9 +2572,11 @@ window.__ModuleLoader__.load({
      *
      * 数据来源：core `listChannels()` 的 `engineDetail`（T2 交付）。缺失时**整条不渲染**
      * （向后兼容旧宿主：没有这个字段就当没有这条 UI，绝不显示空壳）。 */
-    function EngineStatus({ engineDetail }) {
+    function EngineStatus({ engineDetail, loginState, onLogin }) {
       if (!engineDetail || typeof engineDetail !== 'object') return null;
-      const rows = ['zcode', 'opencode', 'qoder'].map((e) => engineDetail[e]).filter(Boolean);
+      /* ZB-84/87：**从 KNOWN_ENGINES 生成**（原先写死三引擎 ⇒ 第四引擎的 WorkBuddy
+       * 根本不会出现在引擎状态条里，属于"加引擎漏一处"的典型）。 */
+      const rows = KNOWN_ENGINES.map((e) => engineDetail[e]).filter(Boolean);
       if (!rows.length) return null;
       const FORM_KEY = {
         cli: 'engineFormCli',
@@ -2575,6 +2598,45 @@ window.__ModuleLoader__.load({
         if (d.loggedIn === false) return t('engineNotLoggedIn');
         return t('engineLoginUnknown');
       };
+      /* ZB-87：WorkBuddy 登录助手的结果块（登录链接 / Web UI / 账号态 / 错误）。
+       * 为什么必须给"可点链接"：`/login` 是 CLI 界面里的斜杠命令，在 shell 里敲会报"无法识别"；
+       * 面板按钮走官方 `--serve` 的 REST 直接生成登录链接，用户点开浏览器即可。 */
+      const loginResultNode = (r) => {
+        if (!r) return null;
+        if (r.ok === false) {
+          return h('span', { className: 'dsp-note', role: 'status', style: { flexBasis: '100%' } }, `⚠ ${r.error ?? t('wbLoginFail')}`);
+        }
+        const acct = r.account && (r.account.userName || r.account.userId);
+        return h('span', { className: 'dsp-note', role: 'status', style: { flexBasis: '100%' } },
+          r.authUrl ? h('a', { key: 'auth', href: r.authUrl, target: '_blank', rel: 'noreferrer' }, `${t('wbLoginOpen')} `) : null,
+          r.webui ? h('a', { key: 'ui', href: r.webui, target: '_blank', rel: 'noreferrer' }, `${t('wbLoginWebui')} `) : null,
+          h('span', { key: 'st' }, r.authenticated === true
+            ? `${t('wbLoginAuthed')}${acct ? `（${r.account.userName || r.account.userId}）` : ''}`
+            : r.authenticated === false ? t('wbLoginNotAuthed') : ''),
+          r.hint ? h('span', { key: 'hint', style: { marginLeft: '6px', opacity: 0.8 } }, r.hint) : null);
+      };
+      /* ZB-87：WorkBuddy 专属操作区（登录 / 检查登录态 / 关闭登录服务）。
+       * 只在**该引擎被探测到**时渲染 —— 没装 WorkBuddy 的机器不该出现这个按钮。 */
+      const loginTools = engineDetail.codebuddy
+        ? h('div', { className: 'dsp-field', style: { marginTop: '2px', flexWrap: 'wrap', gap: '4px' } },
+          h('span', { style: { opacity: 0.75 }, title: t('wbLoginHint') }, `${t('wbLoginTitle')}：`),
+          h('button', {
+            className: 'dsp-switch dsp-toggle', type: 'button', disabled: !!loginState?.busy,
+            title: t('wbLoginHint'),
+            onClick: () => onLogin && onLogin({ sub: 'start' }),
+          }, loginState?.busy ? t('wbLoginBusy') : t('wbLoginBtn')),
+          h('button', {
+            className: 'dsp-switch dsp-toggle', type: 'button', disabled: !!loginState?.busy,
+            title: t('wbLoginCheckHint'),
+            onClick: () => onLogin && onLogin({ sub: 'status' }),
+          }, t('wbLoginCheck')),
+          h('button', {
+            className: 'dsp-switch dsp-toggle', type: 'button', disabled: !!loginState?.busy,
+            title: t('wbLoginStopHint'),
+            onClick: () => onLogin && onLogin({ sub: 'stop' }),
+          }, t('wbLoginStop')),
+          loginResultNode(loginState?.result))
+        : null;
       return h('div', { className: 'dsp-dim', style: { fontSize: '11px', marginTop: '2px' } },
         h('div', { style: { marginBottom: '3px' } },
           h('span', { style: { opacity: 0.75 }, title: t('enginesHint') }, `${t('enginesTitle')}：`),
@@ -2585,10 +2647,11 @@ window.__ModuleLoader__.load({
             title: `${d.summary ?? ''}${d.reason ? `\n${d.reason}` : ''}${d.loginEvidence ? `\n${d.loginEvidence}` : ''}`,
           },
             h('span', { style: { marginRight: '3px' } }, mark(d)),
-            d.engine === 'zcode' ? t('engZcode') : d.engine === 'opencode' ? t('engOpencode') : t('engQoder'),
+            engLabel(d.engine),
             d.form ? ` · ${t(FORM_KEY[d.form] ?? 'engineFormCli')}` : '',
             d.version ? ` · v${d.version}` : '',
             ` · ${stateText(d)}`))),
+        loginTools,
       );
     }
 
@@ -3009,7 +3072,7 @@ window.__ModuleLoader__.load({
     /* ⚠️ ZB-52：新增的 `sequential` / `onSequentialSet` **追加在 `sw` 之后** ——
      * `frozen-probe.test.mjs` F 段钉住了 `… offline, offlineReason, sw` 这段**参数顺序**
      * （它用"包含"而非全等来防漏传，故插入到中间会误报）。 */
-    function ChannelSection({ channelsInfo, channel, fallback, split, onSwitch, onFallbackSet, onSplitSet, offline, offlineReason, sw, chanError, sequential, onSequentialSet, disabledModels, onToggleModel }) {
+    function ChannelSection({ channelsInfo, channel, fallback, split, onSwitch, onFallbackSet, onSplitSet, offline, offlineReason, sw, chanError, sequential, onSequentialSet, disabledModels, onToggleModel, loginState, onLogin }) {
       const [fbFeedback, setFbFeedback] = useState(null);
       const [splitFeedback, setSplitFeedback] = useState(null);
       const [busy, setBusy] = useState(false);
@@ -3459,7 +3522,7 @@ window.__ModuleLoader__.load({
          * 现在：标签 nowrap 定自然宽、下拉 flex:1 等宽撑满 ⇒ 任意面板宽度下版式都一致。 */
         /* ZB-51（T5）：引擎状态条 —— 放在开关/告警之后、两个下拉之前：
          * 用户先看"这台机器上有什么引擎、能不能用"，再看"当前选哪个通道"。 */
-        h(EngineStatus, { engineDetail: channelsInfo?.engineDetail }),
+        h(EngineStatus, { engineDetail: channelsInfo?.engineDetail, loginState, onLogin }),
         h('div', { className: 'dsp-field' },
           h('span', { className: 'dsp-field-k' }, t('provider')),
           h('select', {
@@ -4517,6 +4580,7 @@ window.__ModuleLoader__.load({
       const {
         conn, snapshot, quota, planQuota, dispatch, kill, dismiss, tail,
         channels, channelGet, channelSet, retry, fallbackGet, fallbackSet, splitGet, splitSet,
+        login,
         sequentialGet, sequentialSet,
         modelSwitchesGet, modelSwitchSet,
         switchSet,
@@ -4639,6 +4703,20 @@ window.__ModuleLoader__.load({
           return r;
         });
       }, [splitSet]);
+      /* ZB-87：WorkBuddy 登录助手（面板按钮）。三种子动作：start（起 --serve 拿登录链接）/
+       * status（查账号登录态）/ stop（关服务）。**不落库、不占并发**，纯 UI 交互态。 */
+      const [loginState, setLoginState] = useState({ busy: false, result: null });
+      const onLogin = useCallback((opts) => {
+        setLoginState((prev) => ({ ...prev, busy: true }));
+        return Promise.resolve(login(opts ?? { sub: 'start' })).then((r) => {
+          setLoginState({ busy: false, result: r ?? null });
+          return r;
+        }).catch((e) => {
+          const r = { ok: false, error: e?.message ?? String(e) };
+          setLoginState({ busy: false, result: r });
+          return r;
+        });
+      }, [login]);
       /* ZB-52：顺序派发写入（**只发 `{order}`** —— core 已废弃 `enabled`，传它会**抛 TypeError**；
        * 顺序派发由「模型」值表达，不再有开关）。
        * 乐观回显：面板先按用户操作渲染，wire 返回权威值后校正（与 fallback 同款）。
@@ -4728,7 +4806,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsp-body' },
           h(Section, { id: SEC.channel, title: t('secChannel'), collapsible: true },
             /* 离线说明只在 body 首行渲染一处（去重）：这里不再重复同一句话。 */
-            h(ChannelSection, { channelsInfo, channel, fallback, split, onSwitch, onFallbackSet, onSplitSet, sequential, onSequentialSet, offline: conn !== 'live', offlineReason, sw: dispatchSwitch, chanError,
+            h(ChannelSection, { channelsInfo, channel, fallback, split, onSwitch, onFallbackSet, onSplitSet, sequential, onSequentialSet, offline: conn !== 'live', offlineReason, sw: dispatchSwitch, chanError, loginState, onLogin,
               /* ZB-58：逐模型开关 —— 「模型」下拉据此过滤已关闭项；顺序列表里可原地重开。 */
               disabledModels: modelSw && Array.isArray(modelSw.disabled) ? modelSw.disabled : null,
               onToggleModel: onModelToggle })),

@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "DSH 派发台",
-    "description": "在 Harness 里派发/监视多个 ZCode 无头进程（单写者互斥、用量与上下文、套餐通道）"
+    "description": "在 Harness 里派发/监视多个 AI CLI 无头进程（ZCode / OpenCode / Qoder / WorkBuddy 四引擎）：单写者互斥、用量与上下文、并发与降级链、WorkBuddy 登录"
   },
   "ui": {
     "title": "派发台",
@@ -246,6 +246,19 @@
     "engCodebuddy": "WorkBuddy",
     "engGroupCodebuddy": "WorkBuddy 通道",
     "pNotLoggedIn": "CLI 未登录",
-    "chanEngineHintCodebuddy": "WorkBuddy / CodeBuddy 引擎（走**官方 CLI**，不依赖任何反代）：不支持 mode / memoryBench；思考强度映射为 CodeBuddy 的 --effort（档位值由 CLI 自身 --help 声明，minimal→max，共 6 档）。执行器默认带 --permission-mode acceptEdits（能改工作目录内的文件）；需要全放行时由派发方**显式**传 auto=true（映射为 bypassPermissions）。⚠️ **CLI 的登录态与 WorkBuddy 桌面应用互相独立** —— 桌面用得好好的，CLI 仍可能在无头执行时报 “Authentication required”；此时任务会停在 `未登录` 暂停态，需交互启动 CLI 后输入 /login（一次性）。该 CLI 的进程退出码**恒为 0 即使任务失败**，执行器已把它并入 done exit 码，故别只看 exit=0 判断成功。"
+    "chanEngineHintCodebuddy": "WorkBuddy / CodeBuddy 引擎（走**官方 CLI**，不依赖任何反代）：不支持 mode / memoryBench；思考强度映射为 CodeBuddy 的 --effort（档位值由 CLI 自身 --help 声明，minimal→max，共 6 档）。执行器默认带 --permission-mode acceptEdits（能改工作目录内的文件）；需要全放行时由派发方**显式**传 auto=true（映射为 bypassPermissions）。⚠️ **CLI 的登录态与 WorkBuddy 桌面应用互相独立** —— 桌面用得好好的，CLI 仍可能在无头执行时报 “Authentication required”；此时任务会停在 `未登录` 暂停态，需交互启动 CLI 后输入 /login（一次性）。该 CLI 的进程退出码**恒为 0 即使任务失败**，执行器已把它并入 done exit 码，故别只看 exit=0 判断成功。",
+    "wbLoginTitle": "WorkBuddy 登录",
+    "wbLoginBtn": "登录",
+    "wbLoginBusy": "登录中…",
+    "wbLoginCheck": "检查状态",
+    "wbLoginStop": "关闭",
+    "wbLoginHint": "起一个来自 WorkBuddy 官方 CLI 的本地登录服务（codebuddy --serve），并生成**登录链接**。注意：/login 是 CLI 界面里的斜杠命令，在 PowerShell 里敲会报「无法识别」；CLI 的登录态与桌面应用**互相独立**。派发台不读不写任何凭据，只驱动官方进程。",
+    "wbLoginCheckHint": "查询账号登录态（官方 REST：/api/v1/auth/account/status）",
+    "wbLoginStopHint": "关闭登录服务（连带结束 CLI 子进程）",
+    "wbLoginOpen": "打开登录链接",
+    "wbLoginWebui": "打开 Web UI",
+    "wbLoginAuthed": "已登录",
+    "wbLoginNotAuthed": "未登录",
+    "wbLoginFail": "登录服务不可用"
   }
 }

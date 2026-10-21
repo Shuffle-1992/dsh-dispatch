@@ -134,9 +134,31 @@ $env:CODEBUDDY_FORCE_LITE_WB_BUNDLE='1'
  "errors":["Authentication required. Please use /login command to sign in to your account"]}
 ```
 
-CLI **没有** `login` 子命令。登录有两条路，**① 最稳**：
+CLI **没有** `login` 子命令。登录有三条路，**⓿ 最省事（面板按钮）**：
 
-#### ① Web UI（推荐：不依赖 TUI，实测能起）
+#### ⓿ 面板按钮「登录」（ZB-87，推荐）
+
+面板「引擎」那一行现在有三个按钮：**登录 / 检查状态 / 关闭**（仅当探测到 WorkBuddy 时出现）。
+点「登录」背后发生的事（全走官方 CLI 的 REST，**不依赖终端、不碰凭据**）：
+
+```
+① 起 codebuddy --serve（本地 HTTP，随机端口 + 随机 password）
+② POST /api/v1/auth/login {password}   → 本地 Web UI 的 Bearer token
+③ POST /api/v1/auth/account/login      → { authUrl }   ← 面板显示的「打开登录链接」
+④ 点链接 → 浏览器登录 → 回面板点「检查状态」
+⑤ GET  /api/v1/auth/account/status     → { authenticated, account:{userId,userName} }
+```
+
+真机实测（2026-10-21）：点击到拿到链接 **≈2 秒**；`stop` 幂等且会**连带杀掉 CLI 子进程树**。
+
+> ⚠️ 所有 REST 必须带 **`X-CodeBuddy-Request: 1`**（防 CSRF 的固定值），否则 403
+> `Missing required header: x-codebuddy-request`。
+>
+> ⚠️ 别把两个 `authenticated` 混为一谈：
+> `/api/v1/auth/status` 的是**本地 Web UI 密码认证**；`/api/v1/auth/account/status` 的才是**账号态**。
+> 而且实测**账号态 `authenticated:true` 时，无头 `-p` 仍可能报未登录** —— 以真实执行结果为准。
+
+#### ① Web UI（手工路径，等价于⓿）
 
 ```powershell
 # 前置 node（因为 bin\codebuddy 是无扩展名脚本，PowerShell 不能直接执行它）
@@ -191,6 +213,20 @@ CLI **没有** `login` 子命令。登录有两条路，**① 最稳**：
 > **别只看 `exit=0` 判断成功**；看 `done exit=` 这一行。这是"静默假成功"的新变种。
 
 ### 模型清单与思考档位：**探测 CLI 自己的声明**，不写死
+
+> ⚠️ **已知局限（用户 2026-10-21 反馈"模型太老了"，此处如实说明）**
+>
+> 未登录时只能拿到 CLI `--help` 里的**静态声明**（9 个）。它确实**比服务端目录旧** ——
+> 真机证据：bundle 的 `MODEL_OVERLAYS` 里已有 `kimi-k2.6` / `kimi-k3`，而 `--help` 只写到 `kimi-k2.5`。
+> 真实目录由 **ACP 从服务端拉取**（`getModelsInfo()` → `availableModels`；REST 里**没有** model 端点），
+> **必须先登录**。
+>
+> 探测策略因此是两段式（`--list-models` 会打 `models-source=` 标记）：
+> 1. **优先**用"非法模型哨兵"逼真实目录（`--model zzz_zb87_bogus` 让 CLI 报合法值）；
+>    未登录时只会得到 `Authentication required` ⇒ 记 `reason=not-logged-in`
+>    （**结果缓存 10 分钟**，避免每次刷新都烧 8 秒）。
+> 2. 拿不到 ⇒ 退回 `--help` 静态声明并打 `models-source=static`，
+>    **面板会明确标注"静态声明、可能过期"** —— 不让你误以为那是账号真实可用目录。
 
 CLI 没有 `--list-models` 子命令；而且**鉴权先于参数校验**（用非法 `--model` 逼"合法值清单"
 只会得到 `Authentication required`）。但 `--help` 里 CLI 自己声明了：

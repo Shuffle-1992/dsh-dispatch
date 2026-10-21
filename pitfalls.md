@@ -659,3 +659,59 @@ TUI 方案作为备选 —— 这样不依赖用户终端能力。
 必须用官方 CLI 自己的输出（本例 `--serve` 打印的 `Config` 行）核实。
 本处已把登录态判据改成"只认显式覆盖 + 其余保守判未登录，并把登录指引写进 evidence"，
 并在注释里如实标注"此判据偏保守，以实际派发结果为准"。
+
+---
+
+## 2026-10-21 ZB-87：为 WorkBuddy 做「登录按钮」时挖出来的五件事
+
+### 1. `codebuddy --serve` 是**不依赖 TUI 的登录通道**（本轮关键发现）
+
+用户现场：TUI 起不来（非 TTY 静默退出）、`/login` 在 shell 里报"无法识别" ⇒ **无路可走**。
+破局点：`--serve` 起的本地服务**自带完整 REST 面**（OpenAPI 就打在 `/api/openapi.json`）：
+
+```
+codebuddy --serve --port <n>
+  → Web UI http://127.0.0.1:<n>/?password=<随机>
+  → POST /api/v1/auth/login {password}   → { token }        （本地 Web UI 密码认证）
+  → POST /api/v1/auth/account/login      → { authUrl }      ← 登录链接
+  → GET  /api/v1/auth/account/status     → { authenticated, account }
+```
+
+**纪律**：写"请交互启动 CLI 再敲 /login"这类指引前，**先确认目标环境有没有终端**。
+没有就去找**非交互入口**（HTTP / CLI 子命令）—— 产品自己往往就有。
+
+### 2. 所有 REST 必须带 `X-CodeBuddy-Request: 1`
+
+不带就是 `403 {"error":"Missing required header: x-codebuddy-request"}`。
+它的值是**固定字符串 `1`**（bundle 内 OpenAPI 描述：自定义头使跨域请求变成"非简单请求"，
+从而强制预检，属 CSRF 防护）。**不要猜 token 格式**。
+
+### 3. 两个 `authenticated` **不是一回事**（最容易误判的一处）
+
+| 端点 | `authenticated` 含义 |
+|---|---|
+| `GET /api/v1/auth/status` | **本地 Web UI 的密码认证**（豁免路径，无密码也能访问） |
+| `GET /api/v1/auth/account/status` | **WorkBuddy 账号登录态**（需先过密码认证） |
+
+真机实测：`account/status` 返回 `authenticated:true` + 真实 `userId`，
+但**无头 `-p` 仍然报 `Authentication required`** —— 两者可以不一致。
+
+**教训**：拿到"看起来是登录态"的字段时必须用**真实业务路径**再验一次（本处：跑一次最小 `-p`），
+否则会做出一个"面板显示已登录、实际派发全失败"的功能。
+
+### 4. 模型目录只走 ACP，REST 里**没有** model 端点
+
+把 bundle 里 147 个 HTTP 路径全挖出来逐条看：**没有任何** `/models` 之类接口。
+真实目录是 ACP `getModelsInfo()` → `availableModels` → 推给 Web UI（`model_update`）。
+未登录时只能读 `--help` 的**静态文案**，而它**比服务端旧**
+（bundle 的 `MODEL_OVERLAYS` 有 `kimi-k2.6`/`kimi-k3`，help 只到 `kimi-k2.5`）。
+
+**教训**：用户说"数据不对 / 太老了"时，先分清**是解析错了**还是**数据源本身就是旧快照**。
+本处是后者 —— 正确修法不是"换个正则"，而是**换数据源**（登录后哨兵探测）
+＋**如实标注来源**（`models-source=static`），而不是继续假装权威。
+
+### 5. 贵探测必须缓存，否则拖垮面板刷新
+
+"非法模型哨兵"要真起一次 CLI（≈8 秒），而 `--list-models` 会被通道探测反复调用
+⇒ 缓存（系统临时目录 + 10 分钟 TTL），并**连失败原因一起缓存**（`not-logged-in`），
+否则每次刷新都白烧 8 秒。

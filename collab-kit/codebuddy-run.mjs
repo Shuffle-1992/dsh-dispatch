@@ -44,6 +44,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, openSync, readSync, closeSync, statSync } from 'node:fs';
 import { dirname, join, resolve, extname, basename } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { prefixFor } from './run-line-protocol.mjs';
 import { discoverEngine } from './engine-discover.mjs';
@@ -106,6 +107,9 @@ export function parseArgs(argv) {
     listModels: false, version: false, help: false,
     noSessionPersistence: false, maxTurns: null,
     withEfforts: false,
+    /* ZB-87：登录助手模式 —— 起官方 `--serve`（HTTP + Web UI），由宿主通过它的 REST 接口
+     * 取"账号登录链接"与"登录态"。这是**不依赖 TUI** 的登录通道（真机 2026-10-21 实测可用）。 */
+    loginServe: false, port: null,
     compatNotes: [],
   };
   const unknown = [];
@@ -150,6 +154,10 @@ export function parseArgs(argv) {
       /* --auto：**默认关**，只有 core 显式传才放行（硬约束「不默认开」）。 */
       case '--auto': opt.auto = true; break;
       case '--list-models': case '--list-providers': opt.listModels = true; break;
+      /* ZB-87：登录助手（宿主用）。`--login-serve` 起 `codebuddy --serve`，打印
+       * `[codebuddy-run] login-serve port=<n> password=<pw>` 供宿主调 REST。 */
+      case '--login-serve': opt.loginServe = true; break;
+      case '--port': opt.port = Number(next()); break;
       /* 与 qoder-run 的 `--with-efforts` 同构：探测模式下**追加**打印档位表行。默认不打。 */
       case '--with-efforts': case '--with-variants': opt.withEfforts = true; break;
       case '--version': case '-v': opt.version = true; break;
@@ -543,18 +551,94 @@ function helpText(cli) {
   return HELP_CACHE;
 }
 
+/**
+ * ZB-87：用"非法模型哨兵"逼出**真实**模型目录（Qoder 用的同一手法）。
+ *
+ * 思路：给一个必然非法的 `--model`，若 CLI 在参数校验阶段报出合法清单，那就是**权威**目录
+ * （它会随服务端/版本更新，比 `--help` 的静态文案新）。
+ * ⚠️ 真机已确认：**鉴权先于参数校验** ⇒ 未登录时只会得到 `Authentication required`，
+ * 拿不到清单。故本函数是"登录后才可能生效"的增强路径，失败必须**安静回退**（绝不编造）。
+ *
+ * ⚠️ 成本：一次哨兵 probe 要真起一次 CLI（≈7–8 秒，与登录态无关）。而 `--list-models`
+ * 会被 core 的通道探测反复调用 ⇒ **必须缓存**，否则面板每次刷新都要多等 8 秒。
+ * 缓存落**系统临时目录**（不碰用户 agent 数据），TTL 10 分钟。
+ *
+ * @returns {{ok:true, models:string[], source:string}|{ok:false, reason:string}}
+ */
+const MODELS_CACHE_TTL_MS = 10 * 60_000;
+function modelsCacheFile() {
+  return join(tmpdir(), 'dsh-codebuddy-models-cache.json');
+}
+function readModelsCache() {
+  try {
+    const j = JSON.parse(readFileSync(modelsCacheFile(), 'utf8'));
+    if (!j || typeof j.at !== 'number' || Date.now() - j.at > MODELS_CACHE_TTL_MS) return null;
+    return j;
+  } catch {
+    return null;
+  }
+}
+function writeModelsCache(v) {
+  try {
+    writeFileSync(modelsCacheFile(), `${JSON.stringify({ at: Date.now(), ...v })}\n`, 'utf8');
+  } catch { /* 缓存写失败只影响下次速度，绝不影响功能 */ }
+}
+
+export function probeModelsBySentinel(cli) {
+  const cached = readModelsCache();
+  if (cached) return cached.ok ? { ok: true, models: cached.models, source: 'model-validation-error' } : { ok: false, reason: cached.reason };
+  const r = probe(cli, ['-p', 'hi', '--model', 'zzz_zb87_bogus', '--output-format', 'json'], 90000);
+  const text = `${r.stdout}\n${r.stderr}`;
+  if (/Authentication required|Please use \/login/i.test(text)) {
+    const v = { ok: false, reason: 'not-logged-in' };
+    writeModelsCache(v);
+    return v;
+  }
+  /* 形如 `Valid models are: a, b, c` / `Supported models: …` / `Available models: [a, b]` */
+  const m = text.match(/(?:valid|supported|available)\s+models?\s*(?:are|:|=)\s*[\[(]?([^\n\])}]+)/i);
+  if (!m) {
+    const v = { ok: false, reason: 'no-model-list-in-error' };
+    writeModelsCache(v);
+    return v;
+  }
+  const models = [...new Set(m[1].split(/[,|]/).map((s) => s.trim().replace(/^[`'"]+|[`'"]+$/g, '')).filter((s) => /^[A-Za-z0-9][A-Za-z0-9._+\-]*$/.test(s) && s.length <= 64))];
+  if (!models.length) {
+    const v = { ok: false, reason: 'empty-model-list' };
+    writeModelsCache(v);
+    return v;
+  }
+  writeModelsCache({ ok: true, models });
+  return { ok: true, models, source: 'model-validation-error' };
+}
+
 /** `--list-models`：只吐**裸模型名**（core 会加 `codebuddy/` 前缀）。不写死枚举。 */
 export function listModels(cli, opt = {}) {
   const text = helpText(cli);
-  const models = parseHelpModels(text);
+  const staticModels = parseHelpModels(text);
+
+  /* ZB-87：**优先真实目录**（登录后哨兵可用），拿不到才退回 CLI 静态声明。
+   * ⚠️ 用户反馈过"模型太老了" —— 根因就是 `--help` 是**静态文案**，比服务端目录旧
+   * （真机证据：bundle 里已有 kimi-k2.6 / kimi-k3，而 help 只写到 kimi-k2.5）。 */
+  const real = probeModelsBySentinel(cli);
+  const models = real.ok ? real.models : staticModels;
+  const source = real.ok ? 'real' : 'static';
+
   if (models.length === 0) {
-    note(`--help 里没有 \`Currently supported:\` 声明，拿不到模型清单（不编造）。help 前 200 字：${text.trim().slice(0, 200)}`);
+    note(`拿不到任何模型清单（真实目录与 --help 声明都为空，不编造）。help 前 200 字：${text.trim().slice(0, 200)}`);
     return 1;
   }
   for (const m of models) out(m); // 裸模型名（每行一个），与另两个执行器的 --list-models 同契约
-  /* 如实标注：这份清单是 **CLI 静态声明**，登录后账号实际可用的模型可能不同（额度/套餐相关）。
-   * 不把"声明可用"谎报成"账号可用" —— 面板上会显示 note。 */
-  note(`模型清单来自 CLI 自身 --help 的静态声明（共 ${models.length} 个）；登录后账号实际可用集合可能不同`);
+
+  /* 给宿主的**机器可读来源标记**（core 据此在面板上如实标注"静态/可能过期"，而不是假装权威）。 */
+  out(`${PREFIX} models-source=${source}${real.ok ? '' : ` reason=${real.reason}`}`);
+  if (real.ok) {
+    note(`模型清单来自 CLI 的**实际校验输出**（共 ${models.length} 个，权威、随服务端更新）`);
+  } else {
+    /* 如实标注：这是 CLI 内置的静态声明，**可能过期**；登录后会自动改用真实目录。 */
+    note(`模型清单来自 CLI 自身 --help 的**静态声明**（共 ${models.length} 个，可能过期：真机 bundle 里已有 kimi-k2.6/k3 而 help 只到 kimi-k2.5）`
+      + `；真实目录探测未生效（${real.reason}）⇒ 面板上会标注「静态声明」。`)
+      ;
+  }
 
   if (opt.withEfforts) {
     const efforts = parseHelpEfforts(text);
@@ -752,6 +836,80 @@ async function runOnce(opt, cli) {
   return exit;
 }
 
+/* ------------------------------------------------------------------ *
+ * ZB-87：登录助手 —— 起官方 `--serve`，把端口/密码以协议行交给宿主，
+ * 宿主再用它的 REST 接口取「账号登录链接」与「登录态」。
+ * ------------------------------------------------------------------ */
+
+/**
+ * 为什么不用 TUI 登录：
+ *   · 无参数启动在非 TTY 环境会**静默退出**（真机实测 exit 0、零输出），用户只看到"什么都没有"；
+ *   · `--serve` 是 HTTP 服务，**不依赖终端**，且自带 Web UI 与 REST（真机实测全部可用）：
+ *       GET  /api/v1/auth/status             → { authEnabled, authenticated }
+ *       POST /api/v1/auth/login   {password} → { success, token }        ← 本地 Web UI 密码认证
+ *       GET  /api/v1/auth/account/status     → { authenticated, account:{userId,userName,…} }
+ *       POST /api/v1/auth/account/login      → { authUrl }               ← **登录链接**
+ *   所有请求必须带 `X-CodeBuddy-Request: 1`（防 CSRF 的自定义头，值固定 `1`），
+ *   密码走 `password` query 或 `Authorization: Bearer <token>`。
+ *
+ * 本函数**只负责起服务并报端口/密码**（REST 调用在宿主：它有统一超时与错误包装）。
+ * 进程必须**保持存活**：OAuth 在浏览器完成后，CLI 需要轮询/接收结果才能落地登录态。
+ */
+async function loginServe(cli, opt) {
+  const port = Number.isFinite(opt.port) && opt.port > 0 ? opt.port : 19000 + Math.floor(Math.random() * 500);
+  note(`login-serve starting cli=${cli} port=${port}`);
+  let child;
+  try {
+    child = spawn(process.execPath, [cli, '--serve', '--port', String(port)], {
+      env: codebuddyEnv(process.env), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (e) {
+    process.stderr.write(`${PREFIX} --serve 启动失败：${e?.message ?? e}\n`);
+    return 1;
+  }
+
+  let buf = '';
+  let announced = false;
+  const scan = () => {
+    if (announced) return;
+    const mp = buf.match(/Password\s+(\S+)/);
+    const mu = buf.match(/Endpoint\s+(http:\/\/\S+)/);
+    if (!mp || !mu) return;
+    announced = true;
+    /* 协议行：宿主解析 `port=` / `password=` 后自己拼 HTTP 请求。 */
+    out(`${PREFIX} login-serve port=${port} password=${mp[1]}`);
+    const webui = buf.match(/Web UI\s+(http:\/\/\S+)/);
+    if (webui) note(`login-webui ${webui[1]}`);
+  };
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (c) => { buf += c; scan(); });
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (c) => { buf += c; scan(); process.stderr.write(c); });
+  child.on('close', (code) => { note(`login-serve-exit code=${code}`); process.exit(0); });
+
+  /* 30s 内没读到 password ⇒ 可读失败（宿主据此报错，而不是无限等待）。 */
+  const timer = setTimeout(() => {
+    if (announced) return;
+    process.stderr.write(`${PREFIX} --serve 30 秒内未输出 password。原始输出前 400 字：${buf.slice(0, 400)}\n`);
+    try { spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }); } catch { /* 尽力 */ }
+    process.exit(1);
+  }, 30000);
+  timer.unref?.();
+
+  /* 被宿主 kill 时**连带杀掉 CLI 子进程树**（否则 Windows 下会留下孤儿 --serve 进程）。 */
+  const killTree = () => {
+    try { spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }); } catch { /* 尽力 */ }
+  };
+  for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+    try { process.on(sig, () => { killTree(); process.exit(0); }); } catch { /* 平台不支持则忽略 */ }
+  }
+  process.on('exit', killTree);
+
+  /* 常驻：等子进程结束或被 kill（永不 resolve）。 */
+  await new Promise(() => {});
+  return 0;
+}
+
 const HELP = `${PREFIX} WorkBuddy / CodeBuddy 执行器（第四个引擎）
 
 用法：
@@ -808,6 +966,8 @@ async function main(argv) {
     return 1;
   }
 
+  if (opt.loginServe) return loginServe(disc.cli, opt);
+
   if (opt.version) {
     const r = probe(disc.cli, ['--version']);
     const v = `${r.stdout}\n${r.stderr}`.match(/\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/);
@@ -839,4 +999,4 @@ if (invokedDirectly) {
     .catch((e) => { process.stderr.write(`${PREFIX} 未捕获异常：${e?.stack ?? e}\n`); process.exit(1); });
 }
 
-export { main, PREFIX, helpText, isNodeShebang };
+export { main, PREFIX, helpText, isNodeShebang, loginServe };

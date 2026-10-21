@@ -64,7 +64,7 @@ export const SWITCH_OFF_ERROR = '派发总开关已关闭（collab/dispatch.swit
  *   · 「未知 action」报错串由它 join 生成（原先手抄一份，ZB-08 加 wait 时漏改 ⇒ 模型
  *     收到的"可用动作"里没有 wait，正好掐掉"派发后等结果"这条正路 —— 已实际漂移过）；
  *   · 新增动作只改这里一处 + 写一个 case。 */
-export const ACTIONS = ['dispatch', 'list', 'kill', 'dismiss', 'tail', 'quota', 'status', 'switch', 'channels', 'channel', 'retry', 'fallback', 'split', 'wait'];
+export const ACTIONS = ['dispatch', 'list', 'kill', 'dismiss', 'tail', 'quota', 'status', 'switch', 'channels', 'channel', 'retry', 'fallback', 'split', 'login', 'wait'];
 
 const switchCache = new Map(); // 真值文件路径 → { mtimeMs, value }（同 mtime 不重复读盘）
 
@@ -786,6 +786,20 @@ export function createActionHandler(dispatcher, config = {}) {
           }
           return { ok: true, split: dispatcher.getSplitMode() };
         }
+        /* ZB-87：WorkBuddy 登录助手（面板按钮用）。子动作：
+         *   `start`（默认）→ 起官方 `--serve` 并返回**登录链接** authUrl + Web UI 链接；
+         *   `status`      → 查账号登录态（authenticated / account）；
+         *   `stop`        → 关掉登录服务（连带杀 CLI 子进程树）。
+         * 为什么需要它：`/login` 是 **CLI 界面里的斜杠命令**（在 shell 里敲会报"无法识别"），
+         * 而无参数启动 CLI 在非 TTY 下会静默退出 —— 用户没有任何可点的自助入口。
+         * 全部走官方 REST（真机实测），派发台**不读不写凭据**。 */
+        case 'login': {
+          const sub = String(p.sub ?? p.action2 ?? 'start').trim().toLowerCase();
+          if (sub === 'stop') return { ok: true, ...dispatcher.stopCodebuddyLogin() };
+          if (sub === 'status') return await dispatcher.codebuddyLoginStatus();
+          if (sub !== 'start') return { ok: false, error: `未知 login 子动作：${sub}（可用 start|status|stop）` };
+          return await dispatcher.startCodebuddyLogin();
+        }
         default:
           return { ok: false, error: `未知 action：${action}（可用 ${ACTIONS.join('|')}）` };
       }
@@ -960,6 +974,19 @@ export function createRemoteFace(dispatcher, config = {}) {
         return { ok: false, error: e?.message ?? String(e) };
       }
     },
+    /** ZB-87：WorkBuddy 登录助手 —— `{sub:'start'|'status'|'stop'}`（直调 core，不经 action 信封）。 */
+    async login(opts) {
+      if (!dispatcher) return { ok: false, error: NOT_READY };
+      const sub = String(opts?.sub ?? 'start').trim().toLowerCase();
+      try {
+        if (sub === 'stop') return { ok: true, ...dispatcher.stopCodebuddyLogin() };
+        if (sub === 'status') return await dispatcher.codebuddyLoginStatus();
+        if (sub !== 'start') return { ok: false, error: `未知 login 子动作：${sub}（可用 start|status|stop）` };
+        return await dispatcher.startCodebuddyLogin();
+      } catch (e) {
+        return { ok: false, error: e?.message ?? String(e) };
+      }
+    },
     dispatch: (spec) => viaAction('dispatch', spec && typeof spec === 'object' ? spec : {}),
     kill: (id) => viaAction('kill', { id }),
     dismiss: (id) => viaAction('dismiss', { id }),
@@ -1077,6 +1104,8 @@ export function createRemoteFace(dispatcher, config = {}) {
     fallbackChain() { return impl.fallbackChain(); }
     /** ZB-82：→ { ok:true, split } 分流模式状态（读/写都走这里，见 impl.split）。 */
     split(patch) { return impl.split(patch); }
+    /** ZB-87：WorkBuddy 登录助手 → { ok, authUrl, webui, authenticated, account }（或 { ok:false, error }）。 */
+    login(opts) { return impl.login(opts); }
     /** dispatch(spec) → { ok:true, job } | { ok:false, error }。 */
     dispatch(spec) { return impl.dispatch(spec); }
     /** kill(id) → { ok:true, job } | { ok:false, error }。 */
@@ -1127,7 +1156,7 @@ export function createRemoteFace(dispatcher, config = {}) {
 }
 
 /** face 方法面（标记/描述符/文档共用这一份表）：[方法名, 参数名数组, 签名, 结果说明]。 */
-const REMOTE_METHODS = ['snapshot', 'dispatch', 'kill', 'dismiss', 'retry', 'tail', 'setChannel', 'setFallbackChain', 'switchGet', 'switchSet', 'quota', 'quotaPlan', 'channels', 'channel', 'fallbackChain', 'split', 'sequentialGet', 'sequentialSet', 'modelSwitchesGet', 'modelSwitchSet'];
+export const REMOTE_METHODS = ['snapshot', 'dispatch', 'kill', 'dismiss', 'retry', 'tail', 'setChannel', 'setFallbackChain', 'switchGet', 'switchSet', 'quota', 'quotaPlan', 'channels', 'channel', 'fallbackChain', 'split', 'login', 'sequentialGet', 'sequentialSet', 'modelSwitchesGet', 'modelSwitchSet'];
 
 const FACE_METHOD_TABLE = [
   ['snapshot', [], 'snapshot(): Promise<snapshot>', '快照数据对象 {generatedAt, counts, locks, queue, jobs[], channels[], workRoot, maxConcurrent}', []],
@@ -1147,6 +1176,7 @@ const FACE_METHOD_TABLE = [
   ['fallbackChain', [], 'fallbackChain(): Promise<{enabled, chain}>', '{enabled, chain}', []],
   /* ZB-82：分流模式（用户要求）—— 主通道将满时自动改派降级通道，用两条通道拿更大并发。 */
   ['split', ['patch'], 'split(patch?): Promise<{ok, split}|{ok:false, error}>', '{ok:true, split:{enabled, minFreeSlots, main:{provider,model,engine,limit,running,free}, targets, distinctTargets, active, reason}}（无参=读；patch={enabled?, minFreeSlots?}）', ['patch']],
+  ['login', ['opts'], 'login(opts?): Promise<{ok, authUrl, webui, authenticated, account}|{ok:false, error}>', '{ok:true, authUrl, webui, port, authenticated, account, hint}（opts={sub:"start"|"status"|"stop"}；start=起官方 --serve 并返回登录链接，status=查登录态，stop=关服务）', ['opts']],
   /* ZB-52：顺序派发（面板入口）。`sequentialSet({order})` 按引擎合并；**没有 enabled**。 */
   ['sequentialGet', [], 'sequentialGet(): Promise<{order, levels, sequentialCount}>', '{order:{zcode:[],opencode:[],qoder:[]}, levels:{…}, sequentialCount}（无 enabled：模型为空即顺序派发）', []],
   ['sequentialSet', ['patch'], 'sequentialSet(patch): Promise<{order, levels, sequentialCount}|{ok:false, error}>', '{order, levels, sequentialCount}（patch={order}；传 enabled 抛 TypeError）', ['patch']],

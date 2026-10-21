@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "DSH Dispatch Console",
-    "description": "Dispatch and monitor headless ZCode processes in the Harness (single-writer mutual exclusion, usage & context, plan channel)"
+    "description": "Dispatch and monitor AI CLI headless processes in Harness (four engines: ZCode / OpenCode / Qoder / WorkBuddy): single-writer lock, usage and context, concurrency and fallback chain, WorkBuddy sign-in"
   },
   "ui": {
     "title": "Dispatch Console",
@@ -246,6 +246,19 @@
     "engCodebuddy": "WorkBuddy",
     "engGroupCodebuddy": "WorkBuddy channels",
     "pNotLoggedIn": "CLI not signed in",
-    "chanEngineHintCodebuddy": "WorkBuddy / CodeBuddy engine (runs the **official CLI**; no reverse proxy involved): no mode / memoryBench; thinking maps to CodeBuddy --effort (the level set is declared by the CLI itself in --help: minimal→max, 6 levels). The executor defaults to --permission-mode acceptEdits (can edit files inside the working directory); to allow everything the dispatcher must pass auto=true explicitly (mapped to bypassPermissions). Note: the CLI login is **independent of the WorkBuddy desktop app** — the desktop can be signed in while headless runs still report \"Authentication required\"; the job then pauses as `not logged in` and you need to start the CLI interactively once and run /login. This CLI exits with code 0 even when the task fails, and the executor folds that into the done exit code — so do not judge success from exit=0 alone."
+    "chanEngineHintCodebuddy": "WorkBuddy / CodeBuddy engine (runs the **official CLI**; no reverse proxy involved): no mode / memoryBench; thinking maps to CodeBuddy --effort (the level set is declared by the CLI itself in --help: minimal→max, 6 levels). The executor defaults to --permission-mode acceptEdits (can edit files inside the working directory); to allow everything the dispatcher must pass auto=true explicitly (mapped to bypassPermissions). Note: the CLI login is **independent of the WorkBuddy desktop app** — the desktop can be signed in while headless runs still report \"Authentication required\"; the job then pauses as `not logged in` and you need to start the CLI interactively once and run /login. This CLI exits with code 0 even when the task fails, and the executor folds that into the done exit code — so do not judge success from exit=0 alone.",
+    "wbLoginTitle": "WorkBuddy sign-in",
+    "wbLoginBtn": "Sign in",
+    "wbLoginBusy": "Signing in…",
+    "wbLoginCheck": "Check status",
+    "wbLoginStop": "Close",
+    "wbLoginHint": "Starts a local sign-in service from the official WorkBuddy CLI (codebuddy --serve) and returns a **sign-in link**. Note: /login is a slash command inside the CLI UI — typing it in PowerShell fails with \"not recognized\"; CLI sign-in is **independent of the desktop app**. This plugin never reads or writes credentials; it only drives the official process.",
+    "wbLoginCheckHint": "Query account sign-in state (official REST: /api/v1/auth/account/status)",
+    "wbLoginStopHint": "Stop the sign-in service (also ends the CLI child process)",
+    "wbLoginOpen": "Open sign-in link",
+    "wbLoginWebui": "Open Web UI",
+    "wbLoginAuthed": "signed in",
+    "wbLoginNotAuthed": "not signed in",
+    "wbLoginFail": "sign-in service unavailable"
   }
 }

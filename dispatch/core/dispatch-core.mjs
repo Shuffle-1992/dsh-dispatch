@@ -81,7 +81,9 @@
  *   `options.opencodeRunnerPath`（或 env `DSP_OPENCODE_RUNNER`）覆盖 OpenCode 执行器路径，
  *   `options.maxConcurrentOpenCode` 设 OpenCode 独立并发上限，`options.opencodeMaxModels` 限制探测出的模型数。
  */
-import { spawn as nodeSpawn } from 'node:child_process';
+import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from 'node:child_process';
+import { request as httpRequest } from 'node:http'; // ZB-87：登录助手调官方 --serve 的 REST
+import { createServer as createNetServer } from 'node:net'; // ZB-87：取空闲端口
 import {
   closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync,
   realpathSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync,
@@ -2992,17 +2994,37 @@ export function createDispatcher(options = {}) {
       for (const lv of m[2].split(',').map((s) => s.trim()).filter(Boolean)) levelSet.add(lv);
     }
     const levels = levelSet.size ? [...levelSet] : null;
+    /* ZB-87：模型清单的**来源**（执行器打的机器可读标记）。
+     *   real   = 从 CLI 的模型校验输出拿到（权威、随服务端更新）；
+     *   static = 只有 CLI `--help` 的静态声明（**可能过期**：真机 bundle 已含 kimi-k2.6/k3，
+     *            而 help 只写到 kimi-k2.5 —— 用户反馈"模型太老了"就是这条）。
+     * 静态时必须**如实标注**，不能让用户以为这是账号真实可用目录。 */
+    let modelSource = null;
+    let modelSourceReason = null;
+    for (const line of lines) {
+      const ms = line.match(/models-source=(real|static)(?:\s+reason=(\S+))?/);
+      if (ms) { modelSource = ms[1]; modelSourceReason = ms[2] ?? null; }
+    }
     let version = null;
     const v = await runCodebuddyProbe(['--version']);
     if (v.ok) {
       const m = String(v.stdout).match(/\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/);
       version = m ? m[1] : (String(v.stdout).trim().split('\n')[0].trim() || null);
     }
+    const warnings = [];
+    if (models.length === 0) {
+      warnings.push('CodeBuddy 模型探测未返回任何合法模型名 —— CodeBuddy 通道为空（其它引擎不受影响）');
+    } else if (modelSource === 'static') {
+      /* `[info]` 前缀是约定：客户端据此渲染成**中性提示**，而不是红色"加载失败"。 */
+      warnings.push(`[info] WorkBuddy 模型清单来自 CLI 内置**静态声明**（${models.length} 个，可能过期：真机 bundle 已含 kimi-k2.6/k3 而 help 只到 kimi-k2.5）`
+        + `；真实目录探测未生效（${modelSourceReason ?? 'unknown'}）—— 登录后会自动改用真实目录`);
+    }
     return {
       models,
       version,
       levels,
-      warning: models.length === 0 ? 'CodeBuddy 模型探测未返回任何合法模型名 —— CodeBuddy 通道为空（其它引擎不受影响）' : null,
+      modelSource,
+      warning: warnings.length ? warnings.join('；') : null,
     };
   }
 
@@ -3025,6 +3047,190 @@ export function createDispatcher(options = {}) {
       child.on('error', (e) => { clearTimeout(timer); done({ ok: false, error: e?.message ?? String(e) }); });
       child.on('close', (code) => { clearTimeout(timer); done({ ok: code === 0, code, stdout, stderr }); });
     });
+  }
+
+  /* ── ZB-87：WorkBuddy / CodeBuddy **登录助手**（不依赖 TUI 的登录通道）──
+   *
+   * 真机现场（2026-10-21）：用户照文档在 PowerShell 里敲 `/login` ⇒
+   * `无法将 /login 项识别为 cmdlet…`；而无参数启动 CLI 在非 TTY 下**静默退出**（exit 0、零输出）。
+   * 根因：`/login` 是 **CLI 交互界面里的斜杠命令**，而 TUI 在无终端环境下根本起不来。
+   *
+   * 解法（全部经真机实测的 REST 接口，**不依赖终端**）：
+   *   ① 起 `codebuddy --serve`（HTTP 服务）→ 它打印随机 password；
+   *   ② `POST /api/v1/auth/login {password}`   → 本地 Web UI 的 Bearer token；
+   *   ③ `POST /api/v1/auth/account/login`      → `{ authUrl }` ← **"登录链接"就是它**；
+   *   ④ 用户在浏览器打开 authUrl 完成 OAuth；
+   *   ⑤ `GET /api/v1/auth/account/status`      → `{ authenticated, account:{userId,userName,…} }`。
+   * 所有请求必须带 `X-CodeBuddy-Request: 1`（防 CSRF 的固定值），密码走 query 或 Bearer。
+   *
+   * 边界（硬约束）：派发台**不读不写任何凭据** —— 只驱动官方进程、读官方自己给出的状态。
+   * 登录服务是**内存态**（不落 jobs.json、不占并发/锁），15 分钟无操作自动关闭。
+   */
+  let cbLoginSession = null; // { child, port, password, token, startedAt }
+  const CB_LOGIN_TTL_MS = 15 * 60_000;
+
+  /** 取一个空闲端口（listen(0) 让系统分配，立刻关闭）；失败回退随机高端口。 */
+  function pickFreePort() {
+    return new Promise((done) => {
+      const fallback = () => done(19000 + Math.floor(Math.random() * 900));
+      let srv;
+      try {
+        srv = createNetServer();
+      } catch {
+        fallback();
+        return;
+      }
+      srv.once('error', fallback);
+      srv.listen(0, '127.0.0.1', () => {
+        let p = null;
+        try { p = srv.address()?.port ?? null; } catch { /* 忽略 */ }
+        try { srv.close(() => done(p || 19000 + Math.floor(Math.random() * 900))); } catch { done(p || 19000 + Math.floor(Math.random() * 900)); }
+      });
+    });
+  }
+
+  /** 极简 HTTP 客户端（node:http；带超时、**永不抛**）。返回 {ok,status,text,json,error?}。 */
+  function cbHttp(port, path, { method = 'GET', body, token, password } = {}) {
+    return new Promise((done) => {
+      const payload = body == null ? null : Buffer.from(JSON.stringify(body), 'utf8');
+      const qs = password ? `?password=${encodeURIComponent(password)}` : '';
+      const headers = { 'X-CodeBuddy-Request': '1', Accept: 'application/json' };
+      if (payload) {
+        headers['Content-Type'] = 'application/json';
+        headers['Content-Length'] = String(payload.length);
+      }
+      if (token) headers.Authorization = `Bearer ${token}`;
+      let req;
+      try {
+        req = httpRequest({ host: '127.0.0.1', port, path: `${path}${qs}`, method, headers, timeout: 15000 }, (res) => {
+          let text = '';
+          res.setEncoding('utf8');
+          res.on('data', (c) => { text += c; });
+          res.on('end', () => {
+            let json = null;
+            try { json = JSON.parse(text); } catch { /* 非 JSON：原样留在 text */ }
+            done({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, text, json });
+          });
+        });
+      } catch (e) {
+        done({ ok: false, status: null, text: '', json: null, error: e?.message ?? String(e) });
+        return;
+      }
+      req.on('timeout', () => {
+        try { req.destroy(); } catch { /* 尽力 */ }
+        done({ ok: false, status: null, text: '', json: null, error: 'timeout' });
+      });
+      req.on('error', (e) => done({ ok: false, status: null, text: '', json: null, error: e?.message ?? String(e) }));
+      if (payload) req.write(payload);
+      req.end();
+    });
+  }
+
+  /** 登录服务的进程树终止（Windows 下必须 /T，否则 `--serve` 会变孤儿）。 */
+  function killLoginTree(child) {
+    if (!child?.pid) return;
+    try { nodeSpawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }); } catch {
+      try { child.kill(); } catch { /* 尽力 */ }
+    }
+  }
+
+  /** 停止登录服务（幂等）。 */
+  function stopCodebuddyLogin() {
+    const s = cbLoginSession;
+    cbLoginSession = null;
+    if (!s) return { ok: true, stopped: false };
+    killLoginTree(s.child);
+    return { ok: true, stopped: true };
+  }
+
+  /**
+   * 启动登录服务并取回**登录链接**。
+   * @returns {Promise<{ok:boolean, authUrl?:string|null, webui?:string, port?:number, authenticated?:boolean,
+   *                    account?:object|null, hint?:string, error?:string}>}
+   */
+  async function startCodebuddyLogin() {
+    if (!codebuddyRunnerPath) return { ok: false, error: 'WorkBuddy 执行器未配置（codebuddyRunnerPath 为空）' };
+    if (!existsSync(codebuddyRunnerPath)) return { ok: false, error: `WorkBuddy 执行器不存在：${codebuddyRunnerPath}` };
+    stopCodebuddyLogin(); // 幂等：重开前先清掉旧的
+    const port = await pickFreePort();
+    let child;
+    try {
+      child = spawnImpl(process.execPath, [codebuddyRunnerPath, '--login-serve', '--port', String(port)], { cwd: runnerCwd, env: { ...process.env } });
+    } catch (e) {
+      return { ok: false, error: `登录服务启动失败：${e?.message ?? e}` };
+    }
+    /* 等 runner 报出 `login-serve port=<n> password=<pw>`（30s，与 runner 内部超时对齐）。 */
+    const ready = await new Promise((done) => {
+      let buf = '';
+      let settled = false;
+      const finish = (v) => { if (settled) return; settled = true; clearTimeout(timer); done(v); };
+      const timer = setTimeout(() => finish({ ok: false, error: '登录服务 30 秒内未就绪（未读到 password）' }), 32000);
+      const scan = () => {
+        const m = buf.match(/login-serve port=(\d+) password=(\S+)/);
+        if (m) finish({ ok: true, password: m[2] });
+      };
+      child.stdout?.setEncoding?.('utf8');
+      child.stdout?.on('data', (c) => { buf += c; scan(); });
+      child.stderr?.setEncoding?.('utf8');
+      child.stderr?.on('data', (c) => { buf += c; });
+      child.on('error', (e) => finish({ ok: false, error: e?.message ?? String(e) }));
+      child.on('close', () => finish({ ok: false, error: `登录服务提前退出（输出：${buf.slice(0, 300)}）` }));
+    });
+    if (!ready.ok) {
+      killLoginTree(child);
+      return { ok: false, error: ready.error };
+    }
+    cbLoginSession = { child, port, password: ready.password, token: null, startedAt: nowMs() };
+
+    /* ① 本地 Web UI 密码认证 → Bearer token */
+    const a1 = await cbHttp(port, '/api/v1/auth/login', { method: 'POST', body: { password: ready.password } });
+    const token = a1.json?.token ?? null;
+    if (!token) {
+      stopCodebuddyLogin();
+      return { ok: false, error: `本地密码认证失败（${a1.status ?? a1.error}）：${String(a1.text).slice(0, 200)}` };
+    }
+    cbLoginSession.token = token;
+
+    /* ② 触发账号登录 → 拿 authUrl（这就是要展示给用户的"登录链接"） */
+    const a2 = await cbHttp(port, '/api/v1/auth/account/login', { method: 'POST', body: {}, token });
+    const authUrl = a2.json?.data?.authUrl ?? a2.json?.authUrl ?? null;
+
+    /* ③ 顺带读一次账号态（可能桌面应用已登录 ⇒ authenticated:true，但 CLI 仍需授权一次） */
+    const st = await cbHttp(port, '/api/v1/auth/account/status', { token });
+    const sd = st.json?.data ?? st.json ?? {};
+    const authenticated = !!sd.authenticated;
+    return {
+      ok: true,
+      port,
+      webui: `http://127.0.0.1:${port}/?password=${encodeURIComponent(ready.password)}`,
+      authUrl,
+      authenticated,
+      account: sd.account ?? null,
+      /* 如实说明：账号态 true 并不等于「无头派发能用」—— 真机实测两者可以不一致。 */
+      hint: authUrl
+        ? '请在浏览器打开 authUrl 完成登录，完成后点「检查登录状态」；账号态显示已登录时也建议完成一次授权（真机实测 CLI 与桌面账号态可能不一致）'
+        : '未取到登录链接（account/login 未返回 authUrl）：可直接打开 webui 在网页里登录',
+    };
+  }
+
+  /** 查询登录状态（GET /api/v1/auth/account/status）。登录服务未启动/超时 ⇒ 可读错误。 */
+  async function codebuddyLoginStatus() {
+    const s = cbLoginSession;
+    if (!s) return { ok: false, error: '登录服务未启动（请先点「登录 WorkBuddy」）' };
+    if (nowMs() - s.startedAt > CB_LOGIN_TTL_MS) {
+      stopCodebuddyLogin();
+      return { ok: false, error: '登录服务已超时（15 分钟）关闭，请重新点「登录 WorkBuddy」' };
+    }
+    const st = await cbHttp(s.port, '/api/v1/auth/account/status', { token: s.token });
+    if (!st.ok) return { ok: false, error: `查询登录态失败（${st.status ?? st.error}）：${String(st.text).slice(0, 200)}` };
+    const sd = st.json?.data ?? st.json ?? {};
+    return {
+      ok: true,
+      authenticated: !!sd.authenticated,
+      account: sd.account ?? null,
+      port: s.port,
+      webui: `http://127.0.0.1:${s.port}/?password=${encodeURIComponent(s.password)}`,
+    };
   }
 
   /**
@@ -4110,6 +4316,11 @@ export function createDispatcher(options = {}) {
     engineLimits: Object.fromEntries(ENGINES.map((e) => [e, engineLimit(e)])),
     opencodeRunnerPath,
     codebuddyRunnerPath,
+    /* ZB-87：WorkBuddy 登录助手（面板按钮用）。
+     * 返回的都是纯 JSON（无 ChildProcess/句柄），可直接过 wire 边界。 */
+    startCodebuddyLogin,
+    codebuddyLoginStatus,
+    stopCodebuddyLogin,
   };
 }
 
