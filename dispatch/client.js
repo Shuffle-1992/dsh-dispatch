@@ -2755,18 +2755,22 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * ZB-97：**额度的极短写法**（模块级，侧栏额度行与引擎状态条共用同一套口径）。
-     * 完整原因永远放 title —— 正文只留极短，符合用户"别显示一大段"的要求。
+     * ZB-100：额度的极短写法 —— **只在有真数据时返回文本**，否则返回 null（调用方不渲染）。
+     *
+     * 用户真机反馈（原话）：「额度：无额度接口 / 免费 / 额度不可用 —— 那不是显示没有意义」
+     * —— 这条批评是对的：**"查不到"不是要展示给用户的信息**，它占一行、每次看到都在提醒"没用"。
+     *
+     * 所以这里严格成：**有余额才算有话说**。
+     *   · available === true（真查到余量）      ⇒ `231.4M/300M`
+     *   · 其余（官方无接口 / 暂时取不到 / 免费）⇒ **null ⇒ 整行不渲染**
+     * 「哪个引擎查不到额度」这种元数据仍然完整保留在 `creditSummary` 里给 **Agent** 读
+     * （它需要知道"别指望查余额"），只是不占人的屏幕。
      */
-    function creditBriefOf(credit, t) {
+    function creditBriefOf(credit) {
       if (!credit || typeof credit !== 'object') return null;
-      if (credit.kind === 'free') return t('creditFree');
-      if (credit.available === true) {
-        const m = (v) => (Number.isFinite(v) ? `${(v / 1e6).toFixed(1)}M` : '?');
-        return `${m(credit.remainingUnits)}/${m(credit.totalUnits)}`;
-      }
-      if (credit.available === false) return t('creditUnavailable');
-      return t('creditNoApi');
+      if (credit.available !== true) return null;
+      const m = (v) => (Number.isFinite(v) ? `${(v / 1e6).toFixed(1)}M` : '?');
+      return `${m(credit.remainingUnits)}/${m(credit.totalUnits)}`;
     }
 
     function EngineStatus({ engineDetail, creditSummary }) {
@@ -2775,9 +2779,9 @@ window.__ModuleLoader__.load({
        * 根本不会出现在引擎状态条里，属于"加引擎漏一处"的典型）。 */
       const rows = KNOWN_ENGINES.map((e) => engineDetail[e]).filter(Boolean);
       if (!rows.length) return null;
-      /* ZB-96：**积分/额度**简写 —— 逐引擎如实（有的显示余量、没有的显示"无接口"、免费的显示"免费"）。
-       * 完整原因放 title：正文只留极短，避免把引擎条撑爆（用户明确要求别显示一大段）。 */
-      const creditBrief = (engine) => creditBriefOf(creditSummary && typeof creditSummary === 'object' ? creditSummary[engine] : null, t);
+      /* ZB-100：额度简写 —— **只有真查到余量才显示**（"无接口/免费/取不到"不再进 UI，见 creditBriefOf）。
+       * 完整原因（含"日志 N 天前"）只在**有数据时**作为悬浮补充。 */
+      const creditBrief = (engine) => creditBriefOf(creditSummary && typeof creditSummary === 'object' ? creditSummary[engine] : null);
       const FORM_KEY = {
         cli: 'engineFormCli',
         'client-bundled-cli': 'engineFormClientBundled',
@@ -2811,8 +2815,10 @@ window.__ModuleLoader__.load({
               d.summary ?? '',
               d.reason ? `\n${d.reason}` : '',
               d.loginEvidence ? `\n${d.loginEvidence}` : '',
-              /* ZB-96：额度完整说明（含"日志 N 天前"这类关键限定）只放悬浮。 */
-              creditSummary && creditSummary[d.engine] ? `\n${t('creditTitle')}：${creditSummary[d.engine].text ?? creditBrief(d.engine) ?? '-'}` : '',
+              /* ZB-100：额度说明**只在真有数据时**进悬浮 —— 否则"无接口/取不到"也是噪音。 */
+              creditSummary && creditSummary[d.engine] && creditSummary[d.engine].available === true
+                ? `\n${t('creditTitle')}：${creditSummary[d.engine].text ?? creditBrief(d.engine) ?? '-'}`
+                : '',
             ].filter(Boolean).join(''),
           },
             h('span', { style: { marginRight: '3px' } }, mark(d)),
@@ -3334,7 +3340,7 @@ window.__ModuleLoader__.load({
       const selCredit = (channelsInfo && typeof channelsInfo === 'object' && channelsInfo.creditSummary && selEngine)
         ? channelsInfo.creditSummary[selEngine]
         : null;
-      const selCreditBrief = creditBriefOf(selCredit, t);
+      const selCreditBrief = creditBriefOf(selCredit);
 
       const switchProvider = (id) => {
         /* ⚠️ ZB-51：必须在**折叠后**的清单里找 —— 折叠条目的 id 是裸引擎名（`opencode` / `qoder`），
@@ -3863,19 +3869,18 @@ window.__ModuleLoader__.load({
                   })),
               h('span', { className: 'dsp-note', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' } }, giftText)))
           : null,
-        /* ── ZB-97：其余引擎的额度（选中即显示；qoder/codebuddy 会明说"官方无接口"） ──
-         * ZB-98：改为**始终渲染**（缺数据时显示 `—`）—— 真机反馈"没看到额度"时，
-         * 若整行干脆不渲染就无法区分"没数据"还是"没生效"，留一行空值最省事。
-         * 完整原因（含"日志 N 天前"、"哪个端点 404"）放 title，正文只留一行。 */
-        !giftSel
+        /* ── ZB-97/100：额度行 —— **有真数据才出现**（用户批评：无接口/免费/取不到 全是噪音）──
+         * 所以这里没有 `—` 占位、也不会因为"查不到"而渲染；ZCode 真查到余量时才多这一行。
+         * 免费额度通道仍走上面的进度条（`giftSel`），两者互斥不重复。 */
+        !giftSel && selCreditBrief
           ? h('div', { className: 'dsp-field', 'data-dsp-credit': selEngine ?? '' },
             h('span', { className: 'dsp-field-k' }, t('creditTitle')),
             h('span', {
               className: 'dsp-field-v',
               style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0', cursor: 'help' },
-              title: selCredit ? [selCredit.text ?? '', selCredit.note ?? ''].filter(Boolean).join('\n') : t('creditNoData'),
+              title: [selCredit.text ?? '', selCredit.note ?? ''].filter(Boolean).join('\n'),
             },
-            h('span', { className: 'dsp-note', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' } }, selCreditBrief ?? '—')))
+            h('span', { className: 'dsp-note', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' } }, selCreditBrief)))
           : null,
         /* ── ZB-85：顺序派发列表**已从面板移除**（改由插件设置页的配置卡承载）。
          * 面板只保留"日常派发"需要的东西：通道 / 模型 / 思考强度 / 自动降级目标 / 分流。 ── */

@@ -434,7 +434,7 @@ console.log('\nG. 登录条位置与数据源（用户要求：只放插件详�
   const clientSrc = readFileSync(join(HERE, '..', 'client.js'), 'utf8');
 
   /* ① 简写函数是**模块级公共**（侧栏额度行与引擎状态条同一口径，不许各写一份） */
-  ok(/function creditBriefOf\(credit, t\)/.test(clientSrc), '★ creditBriefOf 提成模块级公共函数（口径单一）');
+  ok(/function creditBriefOf\(credit\)/.test(clientSrc), '★ creditBriefOf 提成模块级公共函数（口径单一）');
   const briefUses = (clientSrc.match(/creditBriefOf\(/g) ?? []).length;
   ok(briefUses >= 3, `creditBriefOf 被多处复用（定义 + 引擎条 + 侧栏 = ≥3，实际 ${briefUses}）`);
 
@@ -447,9 +447,14 @@ console.log('\nG. 登录条位置与数据源（用户要求：只放插件详�
   /* ③ ⚠️ 免费额度通道仍走**进度条**（信息最全），不能被通用额度行顶掉 */
   ok(/!giftSel[\s\S]{0,140}?data-dsp-credit/.test(clientSrc),
     '★ 通用额度行以 `!giftSel` 为前提（免费额度通道保留原有进度条，不重复不冲突）');
-  /* ZB-98：额度行**始终渲染**（缺数据显 `—`）—— 否则真机"没看到额度"时分不清是没数据还是没生效 */
-  ok(/selCreditBrief \?\? '—'/.test(clientSrc),
-    '★ 额度行始终渲染（无数据时显示占位符，便于区分"没数据"与"没渲染"）');
+  /* ZB-100（用户批评）：**"查不到"不是要展示的信息** —— 无接口/免费/取不到 都不许进 UI。
+   * 判据三连：creditBriefOf 只认 available===true；那些文案不再被渲染；额度行有数据才渲染。 */
+  ok(/if \(credit\.available !== true\) return null;/.test(clientSrc),
+    '★ creditBriefOf 只认 available===true（无接口/免费/取不到 ⇒ null）');
+  ok(!/t\('creditNoApi'\)/.test(clientSrc) && !/t\('creditUnavailable'\)/.test(clientSrc),
+    '★ UI 里不再渲染「无额度接口 / 额度不可用」（用户明确说那是噪音）');
+  ok(/!giftSel && selCreditBrief/.test(clientSrc),
+    '★ 额度行为「有真数据才出现」（不再用 `—` 占位）');
 
   /* ④ ZB-98：`?` 说明图标移到 Section 标题右侧（原先独占一行） */
   ok(/titleExtra/.test(clientSrc) && /defaultOpen, titleExtra, children/.test(clientSrc),
