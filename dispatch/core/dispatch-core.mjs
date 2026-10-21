@@ -2994,15 +2994,15 @@ export function createDispatcher(options = {}) {
       for (const lv of m[2].split(',').map((s) => s.trim()).filter(Boolean)) levelSet.add(lv);
     }
     const levels = levelSet.size ? [...levelSet] : null;
-    /* ZB-87：模型清单的**来源**（执行器打的机器可读标记）。
-     *   real   = 从 CLI 的模型校验输出拿到（权威、随服务端更新）；
-     *   static = 只有 CLI `--help` 的静态声明（**可能过期**：真机 bundle 已含 kimi-k2.6/k3，
-     *            而 help 只写到 kimi-k2.5 —— 用户反馈"模型太老了"就是这条）。
-     * 静态时必须**如实标注**，不能让用户以为这是账号真实可用目录。 */
+    /* ZB-87/88：模型清单的**来源**（执行器打的机器可读标记）。
+     *   real      = 从 CLI 的模型校验输出拿到（最权威、随服务端更新）；
+     *   help-auth = 已登录 ⇒ `--help` 反映**账号目录**，可信（真机：登录前后 9 → 20 个新模型）；
+     *   static    = 未登录 ⇒ `--help` 只是**内置快照**，可能过期（用户反馈"模型太老了"就是这条）。
+     * 只有 static 需要警示；help-auth 不该被冤枉成"可能过期"。 */
     let modelSource = null;
     let modelSourceReason = null;
     for (const line of lines) {
-      const ms = line.match(/models-source=(real|static)(?:\s+reason=(\S+))?/);
+      const ms = line.match(/models-source=(real|static|help-auth)(?:\s+reason=(\S+))?/);
       if (ms) { modelSource = ms[1]; modelSourceReason = ms[2] ?? null; }
     }
     let version = null;
@@ -3016,8 +3016,8 @@ export function createDispatcher(options = {}) {
       warnings.push('CodeBuddy 模型探测未返回任何合法模型名 —— CodeBuddy 通道为空（其它引擎不受影响）');
     } else if (modelSource === 'static') {
       /* `[info]` 前缀是约定：客户端据此渲染成**中性提示**，而不是红色"加载失败"。 */
-      warnings.push(`[info] WorkBuddy 模型清单来自 CLI 内置**静态声明**（${models.length} 个，可能过期：真机 bundle 已含 kimi-k2.6/k3 而 help 只到 kimi-k2.5）`
-        + `；真实目录探测未生效（${modelSourceReason ?? 'unknown'}）—— 登录后会自动改用真实目录`);
+      warnings.push(`[info] WorkBuddy 模型清单是 CLI **内置快照**（${models.length} 个，**可能过期**：登录后真机从 9 个变为 20 个）`
+        + `；原因：${modelSourceReason ?? 'unknown'}（未登录）—— 请在插件详情页点「登录」，登录后自动变成账号目录`);
     }
     return {
       models,

@@ -616,12 +616,18 @@ export function listModels(cli, opt = {}) {
   const text = helpText(cli);
   const staticModels = parseHelpModels(text);
 
-  /* ZB-87：**优先真实目录**（登录后哨兵可用），拿不到才退回 CLI 静态声明。
-   * ⚠️ 用户反馈过"模型太老了" —— 根因就是 `--help` 是**静态文案**，比服务端目录旧
-   * （真机证据：bundle 里已有 kimi-k2.6 / kimi-k3，而 help 只写到 kimi-k2.5）。 */
+  /* ZB-87/88：**优先真实目录**（哨兵法；登录后才有意义），拿不到再退回 CLI 声明。
+   * ⚠️ 用户反馈过"模型太老了"。真机进一步确认（2026-10-21 登录后实测）：
+   *   · 未登录：哨兵法得到 `not-logged-in`，help 只列 9 个 ⇒ 必须标注"可能过期"；
+   *   · **已登录：help 直接列 20 个**（hy4-preview / deepseek-v4-pro / glm-5.3 / kimi-k3-1 …），
+   *     而哨兵法此时拿不到清单（`no-model-list-in-error`：CLI 只在**真发请求**时校验模型）。
+   * ⇒ 三种来源必须**分开标注**，不能一律说"静态可能过期"（那会冤枉登录后的真实目录）：
+   *   real      哨兵法给出的清单（最权威）
+   *   help-auth 已登录 ⇒ `--help` 反映的是**账号目录**（可信）
+   *   static    未登录 ⇒ `--help` 是内置快照（**可能过期**） */
   const real = probeModelsBySentinel(cli);
   const models = real.ok ? real.models : staticModels;
-  const source = real.ok ? 'real' : 'static';
+  const source = real.ok ? 'real' : (real.reason === 'not-logged-in' ? 'static' : 'help-auth');
 
   if (models.length === 0) {
     note(`拿不到任何模型清单（真实目录与 --help 声明都为空，不编造）。help 前 200 字：${text.trim().slice(0, 200)}`);
@@ -629,15 +635,18 @@ export function listModels(cli, opt = {}) {
   }
   for (const m of models) out(m); // 裸模型名（每行一个），与另两个执行器的 --list-models 同契约
 
-  /* 给宿主的**机器可读来源标记**（core 据此在面板上如实标注"静态/可能过期"，而不是假装权威）。 */
+  /* 给宿主的**机器可读来源标记**（core 据此在面板上如实标注，而不是假装权威）。 */
   out(`${PREFIX} models-source=${source}${real.ok ? '' : ` reason=${real.reason}`}`);
   if (real.ok) {
     note(`模型清单来自 CLI 的**实际校验输出**（共 ${models.length} 个，权威、随服务端更新）`);
+  } else if (source === 'help-auth') {
+    /* 已登录 ⇒ --help 反映账号目录，可信（真机：登录后从 9 个变成 20 个新模型）。 */
+    note(`模型清单来自 CLI 的 --help（共 ${models.length} 个）。已登录 ⇒ 该清单反映**账号可用目录**`
+      + `（登录前后从 9 个变为 20 个，含 hy4-preview / deepseek-v4-pro / glm-5.3 / kimi-k3-1 等新模型）`);
   } else {
-    /* 如实标注：这是 CLI 内置的静态声明，**可能过期**；登录后会自动改用真实目录。 */
-    note(`模型清单来自 CLI 自身 --help 的**静态声明**（共 ${models.length} 个，可能过期：真机 bundle 里已有 kimi-k2.6/k3 而 help 只到 kimi-k2.5）`
-      + `；真实目录探测未生效（${real.reason}）⇒ 面板上会标注「静态声明」。`)
-      ;
+    /* 未登录 ⇒ --help 只是**内置快照**，可能过期。 */
+    note(`模型清单来自 CLI 自身 --help 的**内置快照**（共 ${models.length} 个，**可能过期**：登录后自动变成账号目录，`
+      + `真机实测从 9 个变为 20 个）；原因：${real.reason}（未登录）⇒ 请在插件详情页点「登录」`);
   }
 
   if (opt.withEfforts) {

@@ -13,9 +13,9 @@
 //
 // 硬约束：零依赖（只用 node 内置）；**只读**探测（凭据只判存在性，绝不解析内容）；
 // 任何失败都不抛到调用方；所有子进程探测都带超时。
-import { existsSync, statSync, readdirSync, openSync, readSync, closeSync } from 'node:fs';
+import { existsSync, statSync, readdirSync, openSync, readSync, closeSync, readFileSync } from 'node:fs';
 import { join, delimiter, basename, extname, isAbsolute, resolve } from 'node:path';
-import { homedir, platform } from 'node:os';
+import { homedir, platform, tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
 export const ENGINES = ['zcode', 'opencode', 'qoder', 'codebuddy'];
@@ -280,10 +280,41 @@ function loginHint(engine, entry, opts) {
     if (!safeIsDir(fs, dir)) {
       return { loggedIn: false, evidence: `未发现 CLI 目录（${dir}）—— CLI 从未运行过，必然未登录` };
     }
+    /* ZB-88：改为读**我们自己的模型探测缓存**（`codebuddy-run` 写，系统临时目录，10 分钟 TTL）。
+     *
+     * 为什么不再靠文件猜（真机 2026-10-21 实测）：登录成功后 `~/.codebuddy/` 里**没有任何**
+     * 可明确指认的凭据文件（只有 settings/user-state/local_storage 的编码块，而解析凭据是
+     * 明令禁止的）。旧实现因此**始终判未登录** —— 而 CLI 其实已经能用（无头真跑返回
+     * `assistant: OK` / `is_error=False`），这就是**假阴性**：面板说未登录、实际能派发，
+     * 用户会白折腾。
+     *
+     * 新判据的数据来源是**真实探测结果**：`probeModelsBySentinel()` 用非法模型探真实目录，
+     * 未登录时必然得到 `reason=not-logged-in`。这份缓存不含任何凭据，只有
+     * `{ok, models?, reason?, at}`，读它安全且**零额外耗时**（探测本来就会跑）。 */
+    try {
+      const cachePath = join(tmpdir(), 'dsh-codebuddy-models-cache.json');
+      if (safeIsFile(fs, cachePath) && safeSize(fs, cachePath) > 0) {
+        const j = JSON.parse(readFileSync(cachePath, 'utf8'));
+        const fresh = j && typeof j.at === 'number' && Date.now() - j.at < 10 * 60_000;
+        if (fresh && j.ok === true) {
+          return { loggedIn: true, evidence: `模型探测拿到了真实目录（${(j.models ?? []).length} 个模型）⇒ CLI 已登录可用` };
+        }
+        if (fresh && j.ok === false && j.reason === 'not-logged-in') {
+          return { loggedIn: false, evidence: '模型探测报未登录（无头执行会报 Authentication required）⇒ 请在插件详情页点「登录」' };
+        }
+        /* ★ 关键推断：探测**已跑过且没报未登录** ⇒ 鉴权这一关过了 ⇒ 已登录。
+         * 真机 2026-10-21：登录后哨兵法拿不到清单（`no-model-list-in-error`），
+         * 但 `-p` 真跑已经成功（`assistant: OK` / `is_error=False`）。
+         * 若这里仍返回 null，面板就一直显示"登录态未知"—— 同样是误导。 */
+        if (fresh && j.ok === false && typeof j.reason === 'string' && j.reason !== 'not-logged-in') {
+          return { loggedIn: true, evidence: `模型探测已通过鉴权（未报未登录，${j.reason}）⇒ CLI 已登录可用` };
+        }
+      }
+    } catch { /* 缓存损坏/不可读 ⇒ 落到下面的"未知"，绝不猜 */ }
     return {
-      loggedIn: false,
-      evidence: `CLI 目录存在（${dir}）但**没有可明确判定的凭据文件**（此判据偏保守，以实际派发结果为准；`
-        + '未登录时无头执行会报 Authentication required，派发台会归为「CLI 未登录」暂停态）',
+      loggedIn: null,
+      evidence: '登录态**未知**（CLI 不落明文凭据，且暂无新鲜的模型探测结果）'
+        + ' —— 以真实派发结果为准；如派发报 Authentication required，请在插件详情页点「登录」',
     };
   }
   /* Qoder：**不能用 `.auth/` 目录判登录** —— 实测 IDE 登录着、CLI 仍报 Not logged in，
