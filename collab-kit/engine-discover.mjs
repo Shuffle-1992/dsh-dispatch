@@ -258,21 +258,32 @@ function loginHint(engine, entry, opts) {
     return { loggedIn: null, evidence: `未发现数据目录（${dataDir}）` };
   }
   /* CodeBuddy / WorkBuddy：**CLI 登录态与桌面应用互相独立**（真机 2026-10-21 实测）。
-   * 证据链：桌面 app 装着且在用，但① 两个候选会话文件都不存在 ② `-p` 直接返回
-   * `Authentication required. Please use /login command to sign in` ⇒ "会话文件缺失"与
-   * "未登录"在这个引擎上是**同一条事实**，可以据此判定（不同于 OpenCode 那个"缺 auth.json
-   * 却用得挺好"的反例；两者区别：CodeBuddy 的 CLI 无凭据**必然**报错）。
-   * 只判存在性与大小，**绝不解析内容**。 */
+   *
+   * ⚠️ 2026-10-21 真机纠正（重要）：本分支最初用 `~/.codebuddy-session.json` 作判据 ——
+   * 那是**错的**：该路径属于社区反代项目（workbuddy2api），**不是官方 CLI 的**。
+   * 官方 CLI 的真机落点是 `~/.codebuddy/`（`--serve` 会直接打印
+   * `Config C:\Users\<u>\.codebuddy\settings.json`），里面有 settings / user-state /
+   * local_storage / sessions / logs，但**没有任何可明确指认的凭据文件**
+   * （local_storage 里只有若干 `.info` 状态桶）。
+   *
+   * 故这里**不猜**：只认显式覆盖（`CODEBUDDY_SESSION_FILE`），其余一律保守判"未登录"，
+   * 并把"怎么登录"直接写进 evidence —— 用户此刻最需要的是这个指引，而不是一个我猜的状态。
+   * 判据本身的局限已如实写进 evidence，别把 false 当成"权威结论"。 */
   if (engine === 'codebuddy') {
-    const files = [
-      env.CODEBUDDY_SESSION_FILE || join(HOME, '.codebuddy-session.json'),
-      join(HOME, '.codebuddy-global-session.json'),
-    ];
-    const hit = files.find((p) => safeIsFile(fs, p) && safeSize(fs, p) > 0);
-    if (hit) return { loggedIn: true, evidence: `会话文件存在（${hit}）` };
+    const override = String(env.CODEBUDDY_SESSION_FILE ?? '').trim();
+    if (override) {
+      const p = resolve(override);
+      const ok = safeIsFile(fs, p) && safeSize(fs, p) > 0;
+      return { loggedIn: ok, evidence: ok ? `CODEBUDDY_SESSION_FILE 存在（${p}）` : `CODEBUDDY_SESSION_FILE 指向的文件不存在或为空（${p}）` };
+    }
+    const dir = join(HOME, '.codebuddy');
+    if (!safeIsDir(fs, dir)) {
+      return { loggedIn: false, evidence: `未发现 CLI 目录（${dir}）—— CLI 从未运行过，必然未登录` };
+    }
     return {
       loggedIn: false,
-      evidence: `未发现会话文件（${files.join(' / ')}）—— CLI 登录态与桌面应用互相独立`,
+      evidence: `CLI 目录存在（${dir}）但**没有可明确判定的凭据文件**（此判据偏保守，以实际派发结果为准；`
+        + '未登录时无头执行会报 Authentication required，派发台会归为「CLI 未登录」暂停态）',
     };
   }
   /* Qoder：**不能用 `.auth/` 目录判登录** —— 实测 IDE 登录着、CLI 仍报 Not logged in，
@@ -449,9 +460,11 @@ async function finalize(res, reason, { fs, env, timeoutMs, runProbe }) {
       res.warnings.push(res.engine === 'qoder'
         ? 'Qoder CLI 存在但**未登录**：运行 `qoderclicn login`（浏览器设备码）或设 QODER_PERSONAL_ACCESS_TOKEN'
         : res.engine === 'codebuddy'
-          ? 'CodeBuddy CLI 存在但**未登录**（CLI 登录态与 WorkBuddy 桌面应用互相独立）：'
-            + '交互启动 CLI 后在界面里输入 /login（浏览器 OAuth）。'
-            + `交互启动命令：set CODEBUDDY_FORCE_LITE_WB_BUNDLE=1 && "${res.entry}"`
+          ? 'CodeBuddy CLI 存在但（按保守判据）**未登录** —— CLI 登录态与 WorkBuddy 桌面应用互相独立。'
+            + '登录方式（都不需要手改文件；`/login` 是 **CLI 界面里的斜杠命令**，不是 shell 命令）：'
+            + `① 最稳（不依赖 TUI）：node "${res.entry}" --serve —— 它会打印带 password 的 Web UI 链接，`
+            + '浏览器打开登录，完成后 Ctrl+C 停服务；'
+            + '② 真终端里交互启动 CLI（node "<上面的路径>"），进入界面后输入 /login。'
           : `${res.engine} 未登录`);
     }
   } catch (e) {

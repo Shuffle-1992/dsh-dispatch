@@ -607,3 +607,55 @@ Error: Cannot find module '../dist/codebuddy'   ← 不设环境变量就是这�
 
 **教训**：这两个坑都不抛异常，只让功能"看起来没配好" —— 排查时优先怀疑
 **路径字符串的编码/形态**与**正则能否匹配真实样本**（拿真实样本跑一次正则，别靠眼过）。
+
+---
+
+## 2026-10-21 ZB-84 追加：给 CodeBuddy CLI 登录时踩到的四件事
+
+### 1. `/login` 是 **CLI 界面里的斜杠命令**，不是 shell 命令
+
+用户真机现场：在 PowerShell 提示符下敲 `/login` ⇒
+
+```
+/login : 无法将“/login”项识别为 cmdlet、函数、脚本文件或可执行程序的名称。
+```
+
+**这是对的报错** —— `/login` 必须在 **CLI 的交互界面里**敲。
+教训：给用户写"敲 /login"这种指令时，**必须同时写明"在哪敲"**（交互界面 ≠ shell），
+否则用户照做必然撞墙，还会以为 CLI 坏了。
+
+### 2. 无 TUI 环境（或非 TTY）下无参数启动会**静默退出**（exit 0、零输出）
+
+`& node <cli>` 在非 TTY 里 `exit=0` 且一行输出都没有 —— 看起来像"命令没执行"。
+**别据此判断 CLI 坏了**；同理，`--serve` 这种非 TUI 入口反而在无 TTY 下能正常起。
+
+**推广**：给用户提供登录/初始化步骤时，**优先给非 TUI 入口**
+（本例 `--serve` 会打印带 `password` 的 Web UI 链接，浏览器里完成登录），
+TUI 方案作为备选 —— 这样不依赖用户终端能力。
+
+### 3. `--version` / `--help` **不能**用来验证"这个 CLI 能不能真跑"
+
+真机实测：不设 `CODEBUDDY_FORCE_LITE_WB_BUNDLE=1` 时
+
+| 命令 | 结果 |
+|---|---|
+| `codebuddy --version` | ✅ 打印 `2.161.0` |
+| `codebuddy --help` | ❌ `Cannot find module '../dist/codebuddy'` |
+| `codebuddy -p hi --output-format stream-json` | ❌ 同上 |
+
+原因：`--version` 由**启动器自己**在加载 bundle 之前就答了（快速路径），
+真跑任务才需要 bundle。**教训**：判定"CLI 可用"必须用**真实执行路径**（哪怕一个最小 `-p`），
+别用 `--version` 充当健康检查 —— 这会造出"探测通过但派发全失败"的假象。
+
+### 4. 社区反代项目的凭据路径 **≠** 官方 CLI 路径
+
+网上（`workbuddy2api` 等）反复出现的 `~/.codebuddy-session.json` /
+`~/.codebuddy-global-session.json` 是**那些反代项目自己的**文件。
+官方 CLI 的真机落点是 **`~/.codebuddy/`**（`--serve` 会直接打印
+`Config C:\Users\<u>\.codebuddy\settings.json`），其中 `settings.json` / `user-state.json` /
+`local_storage/` / `sessions/` 都在，但**没有可明确指认的凭据文件**。
+
+**教训**：参考第三方逆向项目时，**它的路径约定不是官方事实** ——
+必须用官方 CLI 自己的输出（本例 `--serve` 打印的 `Config` 行）核实。
+本处已把登录态判据改成"只认显式覆盖 + 其余保守判未登录，并把登录指引写进 evidence"，
+并在注释里如实标注"此判据偏保守，以实际派发结果为准"。

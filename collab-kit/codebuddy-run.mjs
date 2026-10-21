@@ -673,11 +673,14 @@ async function runOnce(opt, cli) {
   if (authHit) {
     process.stderr.write(`${PREFIX} CLI 未登录（**不是**任务失败、也不是权限/沙箱问题）：WorkBuddy CLI 的登录态与`
       + '桌面应用**互相独立**，CLI 必须单独登录一次。\n'
-      + '处理（一次性，浏览器 OAuth）：\n'
-      + `  ① 交互启动：set CODEBUDDY_FORCE_LITE_WB_BUNDLE=1 && "${cli}"\n`
-      + '  ② 在交互界面里输入斜杠命令：/login\n'
-      + '  ③ 登录成功后确认会话文件存在：~/.codebuddy-session.json（国内）或\n'
-      + '     ~/.codebuddy-global-session.json（--global）；之后无头派发即自动可用。\n');
+      + '处理（一次性；两种方式任选，都不需要手改任何文件）：\n'
+      + `  ① 最稳（不依赖 TUI）：node "${cli}" --serve\n`
+      + '     它会打印形如 `http://127.0.0.1:<port>/?password=…` 的 Web UI 链接，浏览器打开并在其中登录，\n'
+      + '     完成后 Ctrl+C 停掉服务即可（实测可起，2026-10-21）。\n'
+      + `  ② 真终端里交互启动：node "${cli}"，进入界面后输入斜杠命令 /login。\n`
+      + '     ⚠️ /login 是 **CLI 界面里的斜杠命令**，不是 PowerShell/cmd 命令 ——\n'
+      + '        在 shell 里直接敲 /login 会报「无法将 /login 项识别为 cmdlet…」（真机踩过）。\n'
+      + '  登录成功后无头派发即自动可用；凭据由 CLI 自己保存在 ~/.codebuddy/ 下（派发台不读不写）。\n');
   }
 
   /* ---- 静默假成功检测（与 qoder-run 同一套经验）---- */
@@ -771,8 +774,11 @@ const HELP = `${PREFIX} WorkBuddy / CodeBuddy 执行器（第四个引擎）
 登录（一次性，必读）：
   WorkBuddy CLI 的登录态与**桌面应用互相独立**。未登录时无头执行会报
   "Authentication required. Please use /login command to sign in"。
-  登录：交互启动 CLI（带 CODEBUDDY_FORCE_LITE_WB_BUNDLE=1）后在界面里输入 /login。
-  会话文件：~/.codebuddy-session.json（国内）/ ~/.codebuddy-global-session.json（--global）。
+  ① 最稳（不依赖 TUI）：node "<上面的 CLI 路径>" --serve
+     它会打印带 password 的 Web UI 链接，浏览器打开并在其中登录，完成后 Ctrl+C。
+  ② 真终端里交互启动 CLI，进入界面后输入斜杠命令 /login
+     （⚠️ /login 不是 shell 命令，在 PowerShell/cmd 里敲会被当成命令而报错）。
+  凭据由 CLI 自己保存在 ~/.codebuddy/ 下；本执行器**不读不写**任何凭据。
 
 权限（默认已是最优，无需关心）：
   默认 --permission-mode acceptEdits：无头下可修改工作目录内文件。

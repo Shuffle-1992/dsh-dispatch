@@ -134,17 +134,53 @@ $env:CODEBUDDY_FORCE_LITE_WB_BUNDLE='1'
  "errors":["Authentication required. Please use /login command to sign in to your account"]}
 ```
 
-CLI **没有** `login` 子命令 —— 登录是在**交互会话**里敲斜杠命令 `/login`（浏览器 OAuth）：
+CLI **没有** `login` 子命令。登录有两条路，**① 最稳**：
+
+#### ① Web UI（推荐：不依赖 TUI，实测能起）
 
 ```powershell
-$env:CODEBUDDY_FORCE_LITE_WB_BUNDLE='1'
-& "$env:LOCALAPPDATA\Programs\WorkBuddy\resources\app.asar.unpacked\cli\bin\codebuddy"
-# 在交互界面里输入： /login
-# 成功后确认 ~/.codebuddy-session.json（国内）或 ~/.codebuddy-global-session.json（--global）存在
+# 前置 node（因为 bin\codebuddy 是无扩展名脚本，PowerShell 不能直接执行它）
+& node "$env:LOCALAPPDATA\Programs\WorkBuddy\resources\app.asar.unpacked\cli\bin\codebuddy" --serve
 ```
 
-派发台会把这种情况归为 **`CLI 未登录`（`not-logged-in`）暂停态**（不是"失败/未知原因"），
-并在进程 stderr 里直接给出上面的三步指引。
+它会直接打印（真机输出，密码每次随机）：
+
+```
+  CodeBuddy Code HTTP Server
+  Endpoint    http://127.0.0.1:18787
+  Web UI      http://127.0.0.1:18787/?password=<随机密码>
+  Password    <随机密码>
+  Config      C:\Users\<你>\.codebuddy\settings.json
+  Press Ctrl+C to stop the server
+```
+
+把 **Web UI 那一行整条**复制到浏览器打开 → 在网页里登录 → 回到终端 `Ctrl+C` 停掉服务。
+
+#### ② TUI 里敲 `/login`
+
+在**真终端**里交互启动 CLI，界面出来后输入斜杠命令 `/login`：
+
+```powershell
+& node "$env:LOCALAPPDATA\Programs\WorkBuddy\resources\app.asar.unpacked\cli\bin\codebuddy"
+# 进入界面后输入： /login
+```
+
+> 🔴 **`/login` 是 CLI 界面里的斜杠命令，不是 PowerShell 命令。**
+> 在 shell 提示符下直接敲 `/login` 会得到
+> `无法将 /login 项识别为 cmdlet、函数、脚本文件或可执行程序的名称`（真机踩过）。
+>
+> 🔴 还有一点：**无参数启动在非 TTY 环境下会静默退出（exit 0、零输出）** ——
+> 如果你看到"什么都没有"，先确认用的是**真终端窗口**、且命令**前置了 `node`**。
+
+#### 凭据在哪
+
+**`~/.codebuddy/`**（真机落点：`settings.json` / `user-state.json` / `local_storage/` / `sessions/` / `logs/`）。
+派发台**不读不写**这些凭据，只保守判断登录态。
+> ⚠️ 网上流传的 `~/.codebuddy-session.json` 是**社区反代项目**（workbuddy2api）的路径，
+> **不是官方 CLI 的** —— 别照着找。
+
+派发台会把未登录归为 **`CLI 未登录`（`not-logged-in`）暂停态**（不是"失败/未知原因"），
+并在进程 stderr 里直接给出上面两条路。
 
 ### ⚠️ 这个 CLI 的进程**退出码恒为 0**，即使任务失败
 
