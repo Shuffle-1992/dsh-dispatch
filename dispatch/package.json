@@ -2,7 +2,7 @@
   "name": "dsh-dispatch",
   "version": "0.1.0",
   "type": "module",
-  "description": "在 DeepSeek Harness 里派发/监视多个 ZCode 无头进程：单写者互斥、用量与上下文聚合、套餐通道与自动降级",
+  "description": "在 DeepSeek Harness 里派发/监视多个 AI CLI 无头进程（ZCode / OpenCode / Qoder / WorkBuddy 四引擎）：单写者互斥、用量与上下文聚合、并发与降级链、分流、暂停分类与 WorkBuddy 登录助手",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -47,7 +47,7 @@
   },
   "meta": {
     "title": "DSH 派发台",
-    "description": "在 Harness 里派发/监视多个 ZCode 无头进程（单写者互斥、用量与上下文、套餐通道）"
+    "description": "在 Harness 里派发/监视多个 AI CLI 无头进程（ZCode / OpenCode / Qoder / WorkBuddy 四引擎）：单写者互斥、用量与上下文、并发与降级链、WorkBuddy 登录"
   },
   "icon": "./icon.svg",
   "files": [
