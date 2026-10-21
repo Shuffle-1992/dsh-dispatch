@@ -89,7 +89,7 @@ import {
   realpathSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync,
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url'; // ZB-44：默认推断 OpenCode 执行器路径（<core 目录>/../../collab-kit/）
 import { createHash, randomBytes } from 'node:crypto'; // ZB-08：createHash 供文件锁路径哈希用
 /* ZB-44（双引擎）：行协议与引擎判据的**唯一权威**（core 与各执行器共用，见该文件顶部注释）。
@@ -3305,26 +3305,54 @@ export function createDispatcher(options = {}) {
   }
 
   /** 查询登录状态（GET /api/v1/auth/account/status）。登录服务未启动/超时 ⇒ 可读错误。 */
+  /**
+   * ZB-99f：**轻量登录结论**（不 spawn 探测、零额度消耗）—— 只看两样东西：
+   *   ① 探测缓存 `%TEMP%\dsh-codebuddy-models-cache.json`（真实探测的结论，24h 内有效）
+   *   ② 凭据文件存在性（`art.liveCredentials`，由只读扫描给出）
+   * 用途：`codebuddyLoginStatus` 在**登录服务没跑**时也能回答"到底登录着没有"，
+   * 使面板能显示「● 已登录」，而不是退而求其次的「◐ 凭据在（未验证）」。
+   * 顺序即优先级：有真实探测结论时以它为准；没有才拿凭据存在性兜底。
+   */
+  function lightCodebuddyLoggedIn(art) {
+    try {
+      const cachePath = join(tmpdir(), 'dsh-codebuddy-models-cache.json');
+      if (existsSync(cachePath)) {
+        const j = JSON.parse(readFileSync(cachePath, 'utf8'));
+        if (j && typeof j.at === 'number' && Date.now() - j.at < 24 * 3600_000) {
+          if (j.ok === true) return true;
+          if (j.ok === false && j.reason === 'not-logged-in') return false;
+          /* `ok:false` 且 reason 不是 not-logged-in（如 no-model-list-in-error）⇒ 鉴权那关过了。 */
+          if (j.ok === false && typeof j.reason === 'string') return true;
+        }
+      }
+    } catch { /* 缓存不可读 ⇒ 走凭据兜底 */ }
+    if (art && Array.isArray(art.liveCredentials) && art.liveCredentials.length > 0) return true;
+    return null;
+  }
+
   async function codebuddyLoginStatus() {
     const s = cbLoginSession;
     /* ZB-94：即使登录服务没在跑，也把**磁盘侧的登录产物诊断**返回 ——
      * 因为"登录过却一直未登录"最常见的真因就是 `.logged-out` 残留（强杀后遗留），
      * 而这时恰恰**没有**登录服务在跑。只读扫描，不读内容、不写。 */
     const artifacts = scanCodebuddyAuthArtifacts();
+    /* ZB-99f：连"登录结论"一起给（轻量、零 spawn）—— 面板据此显示 ●/○，而不是只能显示 ◐。 */
+    const loggedIn = lightCodebuddyLoggedIn(artifacts);
     if (!s) {
       return {
         ok: false,
         error: '登录服务未启动（请先点「登录 WorkBuddy」）',
         artifacts,
+        loggedIn,
         ...(lastLoginStopInfo ? { lastStop: lastLoginStopInfo } : {}),
       };
     }
     if (nowMs() - s.startedAt > CB_LOGIN_TTL_MS) {
       stopCodebuddyLogin();
-      return { ok: false, error: '登录服务已超时（15 分钟）关闭，请重新点「登录 WorkBuddy」', artifacts };
+      return { ok: false, error: '登录服务已超时（15 分钟）关闭，请重新点「登录 WorkBuddy」', artifacts, loggedIn };
     }
     const st = await cbHttp(s.port, '/api/v1/auth/account/status', { token: s.token });
-    if (!st.ok) return { ok: false, error: `查询登录态失败（${st.status ?? st.error}）：${String(st.text).slice(0, 200)}`, artifacts };
+    if (!st.ok) return { ok: false, error: `查询登录态失败（${st.status ?? st.error}）：${String(st.text).slice(0, 200)}`, artifacts, loggedIn };
     const sd = st.json?.data ?? st.json ?? {};
     return {
       ok: true,
@@ -3335,6 +3363,7 @@ export function createDispatcher(options = {}) {
       /* ZB-94：把"盘上凭据是否还在 / 有没有登出标记残留"一并给出。
        * 这三个字段让面板能回答「我到底登录着没有」而不只是"账号态 true/false"。 */
       artifacts,
+      loggedIn,
       ...(lastLoginStopInfo ? { lastStop: lastLoginStopInfo } : {}),
     };
   }

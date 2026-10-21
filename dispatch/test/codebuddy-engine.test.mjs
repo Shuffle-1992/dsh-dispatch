@@ -503,6 +503,26 @@ console.log('\nG. 登录条位置与数据源（用户要求：只放插件详�
     '★ 「超时/未启动」按中性提示渲染（不吓人）');
 }
 
+/* ===== ZB-99f：login status 直接给登录结论（把 ◐ 提升成 ●） ===== */
+{
+  const coreSrc = readFileSync(join(HERE, '..', 'core', 'dispatch-core.mjs'), 'utf8');
+  const clientSrc = readFileSync(join(HERE, '..', 'client.js'), 'utf8');
+
+  ok(/function lightCodebuddyLoggedIn\(art\)/.test(coreSrc),
+    '★ 有轻量登录判定（零 spawn、零额度）');
+  /* 判据必须与 engine-discover 同源：ok:false 且 reason≠not-logged-in ⇒ 鉴权过了 */
+  const fn = coreSrc.match(/function lightCodebuddyLoggedIn\(art\)[\s\S]*?\n  \}/);
+  ok(!!fn && /j\.reason === 'not-logged-in'\) return false/.test(fn[0]),
+    '★ 明确把 not-logged-in 判为未登录');
+  ok(!!fn && /typeof j\.reason === 'string'\) return true/.test(fn[0]),
+    '★ 其它 reason（如 no-model-list-in-error）判为已登录（通过鉴权）');
+  ok(/codebuddyLoginStatus[\s\S]{0,600}loggedIn,/.test(coreSrc),
+    '★ status 返回里带 loggedIn');
+  ok(/setStatusLoggedIn\(r\.loggedIn\)/.test(clientSrc), '★ 客户端收下 status.loggedIn');
+  ok(/statusLoggedIn === true \|\| statusLoggedIn === false \? statusLoggedIn : null/.test(clientSrc),
+    '★ 三态合并：engineDetail 优先，其次 status.loggedIn');
+}
+
 cleanup();
 console.log(`\n===== ZB-84 WorkBuddy/CodeBuddy 引擎：${pass} PASS / ${fails.length} FAIL =====`);
 if (fails.length) {

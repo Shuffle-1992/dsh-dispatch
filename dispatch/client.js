@@ -2671,6 +2671,9 @@ window.__ModuleLoader__.load({
        * ZB-94 加的：即使登录服务没在跑也会返回）。它只够判「凭据在不在」，
        * 但足以把"未知"变成「◐ 凭据在（未验证）」。 */
       const [statusArtifacts, setStatusArtifacts] = useState(null);
+      /* ZB-99f：`login({sub:'status'})` 现在也回 **`loggedIn`**（宿主轻量判定：探测缓存 + 凭据），
+       * 有了它就能显示「● 已登录」而不是只能到「◐ 凭据在（未验证）」。 */
+      const [statusLoggedIn, setStatusLoggedIn] = useState(undefined);
       const hasPropsDetail = !!(engineDetail && typeof engineDetail === 'object'
         && (engineDetail.codebuddy || engineDetail.codebuddyAuth));
       /* ⚠️ `useWire()` 每次渲染返回**新对象** ⇒ `channelsApi` 引用每次都变，
@@ -2703,7 +2706,12 @@ window.__ModuleLoader__.load({
         /* 并行：拿凭据诊断（它的 `artifacts` 与服务是否在跑无关）。 */
         try {
           Promise.resolve(typeof login === 'function' ? login({ sub: 'status' }) : null)
-            .then((r) => { if (alive && r && r.artifacts) setStatusArtifacts(r.artifacts); })
+            .then((r) => {
+              if (!alive || !r) return;
+              if (r.artifacts) setStatusArtifacts(r.artifacts);
+              /* `loggedIn` 三态：true / false / null（未知）—— undefined 表示这一版宿主还没这个字段。 */
+              if (r.loggedIn !== undefined) setStatusLoggedIn(r.loggedIn);
+            })
             .catch(() => { /* 尽力 */ });
         } catch { /* 同步抛错不影响渲染 */ }
         return () => { alive = false; for (const t of timers) clearTimeout(t); };
@@ -2763,9 +2771,14 @@ window.__ModuleLoader__.load({
       /* ZB-99：`未知` 只在**什么都没证据**时才给 —— 凭据文件在磁盘上就是最强的静态证据
        * （即使这次探测还没跑完）。真机反馈"登录态会掉"，一半原因就是这里过度保守。 */
       const credPresent = !!(wbAuth && Array.isArray(wbAuth.liveCredentials) && wbAuth.liveCredentials.length);
+      /* 登录结论的来源优先级：`engineDetail.codebuddy.loggedIn`（探测）→ `login status` 的
+       * `loggedIn`（ZB-99f 轻量判定）→ 凭据存在性（◐）→ 未知。 */
+      const effLoggedIn = (wb && (wb.loggedIn === true || wb.loggedIn === false))
+        ? wb.loggedIn
+        : (statusLoggedIn === true || statusLoggedIn === false ? statusLoggedIn : null);
       const stateKind = residue ? 'residue'
-        : wb && wb.loggedIn === true ? 'authed'
-          : wb && wb.loggedIn === false ? 'notAuthed'
+        : effLoggedIn === true ? 'authed'
+          : effLoggedIn === false ? 'notAuthed'
             : credPresent ? 'credPresent'
               : 'unknown';
       const stateMark = { authed: '●', notAuthed: '○', residue: '⚠', credPresent: '◐', unknown: '?' }[stateKind];
