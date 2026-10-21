@@ -14,10 +14,61 @@
  * taskkill 找不到进程（已退出）返回非 0 属正常。任何失败都让挂起请求以 Error 收尾，绝不悬挂。
  */
 import { spawn as nodeSpawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-const DEFAULT_CLI_PATH = 'F:\\Program Files\\ZCode\\resources\\glm\\zcode.cjs';
+/**
+ * ZCode CLI 的**候选路径解析**（ZB-92：绝不写死开发机盘符）。
+ *
+ * 历史（pitfalls 2026-10-05 记过同一类事故）：这里原来是
+ * `const DEFAULT_CLI_PATH = 'F:\\Program Files\\ZCode\\resources\\glm\\zcode.cjs'` ——
+ * **开发机的盘符**。别人装在 C:/D: 就 spawn 一个不存在的文件，
+ * 表现为"插件装好了但 app-server 永远连不上"，且报错只是一句 spawn ENOENT。
+ *
+ * 顺序（与 collab-kit/engine-discover.mjs 的 zcode 分支同一套判据）：
+ *   env DSP_APPSERVER_CLI → env ZCODE_CLI → 用户级安装 → Program Files → 各盘符兜底。
+ * 全都没命中 ⇒ 返回 null（调用方给**可读错误**，绝不拿一个不存在的路径去 spawn）。
+ */
+function resolveDefaultCliPath() {
+  const env = process.env;
+  /* ⚠️ 显式配置**优先且不校验存在性**：配错了要如实报错（spawn ENOENT / 可读失败），
+   * 绝不能因为"该路径不存在"就静默换成我们猜的路径 —— 那会让用户的显式配置失效
+   * （wire-actions 测试就是这么钉的：DSP_APPSERVER_CLI 指向不存在 ⇒ 必须 available:false）。 */
+  const explicit = String(env.DSP_APPSERVER_CLI ?? '').trim() || String(env.ZCODE_CLI ?? '').trim();
+  if (explicit) return explicit;
+
+  const rel = join('resources', 'glm', 'zcode.cjs');
+  const cands = [];
+  const push = (p) => { if (p && !cands.includes(p)) cands.push(p); };
+  const local = env.LOCALAPPDATA;
+  const pf = env.ProgramFiles;
+  const pfx = env['ProgramFiles(x86)'];
+  const pd = env.ProgramData;
+  for (const root of [
+    env.ZCODE_HOME, env.ZCODE_INSTALL_DIR,
+    local && join(local, 'Programs', 'ZCode'),
+    local && join(local, 'ZCode'),
+    pf && join(pf, 'ZCode'),
+    pfx && join(pfx, 'ZCode'),
+    pd && join(pd, 'ZCode'),
+  ]) push(root && join(root, rel));
+  /* 跨盘符兜底：原实现只认 F: 盘，别人装 C:/D: 就找不到。 */
+  for (let c = 65; c <= 90; c += 1) {
+    const drive = `${String.fromCharCode(c)}:\\`;
+    let ok = false;
+    try { ok = existsSync(drive); } catch { ok = false; }
+    if (!ok) continue;
+    push(join(drive, 'Program Files', 'ZCode', rel));
+    push(join(drive, 'Program Files (x86)', 'ZCode', rel));
+  }
+  /* 猜出来的候选**只返回真实存在的**（不存在的猜法没有意义）。 */
+  for (const p of cands) {
+    try { if (existsSync(p)) return p; } catch { /* 忽略单个候选的探测失败 */ }
+  }
+  return null;
+}
+
 const LINE_BUFFER_CAP = 4 * 1024 * 1024; // 无换行的坏流缓冲上限，防 OOM
 const STDERR_TAIL_LINES = 16;
 
@@ -41,7 +92,12 @@ function defaultEnv(cliPath) {
 export async function createAppServerClient(opts = {}) {
   const spawnImpl = opts.spawnImpl || nodeSpawn;
   const callTimeoutMs = Number.isFinite(Number(opts.timeoutMs)) && Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 20000;
-  const cliPath = opts.cliPath || process.env.DSP_APPSERVER_CLI || DEFAULT_CLI_PATH;
+  const cliPath = opts.cliPath || resolveDefaultCliPath();
+  if (!cliPath) {
+    throw new Error('未找到 ZCode CLI（zcode.cjs）。已查：env DSP_APPSERVER_CLI / ZCODE_CLI、'
+      + '用户级安装（%LOCALAPPDATA%\\Programs\\ZCode）、Program Files、各盘符 —— '
+      + '请安装 ZCode 桌面版，或显式传 opts.cliPath / 设 DSP_APPSERVER_CLI');
+  }
 
   const child = spawnImpl(process.execPath, [cliPath, 'app-server', '--stdio', '--surface', 'terminal'], {
     env: { ...process.env, ...defaultEnv(cliPath), ...(opts.env || {}) },

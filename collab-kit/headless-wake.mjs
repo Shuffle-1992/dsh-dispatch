@@ -14,6 +14,7 @@
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, rmSync, appendFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, resolve, dirname } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 /* 项目根（含 collab/ 的目录）：--project > env ZCODE_PROJECT_DIR > cwd。
@@ -33,7 +34,10 @@ const LOGS = join(COLLAB, 'logs');
 const LOCK = join(LOGS, '.headless-lock');
 const WAKE_LOG = join(LOGS, 'headless-wake.log');
 const LOCK_STALE_MS = 45 * 60 * 1000;
-const TRAECLI = process.env.TRAECLI_BIN || join(process.env.LOCALAPPDATA ?? 'C:/Users/Administrator/AppData/Local', 'trae-cli', 'bin', 'traecli.exe');
+/* ZB-92：回退路径**不能写死用户名**（原为 'C:/Users/Administrator/AppData/Local'）——
+ * 换台机器 / 换用户名就指向不存在的目录。改为 env → 用户主目录推导。 */
+const LOCAL_APPDATA = process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local');
+const TRAECLI = process.env.TRAECLI_BIN || join(LOCAL_APPDATA, 'trae-cli', 'bin', 'traecli.exe');
 const skipRelay = process.argv.includes('--skip-relay');
 const force = process.argv.includes('--force');
 

@@ -217,8 +217,19 @@ function dshToolsCandidates() {
     out.push({ source: 'resourcesPath/app.asar', path: join(res, 'app.asar', ...DSH_TOOLS_REL) });
     out.push({ source: 'resourcesPath/app.asar.unpacked', path: join(res, 'app.asar.unpacked', ...DSH_TOOLS_REL) });
   }
-  out.push({ source: 'abs:D:/DeepSeek/resources/app.asar', path: join('D:/DeepSeek/resources/app.asar', ...DSH_TOOLS_REL) });
-  out.push({ source: 'abs:D:/DeepSeek/resources/app.asar.unpacked', path: join('D:/DeepSeek/resources/app.asar.unpacked', ...DSH_TOOLS_REL) });
+  /* ZB-92：兜底候选**不得写死开发机的盘符**（原为 `abs:D:/DeepSeek/resources/...`）。
+   * 改为从 `process.execPath`（DSH 自己的可执行文件）向上推导安装根 —— 换台机器照样成立：
+   *   <安装根>/<DSH 可执行文件>            ⇒ 安装根
+   *   <安装根>/resources/app.asar(.unpacked) ⇐ 就是我们要找的
+   * 推导不出就跳过（正常情况前面的 resourcesPath 候选已经命中，这里只是兜底）。 */
+  try {
+    const exeDir = dirname(process.execPath);
+    for (const root of [exeDir, dirname(exeDir), dirname(dirname(exeDir))]) {
+      if (!root) continue;
+      out.push({ source: `execPath(${root})/resources/app.asar`, path: join(root, 'resources', 'app.asar', ...DSH_TOOLS_REL) });
+      out.push({ source: `execPath(${root})/resources/app.asar.unpacked`, path: join(root, 'resources', 'app.asar.unpacked', ...DSH_TOOLS_REL) });
+    }
+  } catch { /* 推导失败 ⇒ 跳过这组兜底（不影响前面已命中的候选） */ }
   /* ZB-60（兼容性加固，DSH 0.2.1 更新前）：上面所有候选都假设 asar 内多一层 `dsh/` 目录
    * （实测 `app.asar/dsh/node_modules/@deepseek-ai/dsh-tools/lib/index.js`）。
    * 若新版把 asar 结构重排（去掉或多一层），这条链会**全部落空** ⇒ agent 的 `dispatch` 工具不注册。
