@@ -219,7 +219,9 @@ function resFor(engine) {
      * ⚠️ 用**宽松子串**（`\b` 开头 + 不锚定结尾）而不是 `.+$`：那条 stderr 行自身带括号且带截断，
      * 用严格结尾匹配会因"截断文本里含 `)`"而失配（实测踩到）。已知信息行不需要结构化取数，
      * 宽松匹配更能容忍执行器文案变化。 */
-    knownInfo: new RegExp(`^${p} (?:cli|task|permission-mode|permission-mode-requested|tools count|model|resume)\\b`
+    /* ZB-89：`cost` / `models-source` 也是执行器打的**已知信息行**（真机派发时实测到
+     * 「unparsed [codebuddy-run] line: … cost usd=0 …」噪音）—— 识别但不入库。 */
+    knownInfo: new RegExp(`^${p} (?:cli|task|permission-mode|permission-mode-requested|tools count|model|resume|cost|models-source)\\b`
       + `|^${p} stderr 非空`),
     // 引擎差异行①（探测/声明行；parseProviderTable 的 modelLevels 走同一份正则）
     levels: new RegExp(`^${p} ${LEVELS_KEYWORD[e] ?? 'reasoning-levels'} (\\S+?)=(\\S+)\\s*$`),

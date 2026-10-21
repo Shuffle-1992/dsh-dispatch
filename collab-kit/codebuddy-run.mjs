@@ -689,7 +689,9 @@ async function runOnce(opt, cli) {
   note(`tag=${opt.tag ?? '(none)'} mode=codebuddy cwd=${opt.cwd ?? process.cwd()}`);
   note(`cli=${cli}`);
   if (opt.model) note(`model=${opt.model}`);
-  if (opt.effort) note(`effort=${opt.effort}`);
+  /* ⚠️ 这里**不要**再 note(`effort=…`)：真正的档位回显在末尾用 `effort=<lv> model=<m>`
+   * 打到标准输出（core 的 applied 正则解析它）。开头的这一条没有 model=，
+   * core 认不出 ⇒ 每次都留一条 "unparsed line" 噪音（真机派发时实测到）。 */
   note(`permission-mode=${requestedMode}${opt.auto ? '（--auto 显式放行）' : '（默认：无头下可改工作目录内文件）'}`);
   if (opt.resume) note(`resume=${opt.resume}`);
   for (const cn of opt.compatNotes) process.stderr.write(`${PREFIX} 说明：${cn}\n`);
@@ -781,8 +783,15 @@ async function runOnce(opt, cli) {
   if (!s.isError && code === 0 && (s.permissionDenials ?? []).length === 0 && SILENT_FAIL_RE.test(s.response)) {
     process.stderr.write(`${PREFIX} 警告：任务报成功，但回答里出现"被拒绝/被拦"字样且 permission_denials 为空 —— 这是**静默假成功**的典型特征（文件很可能没改）。排查：① 权限（改用 auto:true）；② 路径语法（cwd 是否含 Windows 8.3 短名如 ADMINI~1 ⇒ 请用长路径）。\n`);
   }
-  /* 反向信号：**零工具调用**。声明要写文件的任务却一个工具都没调 ⇒ 几乎必然是静默失败。 */
-  if (!s.isError && code === 0 && (s.toolCalls ?? []).length === 0 && /create|write|edit|file|文件|创建|写入|修改/i.test(String(opt.prompt ?? opt.target ?? ''))) {
+  /* 反向信号：**零工具调用**。声明要写文件的任务却一个工具都没调 ⇒ 几乎必然是静默失败。
+   *
+   * ⚠️ 真机假阳性（2026-10-21 派发实测）：core 会给 prompt 注入**记忆禁令**，里面含
+   * "不要**修改** ~/.workbuddy …" ⇒ 关键词命中"修改" ⇒ 一个只回复 `OK` 的普通任务也被
+   * 报"要求创建/修改文件却零工具调用"。故这里**先剔掉注入的硬约束段**再判断。 */
+  const rawPrompt = String(opt.prompt ?? opt.target ?? '')
+    .replace(/\n*---\n【硬约束】[\s\S]*$/, '')
+    .replace(/\n*【硬约束】[\s\S]*$/, '');
+  if (!s.isError && code === 0 && (s.toolCalls ?? []).length === 0 && /create|write|edit|file|文件|创建|写入|修改/i.test(rawPrompt)) {
     process.stderr.write(`${PREFIX} 警告：任务报成功，但本次**一次工具都没调用**（toolCalls=0），而提示词里要求创建/修改文件 —— 高度可疑。\n`);
   }
 
@@ -797,8 +806,14 @@ async function runOnce(opt, cli) {
   if (opt.effort) out(`${PREFIX} effort=${opt.effort} model=${opt.model ?? s.model ?? '(default)'}`);
   /* **观测到的思考状态**：本次是否真的产生了 thinking 内容块。
    * `observed=thinking` = 有；`observed=silent` = 一块都没有 ⇒ core 据此判定"请求要思考、实际没思考"。
-   * 绝不把请求值谎报成实际值（否则核对退化成"永远通过"）。 */
-  out(`${PREFIX} thinking-observed=${(s.thinkingBlocks ?? 0) > 0 ? 'thinking' : 'silent'} blocks=${s.thinkingBlocks ?? 0} chars=${s.thinkingChars ?? 0} requested=${opt.effort ?? '-'}`);
+   * 绝不把请求值谎报成实际值（否则核对退化成"永远通过"）。
+   *
+   * ⚠️ 真机假阳性（2026-10-21 派发实测）：请求 `low`、任务只是回两个字 `OK`，
+   * 模型**没有产生 thinking 块** ⇒ core 判"档位被静默降级"并建议改 medium —— 这是**误报**：
+   * 极低档位面对 trivial 任务不思考是正常行为。故 `minimal` / `low` 两档**不参与核对**
+   * （requested 打 `-`）；`medium` 及以上照常核对（那里"要求思考却没有"才是真信号）。 */
+  const effortForCheck = (opt.effort && opt.effort !== 'minimal' && opt.effort !== 'low') ? opt.effort : '-';
+  out(`${PREFIX} thinking-observed=${(s.thinkingBlocks ?? 0) > 0 ? 'thinking' : 'silent'} blocks=${s.thinkingBlocks ?? 0} chars=${s.thinkingChars ?? 0} requested=${effortForCheck}`);
   if (s.toolNames.length) out(`${PREFIX} tools count=${new Set(s.toolNames).size}`);
 
   const pct = (s.contextUsed != null && s.contextWindow) ? ((s.contextUsed / s.contextWindow) * 100).toFixed(1) : '-';
