@@ -3649,6 +3649,12 @@ export function createDispatcher(options = {}) {
       if (discoveryEnabled) {
         const disc = await engineDiscovery();
         engineDetail = summarizeEngineDiscovery(disc);
+        /* ZB-95：把 WorkBuddy 的**登录产物只读诊断**挂进 engineDetail —— 面板据此**常显登录态**
+         * （已登录 / 未登录 / 标记残留），不必等派发失败才发现。
+         * 放在 engineDetail 里而不是顶层字段：客户端已有若干处必须保留 engineDetail 的既有约束，
+         * 挂在这里等于"自动跟着走"，不用再逐个 setChannelsInfo 补一遍。
+         * 纯只读（只判存在性/大小），且**失败绝不影响通道清单**。 */
+        try { engineDetail.codebuddyAuth = scanCodebuddyAuthArtifacts(); } catch { /* 诊断失败不影响清单 */ }
         for (const e of ENGINES) {
           const d = disc?.[e];
           if (!d) continue;

@@ -364,6 +364,45 @@ console.log('\nG. 登录条位置与数据源（用户要求：只放插件详�
   ok(faceKeys.includes('split'), '★ face 映射表含 split（ZB-91 真机就是漏了它导致分流开关点不动）');
 }
 
+/* ===== ZB-95：登录态常显（日志残留诊断 + 面板三态） ===== */
+{
+  const coreSrc = readFileSync(join(HERE, '..', 'core', 'dispatch-core.mjs'), 'utf8');
+  const clientSrc = readFileSync(join(HERE, '..', 'client.js'), 'utf8');
+  const runnerSrc = readFileSync(join(HERE, '..', '..', 'collab-kit', 'codebuddy-run.mjs'), 'utf8');
+
+  /* ① 只读扫描函数存在，且**绝不**写/删（硬约束：派发台不碰凭据内容） */
+  ok(/function scanCodebuddyAuthArtifacts\(\)/.test(coreSrc), 'core 有只读登录产物扫描 scanCodebuddyAuthArtifacts');
+  const scanFn = coreSrc.match(/function scanCodebuddyAuthArtifacts\(\)[\s\S]*?\n  \}/);
+  ok(!!scanFn, '能取出 scanCodebuddyAuthArtifacts 实现');
+  const scanBody = scanFn ? scanFn[0] : '';
+  ok(!/writeFileSync|unlinkSync|renameSync|rmSync/.test(scanBody),
+    '★ 扫描函数**只读**（不含 write/unlink/rename/rm）—— 派发台不读内容、不删凭据');
+
+  /* ② 诊断挂进 engineDetail（挂顶层会漏：客户端多处只保留 engineDetail） */
+  ok(/engineDetail\.codebuddyAuth\s*=\s*scanCodebuddyAuthArtifacts\(\)/.test(coreSrc),
+    '★ 诊断结果挂进 engineDetail.codebuddyAuth（随 engineDetail 自动流转，无需逐处补 setChannelsInfo）');
+  ok(/try \{ engineDetail\.codebuddyAuth/.test(coreSrc), '诊断失败不影响通道清单（包在 try 里）');
+
+  /* ③ runner 侧：未登录时做残留诊断（只在命中时输出，不产生噪音） */
+  ok(/export function authArtifacts\(/.test(runnerSrc), 'runner 导出 authArtifacts（可测/可复用）');
+  ok(/hasResidue/.test(runnerSrc) && /logged-out/.test(runnerSrc), 'runner 能识别 .logged-out 残留');
+
+  /* ④ 客户端：三态判定 + 常显渲染 */
+  ok(/data-wb-state/.test(clientSrc), '★ 登录态常显节点带 data-wb-state（可被测试/样式钩住）');
+  ok(/const residue = !!\(wbAuth && wbAuth\.hasResidue\)/.test(clientSrc), '客户端读 hasResidue');
+  /* 优先级必须「残留 > loggedIn」：残留时 loggedIn 可能仍是 true（探测缓存旧值），
+   * 那正是最误导人的状态 —— 顺序写反就会把"需要重登"显示成"已登录"。 */
+  const stateOrder = clientSrc.match(/const stateKind = residue \? 'residue'[\s\S]{0,220}?:\s*'unknown';/);
+  ok(!!stateOrder, '★ 三态判定按「残留 → 已登录 → 未登录 → 未知」的优先级写（顺序错会把要重登显示成已登录）');
+  ok(/wbStateResidue/.test(clientSrc) && /wbStateAuthed/.test(clientSrc), '客户端用到残留/已登录文案');
+
+  /* ⑤ 文案两侧对齐（locale 是 zh/en 各一份，漏一个就出现 key 原样显示） */
+  const zh = JSON.parse(readFileSync(join(HERE, '..', 'locale', 'zh.json'), 'utf8'));
+  const en = JSON.parse(readFileSync(join(HERE, '..', 'locale', 'en.json'), 'utf8'));
+  const need = ['wbStateTitle', 'wbStateAuthed', 'wbStateNotAuthed', 'wbStateResidue', 'wbStateUnknown', 'wbStateDir', 'wbStateCred', 'wbStateMarker', 'wbStateResidueHint'];
+  ok(need.every((k) => zh.ui[k] && en.ui[k]), '★ 新增登录态文案 zh/en 全齐（269 key 对齐）');
+}
+
 cleanup();
 console.log(`\n===== ZB-84 WorkBuddy/CodeBuddy 引擎：${pass} PASS / ${fails.length} FAIL =====`);
 if (fails.length) {

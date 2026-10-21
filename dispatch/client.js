@@ -609,6 +609,11 @@ window.__ModuleLoader__.load({
         /* ZB-84：第四个引擎（WorkBuddy / CodeBuddy）。 */
         engCodebuddy: 'WorkBuddy', engGroupCodebuddy: 'WorkBuddy 通道',
         /* ZB-87：WorkBuddy 登录助手（面板按钮）。 */
+        /* ZB-95：登录态常显（三态 + 悬浮证据）。 */
+        wbStateTitle: '登录态', wbStateAuthed: '已登录', wbStateNotAuthed: '未登录',
+        wbStateResidue: '标记残留（需重登）', wbStateUnknown: '未知',
+        wbStateDir: '凭据目录', wbStateCred: '凭据文件', wbStateMarker: '登出标记',
+        wbStateResidueHint: '⚠ 这是「登录过却一直未登录」最常见的原因：CLI 被强杀（taskkill /F）后会留下 .logged-out 标记，此时凭据文件还在也没用。点「登录」重登一次即可自动撤销该标记；或把上面的标记文件改名备份后重试（不必重登）。',
         wbLoginTitle: 'WorkBuddy 登录', wbLoginBtn: '登录', wbLoginBusy: '登录中…', wbLoginCheck: '检查状态', wbLoginStop: '关闭',
         wbLoginHint: '起一个来自 WorkBuddy 官方 CLI 的本地登录服务（codebuddy --serve），并生成**登录链接**。注意：/login 是 CLI 界面里的斜杠命令，在 PowerShell 里敲会报「无法识别」；CLI 的登录态与桌面应用**互相独立**。派发台不读不写任何凭据，只驱动官方进程。',
         wbLoginCheckHint: '查询账号登录态（官方 REST：/api/v1/auth/account/status）',
@@ -758,6 +763,11 @@ window.__ModuleLoader__.load({
         engZcode: 'ZCode', engOpencode: 'OpenCode', engGroupZcode: 'ZCode channels', engGroupOpencode: 'OpenCode free models',
         engQoder: 'Qoder', engGroupQoder: 'Qoder channels',
         engCodebuddy: 'WorkBuddy', engGroupCodebuddy: 'WorkBuddy channels',
+        /* ZB-95：sign-in state always visible (three states + hover evidence). */
+        wbStateTitle: 'Sign-in state', wbStateAuthed: 'signed in', wbStateNotAuthed: 'not signed in',
+        wbStateResidue: 'stale logout marker (re-sign-in needed)', wbStateUnknown: 'unknown',
+        wbStateDir: 'credential dir', wbStateCred: 'credential file', wbStateMarker: 'logout marker',
+        wbStateResidueHint: '⚠ This is the most common cause of "I signed in but it keeps saying not signed in": a forced kill (taskkill /F) left a .logged-out marker, and the credential file is ignored while it exists. Click Sign in once to renew (it removes the marker automatically), or rename that marker file as a backup and retry (no re-sign-in needed).',
         wbLoginTitle: 'WorkBuddy sign-in', wbLoginBtn: 'Sign in', wbLoginBusy: 'Signing in…', wbLoginCheck: 'Check status', wbLoginStop: 'Close',
         wbLoginHint: 'Starts a local sign-in service from the official WorkBuddy CLI (codebuddy --serve) and returns a **sign-in link**. Note: /login is a slash command inside the CLI UI — typing it in PowerShell fails with "not recognized"; CLI sign-in is **independent of the desktop app**. This plugin never reads or writes credentials; it only drives the official process.',
         wbLoginCheckHint: 'Query account sign-in state (official REST: /api/v1/auth/account/status)',
@@ -2646,6 +2656,40 @@ window.__ModuleLoader__.load({
       const hasWbEngine = !!(engineDetail && typeof engineDetail === 'object' && engineDetail.codebuddy)
         || (Array.isArray(channels) && channels.some((c) => engineOf(c.engine) === 'codebuddy'));
       if (!hasWbEngine) return null;
+      /* ZB-95（用户要求）：**登录态常显**，不必点「检查状态」才知道。
+       * 判据优先级（真机机制，见 teaching.md §2.6）：
+       *   ① 标记残留（凭据在 + `.logged-out` 也在）⇒ 这是**矛盾态**，一定判未登录，
+       *      且这是"登录过却一直未登录"最常见的原因（CLI 被强杀留下）——必须优先报出来；
+       *   ② engineDetail.codebuddy.loggedIn === true / false ⇒ 有明确结论；
+       *   ③ 其它 ⇒ 未知（探测未完成/不适用），不猜。 */
+      const wbAuth = (engineDetail && typeof engineDetail === 'object' && engineDetail.codebuddyAuth) || null;
+      const wb = (engineDetail && typeof engineDetail === 'object' && engineDetail.codebuddy) || null;
+      const residue = !!(wbAuth && wbAuth.hasResidue);
+      const stateKind = residue ? 'residue'
+        : wb && wb.loggedIn === true ? 'authed'
+          : wb && wb.loggedIn === false ? 'notAuthed'
+            : 'unknown';
+      const stateMark = { authed: '●', notAuthed: '○', residue: '⚠', unknown: '?' }[stateKind];
+      const stateText = {
+        authed: t('wbStateAuthed'),
+        notAuthed: t('wbStateNotAuthed'),
+        residue: t('wbStateResidue'),
+        unknown: t('wbStateUnknown'),
+      }[stateKind];
+      /* 悬浮说明给**完整证据**（凭据文件、标记文件），正文只留一行 —— 用户要求"别显示一大段"。 */
+      const stateTip = [
+        `${t('wbStateTitle')}：${stateText}`,
+        wbAuth && wbAuth.dirs && wbAuth.dirs[0] ? `${t('wbStateDir')}：${wbAuth.dirs[0]}` : '',
+        wbAuth && wbAuth.liveCredentials && wbAuth.liveCredentials.length ? `${t('wbStateCred')}：${wbAuth.liveCredentials.join(', ')}` : '',
+        wbAuth && wbAuth.markers && wbAuth.markers.length ? `${t('wbStateMarker')}：${wbAuth.markers.join(', ')}` : '',
+        residue ? t('wbStateResidueHint') : '',
+        wb && wb.loginEvidence ? wb.loginEvidence : '',
+      ].filter(Boolean).join('\n');
+      const stateNode = h('span', {
+        style: { opacity: 0.9, cursor: 'help' },
+        title: stateTip,
+        'data-wb-state': stateKind,
+      }, `${t('wbStateTitle')}：${stateMark} ${stateText}`);
       const r = st.result;
       const acct = r && r.account && (r.account.userName || r.account.userId);
       /* 结果区独立成块（`flexBasis:100%` + 上下留白）—— 真机反馈"没看到链接"：
@@ -2669,6 +2713,8 @@ window.__ModuleLoader__.load({
         : null;
       return h('div', { className: 'dsp-field', style: { marginTop: '4px', flexWrap: 'wrap', gap: '4px' } },
         h('span', { style: { opacity: 0.75 }, title: t('wbLoginHint') }, `${t('wbLoginTitle')}：`),
+        /* ZB-95：常显登录态（三态 + 悬浮看完整证据），在按钮之前 —— 先看状态再决定按不按。 */
+        stateNode,
         h('button', {
           className: 'dsp-switch dsp-toggle', type: 'button', disabled: st.busy,
           title: t('wbLoginHint'), onClick: () => run('start'),
