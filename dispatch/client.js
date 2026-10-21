@@ -2658,10 +2658,35 @@ window.__ModuleLoader__.load({
      * 不需要从 App 一层层传 props（传 props 的版本第一版就漏了插件详情页）。
      */
     function EngineLoginBar({ engineDetail, channels }) {
-      const { login } = useWire();
+      const { login, channels: channelsApi } = useWire();
       const [st, setSt] = useState({ busy: false, result: null });
       const aliveRef = useRef(true);
       useEffect(() => () => { aliveRef.current = false; }, []);
+      /* ZB-99c（真机 bug：重启后详情页显示「登录态：? 未知」，而宿主 `action=channels`
+       * 明明返回 `loggedIn:true`）：**父层传进来的 `engineDetail` 可能是空的**
+       * （首次拉取时探测还没完成 / 被快照兜底路径覆盖）。这个组件自己再拉一次自愈 ——
+       * 只在 props 缺数据时才拉，避免多余请求；失败就保持原样（不覆盖成错误）。 */
+      const [selfDetail, setSelfDetail] = useState(null);
+      const hasPropsDetail = !!(engineDetail && typeof engineDetail === 'object'
+        && (engineDetail.codebuddy || engineDetail.codebuddyAuth));
+      /* ⚠️ `useWire()` 每次渲染返回**新对象** ⇒ `channelsApi` 引用每次都变，
+       * 不给守卫的话 effect 会反复拉取（每个渲染周期一次）。用 ref 保证**只拉一次**。 */
+      const triedSelfRef = useRef(false);
+      useEffect(() => {
+        if (hasPropsDetail || triedSelfRef.current) return undefined;
+        triedSelfRef.current = true;
+        let alive = true;
+        try {
+          Promise.resolve(typeof channelsApi === 'function' ? channelsApi() : null)
+            .then((r) => { if (alive && r && r.engineDetail) setSelfDetail(r.engineDetail); })
+            .catch(() => { /* 尽力：失败就保持"未知" */ });
+        } catch { /* 同步抛错也不影响渲染 */ }
+        return () => { alive = false; };
+        /* 依赖只放 hasPropsDetail：channelsApi 引用每次渲染都变，放进来会无限触发。 */
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [hasPropsDetail]);
+      /* 合并：props 优先，缺则用自拉的结果。 */
+      const ed = hasPropsDetail ? engineDetail : (selfDetail ?? engineDetail);
 
       /* ZB-89（真机 bug：点「登录/检查状态」后按钮**永远停在「登录中…」**）：
        * 旧实现 `Promise.resolve(login({sub}))` 有三个洞：
@@ -2697,7 +2722,7 @@ window.__ModuleLoader__.load({
        *   ① `engineDetail.codebuddy` 存在，**或**
        *   ② 通道清单里出现了 codebuddy 通道（有通道 ⇒ 必有该引擎）。
        * 两者任一成立就渲染。 */
-      const hasWbEngine = !!(engineDetail && typeof engineDetail === 'object' && engineDetail.codebuddy)
+      const hasWbEngine = !!(ed && typeof ed === 'object' && ed.codebuddy)
         || (Array.isArray(channels) && channels.some((c) => engineOf(c.engine) === 'codebuddy'));
       if (!hasWbEngine) return null;
       /* ZB-95（用户要求）：**登录态常显**，不必点「检查状态」才知道。
@@ -2706,8 +2731,8 @@ window.__ModuleLoader__.load({
        *      且这是"登录过却一直未登录"最常见的原因（CLI 被强杀留下）——必须优先报出来；
        *   ② engineDetail.codebuddy.loggedIn === true / false ⇒ 有明确结论；
        *   ③ 其它 ⇒ 未知（探测未完成/不适用），不猜。 */
-      const wbAuth = (engineDetail && typeof engineDetail === 'object' && engineDetail.codebuddyAuth) || null;
-      const wb = (engineDetail && typeof engineDetail === 'object' && engineDetail.codebuddy) || null;
+      const wbAuth = (ed && typeof ed === 'object' && ed.codebuddyAuth) || null;
+      const wb = (ed && typeof ed === 'object' && ed.codebuddy) || null;
       const residue = !!(wbAuth && wbAuth.hasResidue);
       /* ZB-99：`未知` 只在**什么都没证据**时才给 —— 凭据文件在磁盘上就是最强的静态证据
        * （即使这次探测还没跑完）。真机反馈"登录态会掉"，一半原因就是这里过度保守。 */
