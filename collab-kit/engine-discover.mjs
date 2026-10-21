@@ -318,10 +318,39 @@ function loginHint(engine, entry, opts) {
           return { loggedIn: true, evidence: `模型探测已通过鉴权（未报未登录，${j.reason}）⇒ CLI 已登录可用${staleNote}` };
         }
       }
-    } catch { /* 缓存损坏/不可读 ⇒ 落到下面的"未知"，绝不猜 */ }
+    } catch { /* 缓存损坏/不可读 ⇒ 落到下面的凭据兜底，绝不猜 */ }
+
+    /* ZB-99b：**凭据文件的刷新时间**是最硬的静态证据 —— 只有登录成功 / 会话续期才会写它。
+     * 真机实测（2026-10-22）：登录 21:03，凭据 `workbuddy-desktop.info` 在 02:14 仍在刷新
+     * （每次跑任务都会更新），而探测缓存早过期了。有这条就不用显示"未知"。
+     * 放在最后一步：它是**间接**证据，优先级低于真实探测结论。
+     * ⚠️ 用 `env.LOCALAPPDATA` —— `loginHint` 作用域里**没有** `localAppData` 这个变量
+     * （那是候选表函数的局部变量），写成它会 ReferenceError 并被上层吞掉，兜底静默失效。 */
+    try {
+      const la = env && env.LOCALAPPDATA;
+      const authDir = la ? join(la, 'CodeBuddyExtension', 'Data', 'Public', 'auth') : null;
+      if (authDir) {
+        let newestMs = null;
+        for (const n of fs.readdirSync(authDir)) {
+          if (!n.endsWith('.info')) continue;
+          const p = join(authDir, n);
+          const st = fs.statSync(p);
+          if (st.size > 0 && (newestMs === null || st.mtimeMs > newestMs)) newestMs = st.mtimeMs;
+        }
+        if (newestMs !== null) {
+          const ageMin = Math.round((Date.now() - newestMs) / 60_000);
+          if (ageMin <= 24 * 60) {
+            return {
+              loggedIn: true,
+              evidence: `凭据文件 ${ageMin} 分钟前刷新过（只有登录/续期才会写它）⇒ CLI 已登录；本次未重新探测`,
+            };
+          }
+        }
+      }
+    } catch { /* 目录/文件读不到 ⇒ 继续落到"未知"，不猜 */ }
     return {
       loggedIn: null,
-      evidence: '登录态**未知**（CLI 不落明文凭据，且没有可用的模型探测结果）'
+      evidence: '登录态**未知**（CLI 不落明文凭据、没有可用的探测结果、也没有近期刷新的凭据文件）'
         + ' —— 以真实派发结果为准；如派发报 Authentication required，请在插件详情页点「登录」',
     };
   }

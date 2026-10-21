@@ -311,6 +311,20 @@ console.log('\n⑫ core 集成（T2）：listChannels() 带上 engineDetail 与�
   }
 }
 
+/* ZB-99b：WorkBuddy 登录态——探测缓存不可用时用**凭据文件 mtime** 兜底
+ * 用户真机反馈「WorkBuddy 登录态时长好像就 10 分钟」，其实是旧缓存 TTL 让面板显示"未知"，
+ * 登录本身一直在续期（真机：登录 21:03，凭据 02:14 仍在刷新，存活 5 小时+）。 */
+{
+  const fsm = await import('node:fs');
+  const src = fsm.readFileSync(new URL('../../collab-kit/engine-discover.mjs', import.meta.url), 'utf8');
+  ok(/凭据文件 \$\{ageMin\} 分钟前刷新过/.test(src),
+    '★ 有"凭据 mtime 兜底"分支（缓存不可用时仍能判已登录）');
+  ok(/const la = env && env\.LOCALAPPDATA/.test(src),
+    '★ 兜底用 env.LOCALAPPDATA —— 写成 localAppData 会 ReferenceError 被吞掉（本文件已踩一次）');
+  ok(/CodeBuddyExtension.*Data.*Public.*auth/.test(src), '兜底读的是真实凭据目录');
+  ok(/if \(ageMin <= 24 \* 60\)/.test(src), '凭据新鲜度上限 24 小时（太旧不猜）');
+}
+
 console.log(`\n===== 引擎自动发现：${pass} PASS / ${fail.length} FAIL =====`);
 for (const m of fail) console.log(`  ✗ ${m}`);
 process.exit(fail.length ? 1 : 0);
