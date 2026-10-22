@@ -1,10 +1,58 @@
 # DSH 派发台（dispatch）
 
 > 一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）插件：
-> 把任务派发给本机 **ZCode** CLI 的无头进程，并在 DSH 页面右下角的悬浮面板里监视它们。
+> 把任务派发给本机 **四个 AI 编程 CLI**（ZCode / OpenCode / Qoder / WorkBuddy）的无头进程，
+> 并在 DSH 页面右下角的悬浮面板里监视它们。
 
-DSH 自带的 `subagent` 跑的是 DSH 自己的 agent；**本插件跑的是 ZCode**——独立进程、独立额度、
-独立会话，任务行出现在「DSH 派发台」面板里，可查输出、可终止、可续跑、可换通道重跑。
+DSH 自带的 `subagent` 跑的是 DSH 自己的 agent；**本插件跑的是你自己的 CLI** —— 独立进程、
+独立额度、独立会话，任务行出现在「DSH 派发台」面板里，可查输出、可终止、可续跑、可换通道重跑。
+
+## 四个引擎
+
+全部走**官方 CLI**：不反代、不模拟 OpenAI/Anthropic 兼容接口、不读写任何凭据内容 ——
+插件只负责"起进程 / 传参数 / 读 stdout"。"通道即执行目标"是 core 的模型
+（`zcode` / `opencode/<model>` / `qoder/<model>` / `codebuddy/<model>`）。
+
+| 引擎 | 官方 CLI | 登录 | 额度 / 积分 | 备注 |
+|---|---|---|---|---|
+| **ZCode** | `zcode.cjs`（桌面客户端自带） | 读 `~/.zcode/v2/credentials.json` | ✅ **能查**（客户端日志里的 balance 行） | 支持「套餐」与「免费额度 Start Plan」两条路由 |
+| **OpenCode** | `opencode`（PATH） | 免费模型无需凭据 | 免费（无额度概念） | 十几个免费模型；并发上限默认 2（实测依据） |
+| **Qoder** | `qoderclicn`（PATH） | ⚠️ **需单独登录** | ⚠️ 积分制，**无余额查询接口**；单次消耗可查（`credits`） | 与桌面应用登录**不共享**；并发默认 3（实测） |
+| **WorkBuddy** | `codebuddy`（WorkBuddy 客户端内置） | ⚠️ **需单独登录** | ⚠️ 积分制，**CLI 完全不暴露** | 见下节「积分可得性」；并发默认 2（保守默认，未实测） |
+
+**引擎自动发现**：四引擎都走 `collab-kit/engine-discover.mjs` 的五级探测
+（env → 配置 → PATH → 已知安装位置 → 跨盘符扫描），**不需要手填路径**；
+面板「引擎」行显示形态 / 版本 / 登录态，点悬浮看探测依据。
+
+### 积分可得性（真机实测结论，不猜）
+
+| 引擎 | 余额 | 单次消耗 | 依据 |
+|---|---|---|---|
+| ZCode | ✅ `giftQuota` | token | 读客户端日志（只读，零网络） |
+| OpenCode | — | token | 免费模型 |
+| Qoder | ❌ 官方无接口 | ✅ `credits` | `result.total_credits` **恒 0**，真值在每条 assistant 的 `message.usage.credits`（需按 `message.id` 去重累加） |
+| WorkBuddy | ❌ 官方无接口 | ❌ | stream-json 只有 token；`total_cost_usd` **恒 0**；`/cost` `/stats` 无头不支持；`--serve` REST 无 usage 端点；本地存储无数值 |
+
+⇒ 面板与 agent 工具**只显示真拿得到的数**：拿不到就**不显示**（不编数字、不猜汇率折算）。
+「哪个引擎查不到」这种元数据仍完整保留在 `action=channels` 的 `creditSummary` 里给 agent 读。
+
+### 为什么走官方 CLI，而不是反代
+
+社区有把 WorkBuddy / Qoder 的账号登录态**反代成 OpenAI/Anthropic 兼容接口**的做法。
+本项目**刻意不做**：
+
+1. **合规**：反代本质是伪造客户端身份调官方接口，官方一收紧就会被封（WorkBuddy 已经开始限制）。
+   走官方 CLI 是产品自身入口，不受这类限制影响。
+2. **不碰凭据**：插件**只读**做登录态探测（凭据文件**是否存在 / 大小 / 刷新时间**），
+   **从不读内容、不写、不删**。修复动作一律交给用户或官方 `/login`。
+3. **能力完整**：CLI 自带完整工具链（读写文件、跑命令、MCP）；反代只能拿到"对话"，
+   DSH 的工具层反而用不上。
+
+代价：只能拿到 CLI **愿意暴露**的数据 —— 比如 WorkBuddy 的积分就查不到（见上表）。
+本项目的态度是**如实标注"查不到"，不编数字**。
+
+> 长任务在看守进程那侧还会被**温和终止**（3 秒后才兜底强杀）—— 因为真机发现强杀 WorkBuddy CLI
+> 会留下 `.logged-out` 标记，导致之后一直判"未登录"（详见 [`pitfalls.md`](pitfalls.md)）。
 
 ---
 
@@ -37,15 +85,20 @@ dsh plugin --profile web add "github:Shuffle-1992/dsh-dispatch#path:dispatch"
 
 | 能力 | 说明 |
 |---|---|
-| **派发** | 把 `prompt` / 任务文件 / 目标描述交给 ZCode 跑，支持 `build / edit / plan / yolo` 四种模式 |
-| **单写者互斥** | `repo` / `memory` 文件锁 + 进程内 FIFO 队列：同锁任务串行，冲突只排队不报错（多会话并发也不会互相踩） |
-| **实时监视** | 每个 job 的状态、耗时、上下文占用、退出码、锁持有者；可拉最近输出（tail） |
-| **续跑 / 重跑** | 同会话 `--resume` 重发原提示词，或在同一会话里发一条新指令 |
-| **通道与降级链** | 切换套餐通道 / 模型；额度耗尽或未开通时按降级链自动交接重跑到下一个可用通道 |
-| **免费额度通道** | 支持 ZCode **Start Plan（活动赠送额度）**：托管官方 agent 走 app-server（端点要求逐请求官方签名），通道 `account:<family>-start-plan`；与付费套餐复用同一条面板 / 台账 / 暂停 / 降级流水线 |
-| **用量聚合** | 本地台账 5 小时滚动 / 本周 / 今日，外加套餐剩余额度（数据源不可用时如实标注 `available:false`，不猜） |
+| **派发（四引擎）** | 把 `prompt` / 任务文件 / 目标描述交给 ZCode / OpenCode / Qoder / WorkBuddy 跑；`build / edit / plan / yolo` 四种模式仅 ZCode 支持（其它引擎按各自 CLI 能力剔除） |
+| **单写者互斥** | `repo` / 文件锁 + 进程内 FIFO 队列：同锁任务串行，冲突只排队不报错（多会话并发也不会互相踩） |
+| **实时监视** | 每个 job 的状态、耗时、**Token 用量**、上下文占用、**积分/费用**、退出码、锁持有者；可拉最近输出（tail） |
+| **续跑 / 重跑** | 同会话 `--resume` 重发原提示词，或在同一会话里发一条新指令（仅 ZCode 支持 resume） |
+| **通道与降级链** | 切换通道 / 模型 / 思考强度；额度耗尽或未开通时按降级链自动交接重跑到下一个可用通道 |
+| **分流模式** | 主通道名额满时把新任务自动改派到降级通道（两条通道并发名额叠加）；显式指定 provider 时不生效 |
+| **思考强度核对** | 记录请求档位 vs 实际生效档位；Qoder 用 thinking 内容块有无判定，**不符时给出向上改档建议** |
+| **引擎登录助手** | WorkBuddy 登录态常显（●已登录 / ◐凭据在 / ○未登录 / ⚠标记残留）+ 一键登录（临时 `--serve`）；登录服务**温和终止**、残留标记自动诊断 |
+| **免费额度通道** | ZCode **Start Plan**：托管官方 app-server 走逐请求签名；`account:<family>-start-plan`；与付费套餐复用同一条面板 / 台账 / 暂停 / 降级流水线 |
+| **积分/额度视图** | 按引擎汇总（`creditSummary`：有余额 / 取不到 / 官方无接口）+ 本进程内消耗聚合（`creditConsumption`）；**拿不到的就不显示** |
+| **用量聚合** | 本地台账 5 小时滚动 / 本周 / 今日，外加套餐剩余额度（数据源不可用时如实标注，不猜） |
 | **派发总开关** | 一个跨会话真值文件：`false` = 任何会话都不得派发（runner / 插件 / 桥接三处强制生效） |
 | **agent 工具** | 注册 `dispatch`，与面板同一套动作实现（一操作两调用方） |
+| **落地自动唤醒** | 任务落地（done/failed/killed/paused）时唤醒发起会话，与 DSH 后台任务同款 |
 
 ---
 
@@ -58,23 +111,37 @@ dispatch/
 │  ├─ wire.host.mjs         Host 接线 + 动作唯一实现 createActionHandler + 派发总开关读写
 │  ├─ wire.client.mjs       Client 接线 + 轮询 / demo 降级
 │  ├─ client.js             UI 半边：悬浮面板（React.createElement，无构建步骤）
-│  ├─ core/                 派发核心（零 npm 依赖）：dispatch-core / quota / appserver-rpc
+│  ├─ core/                 派发核心（零 npm 依赖）：dispatch-core / quota / gift-quota / appserver-rpc …
 │  ├─ bin/dispatch.mjs           独立 CLI（与插件同 core，用来对照排查）
-│  ├─ locale/{zh,en}.json   中英文案
-│  ├─ test/                 可复跑自测与验收脚本
+│  ├─ locale/{zh,en}.json   中英文案（key 一一对应，有测试锁）
+│  ├─ test/                 69 个可复跑自测文件
 │  └─ cordis.patch.yml      bundle 层 patch（**只放 demo/maxConcurrent**，机器路径见「配置」）
-├─ tools/                   常驻证据脚本（见「复跑证据」）
+├─ collab-kit/              ★ 四个执行器（与插件 core 共用行协议，也可单独当 CLI 用）
+│  ├─ zcode-run.mjs         ZCode 执行器
+│  ├─ opencode-run.mjs      OpenCode 执行器
+│  ├─ qoder-run.mjs         Qoder 执行器（credits 计量）
+│  ├─ codebuddy-run.mjs     WorkBuddy / CodeBuddy 执行器（官方 CLI + 登录助手）
+│  ├─ engine-discover.mjs   四引擎自动发现（env → 配置 → PATH → 已知安装位置 → 跨盘符扫描）
+│  └─ appserver-gift*.mjs   ZCode Start Plan 免费额度托管
+├─ tools/                   常驻证据脚本（见「复跑证据」，17 个）
 ├─ bridge/                  客户端自动化桥（inbox/outbox 收发任务文件）
 ├─ tasks/                   开发留档：每轮任务书与交付记录（含原始输出与未决项）
 ├─ refs/                    参考资料（**含第三方材料，见文末声明**）
-└─ profile-backup/          DSH profile 配置的三态留档与恢复说明
+├─ profile-backup/          DSH profile 配置的三态留档与恢复说明
+├─ pitfalls.md              ★ 踩坑总账（每个真机坑的现场、根因、修法）
+└─ dispatch/teaching.md     ★ 教学文档（引擎细节 / 登录 / 额度 / 验收清单）
 ```
+
+**四引擎的差异不会被"抹平"**：每个引擎在 `validateSpec` 里剔除自己不支持的参数
+（如 Qoder/WorkBuddy 不支持 `mode` / `memoryBench`），并在面板"引擎提示"行如实说明，
+而不是静默忽略。
 
 ---
 
 ## 安装
 
-要求：DSH 桌面版（在 `0.2.0-rc.2` 上开发验证）+ 可选的本机 ZCode CLI。
+要求：DSH 桌面版（在 `0.2.1-rc.2` 上开发验证）+ **至少一个**本机 AI CLI
+（ZCode / OpenCode / Qoder / WorkBuddy 任一；四个都在则全部自动发现）。
 
 1. 让插件目录能被 profile 解析（开发期常用 junction / `link:`）：
 
@@ -102,14 +169,28 @@ dispatch/
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `demo` | `false` | UI 演示模式：用内置假数据渲染面板，不触达 dispatcher |
-| `maxConcurrent` | `3` | 同时运行的 run 上限 |
-| `runnerPath` | `''` | runner 脚本绝对路径（通用工具仓库 `<本仓库>/collab-kit/zcode-run.mjs`，只读使用） |
+| `maxConcurrent` | `3` | **全局**同时运行上限（各引擎实际并发 = min(全局, 该引擎上限)） |
+| `maxConcurrentOpenCode` | `2` | OpenCode 独立并发（**实测**：并发 opencode 进程会零输出 exit 1，故默认 2 不建议调高） |
+| `maxConcurrentQoder` | `3` | Qoder 独立并发（**实测**：3/5 个 `qoderclicn` 并发全部 exit=0 且结果正确） |
+| `maxConcurrentCodebuddy` | `2` | WorkBuddy 独立并发（**保守默认，未实测**；该 CLI 是 Electron 内置 bundle，比纯 CLI 重） |
+| `runnerPath` | `''` | ZCode 执行器绝对路径（`collab-kit/zcode-run.mjs`）；**留空则不创建 dispatcher** |
+| `opencodeRunnerPath` | `''` | OpenCode 执行器（留空自动推断：env `DSP_OPENCODE_RUNNER` → 仓库内） |
+| `codebuddyRunnerPath` | `''` | WorkBuddy 执行器（留空自动推断：env `DSP_CODEBUDDY_RUNNER` → 仓库内） |
 | `ledgerPath` | `''` | 台账 `dispatch-runs.jsonl` 绝对路径；留空则跳过用量聚合 |
-| `workRoot` | `''` | 派发器工作根目录（`locks/`、`state/jobs.json`、`logs/`）；留空落到插件目录 `.data/` |
-| `switchPath` | `''` | 派发总开关真值文件；留空则开关不可写 |
+| `workRoot` | `''` | 派发器工作根目录（`locks/`、`state/jobs.json`、`logs/`）；**留空则不创建 dispatcher** |
+| `runnerCwd` | `''` | runner 子进程工作目录（通常设为宿主项目根）；留空 = DSH 进程 cwd |
+| `switchPath` | 内置默认 | 派发总开关真值文件；留空则开关不可写 |
+| `notifyOnSettle` | `true` | 任务落地时自动唤醒发起会话（与 DSH 后台任务同款） |
+| `maxConsecutiveWakes` | `0` | 连续唤醒次数上限；0 = 不限 |
+| `systemPromptHint` | `true` | 向 system prompt 注入「派发台优先于 subagent」提示段 |
+
+> Qoder 执行器路径通过 `options.qoderRunnerPath` / env `DSP_QODER_RUNNER` 注入，默认推断到仓库内。
 
 `runnerPath` 与 `workRoot` **任一为空则不创建 dispatcher**：面板走 demo 降级，agent 工具返回可读错误。
 这是**刻意设计**——不猜一个位置静默跑错。
+
+> 「引擎自动发现」在 dispatcher 存在时**默认开启**，不需要额外配置；
+> 它只读取环境/文件系统/CLI 版本，**不消耗任何额度**。
 
 ### 机器专有路径放 profile patch（不进本仓库）
 
@@ -195,15 +276,30 @@ zcd dispatch --kind task   --task <任务包> --provider account:bigmodel-start-
 一个工具 + `action` 参数，与面板上的操作一一对应：
 
 ```
-dispatch | list | kill | dismiss | tail | quota | status | switch | channels | channel | retry | fallback
+dispatch | list | kill | dismiss | tail | quota | status | switch
+         | channels | channel | retry | fallback | split | login | wait
 ```
 
-- `dispatch`：`kind=prompt|task|target` + 对应内容字段；可选 `model` / `provider` / `mode` /
-  `timeoutMin` / `memoryBench` / `tag` / `lock` / `cwd` / `resume`
+- `dispatch`：`kind=prompt|task|target` + 对应内容字段；可选 `model` / `provider` / `engine` /
+  `thinking` / `mode` / `timeoutMin` / `memoryBench` / `auto` / `tag` / `lock` / `write` / `cwd` / `resume`
 - `list` / `tail(id,n)` / `quota`：监视与用量
 - `kill(id)` / `dismiss(id)`：终止；把 paused/终态 job 从列表移除
 - `status` / `switch(enabled)`：读 / 切换派发总开关
-- `channels` / `channel` / `retry` / `fallback`：通道、续跑、降级链
+- `channels` / `channel` / `retry` / `fallback`：通道清单、默认通道、续跑、降级链
+- `split`：分流模式（主通道满了自动摊到降级通道，两条通道名额叠加）
+- `login`：WorkBuddy 登录助手（`start` / `status` / `stop`）
+- `wait`：等 job 落终态（paused 也返回，超时不谎报）
+
+**给 agent 的关键数据**（都在 `action=channels` 的返回里）：
+
+| 字段 | 含义 |
+|---|---|
+| `channels[].thinkingLevels` | 该通道各模型的**合法思考档位**（随模型声明不同，别猜枚举） |
+| `channels[].recentQuotaExhausted` | 最近撞过额度（含 `retryAfterSec`）—— 这才是"现在能不能派"的真信号 |
+| `channels[].expired` | 用户已关闭的模型（面板勾选决定） |
+| `engineDetail` | 四引擎形态 / 版本 / **登录态** / 探测依据 |
+| `creditSummary` | 按引擎的积分/额度：`available:true`(有数据) / `false`(取不到) / **`null`(官方不提供)** |
+| `creditConsumption` | 本进程内按引擎的**已消耗**（Qoder `credits` / WorkBuddy `costUsd`，口径不同**绝不相加**） |
 
 > **派发优先级（写进了工具描述，模型选工具就看这段）**：
 > 凡是「把任务交给一个 agent 去做」的诉求，**能用派发台就优先用派发台**——
@@ -239,11 +335,14 @@ dispatch | list | kill | dismiss | tail | quota | status | switch | channels | c
 弹窗高度上限 **960px**（ZB-36：按用户要求「增加 100%」由 480px 翻倍；短屏按 `calc(100vh - 140px)`
 自然收敛，不会顶出屏幕；该上限**只挂在面板这一层**，`.dsp-menu` 类仍是 DSH 官方菜单的 480px）。
 
-- **通道**：通道 + 模型两个下拉（固定两行版式），自动降级链；**不可用通道不再列出**
-  （主通道与降级目标同一过滤；当前选中值若已掉线仍单独显示并标注「不可用：原因」以便切走）
-- **派发**：类型 / 模式 / 内容 / 超时 / `--memory-bench` / 派发按钮
+- **通道**：通道 + 模型两个下拉（按引擎折叠：选引擎→选模型），思考强度；
+  自动降级链；**不可用通道不再列出**（当前选中值若已掉线仍单独显示并标注原因以便切走）
+- **引擎**：四引擎状态行（● 可用 / ○ 未登录 / × 未找到）+ 形态 · 版本 · 登录态；
+  选中通道时显示它的**额度**（只在真查到数据时出现，查不到就不占地方）
+- **派发**：面板**已不再手动派发**（ZB-29c）——需要时让 agent 用 `dispatch` 工具代劳
 - **进程**：按状态分 **Tab**（进行中 / 需处理 / 异常 / 已完成），每页只渲染最近 5 条 + 可展开；
   点击行头展开详情（派发要素、会话 id、最近输出），行动作（终止 / 重跑 / 续接 / 关闭）都在展开区里
+- **每行显示**：`Token 用量` · 上下文占用 · 积分/费用（有才显示） · 耗时 · 退出码
 - **用量**：5 小时窗口 / 本周 / 今日三张卡；**单写者**：锁持有者与队列长度
 - 面板空白区不挡应用（`pointer-events` 精细控制）；主题令牌取自 DSH 主题，无字面色值
 
@@ -252,32 +351,29 @@ dispatch | list | kill | dismiss | tail | quota | status | switch | channels | c
 ## 复跑证据
 
 ```bash
-node tools/verify-plugin.mjs      # 插件形态与契约探针（20 项）
-node tools/verify-switch.mjs      # 派发总开关独立复现（8 项，用临时目录密封）
-cd dispatch
-node test/core.test.mjs           # 派发核心自测（12 项）
-node test/channel-retry.test.mjs  # 通道 / 续跑 / 降级链自测（9 项）
-node test/quota-rpc.test.mjs      # 额度 RPC 自测（16 项）
-node test/tail-scroll.test.mjs    # 输出框滚动决策（13 项：不闪烁 / 不弹回 / 底部跟随）
-node test/pill.test.mjs           # 最小化胶囊（16 项：标题字样 / locale 对称）
-node test/pill-position.test.mjs  # 胶囊定位与视口钳制（15 项：固定右下角 / 脏 pos 不出屏）
-node --test test/file-lock.test.mjs    # 细粒度文件锁（9 项：write 声明 / 回退底线 / 归一化 / 防死锁）
-node --test test/wait-action.test.mjs  # wait 动作（6 项：等终态 / paused 也返回 / 超时不谎报）
-node test/section-order.test.mjs  # 分区顺序（9 项：单写者紧跟进程 / 用量置末）
-node test/panel-reclamp.test.mjs  # 面板位置可见性（9 项）
-node test/panel-anchor.test.mjs  # 面板锚定语义（22 项：缩窗不挤中间 / 放大回原位）
-node test/elapsed-format.test.mjs  # 耗时展示格式（15 项：XX时XX分XX秒）
-node test/ctx-format.test.mjs  # 上下文占用展示（23 项：180.9k / 200k）
-node --test test/lock-model.test.mjs  # 锁模型（8 项：删 memory / 不同文件集可并发）
-node test/lock-ui.test.mjs  # 派发区锁控件与中文锁名（26 项）
-node --test test/lock-priority.test.mjs  # 调度优先级（4 项：文件锁任务优先放行）
-node test/lock-badge.test.mjs  # 进程行锁徽标 + 全仓防复发扫描（34 项）
-node --test test/memory-ban.test.mjs  # 记忆禁令注入（4 项：prompt/target 注入，task 如实标记）
-node test/panel-style.test.mjs  # 面板样式注入（24 项：只注入 head 一次，重渲染不触碰）
-Z2_HOST_REPO=<宿主项目> node test/z2-verify.mjs   # 端到端验收（不设则跳过越界检查并如实标注）
+node tools/verify-plugin.mjs      # 插件形态与契约探针
+node tools/verify-switch.mjs      # 派发总开关独立复现（用临时目录密封）
+node tools/verify-engine-detail.mjs   # 四引擎自动发现真机冒烟
+node tools/verify-zb95-state.mjs      # WorkBuddy 登录态三态（含临时 marker 造残留）
+# 全量套件（69 个测试文件）：
+node %TEMP%\dispatch-suite.mjs
 ```
 
-门禁阈值只升不降；原始输出与未决项记录在 `tasks/` 下各轮的交付文档里。
+各引擎专项（也可单独跑）：
+
+```bash
+cd dispatch
+node test/core.test.mjs               # 派发核心
+node test/qoder-executor.test.mjs     # Qoder 协议 / 聚合器 / credits 去重累加
+node test/codebuddy-engine.test.mjs   # WorkBuddy 协议 / 端到端（退出码恒 0 的坑）/ 登录助手
+node test/engine-discover.test.mjs    # 四引擎自动发现（五级优先级 + 假 fs）
+node test/gift-quota.test.mjs         # 免费额度解析 + 陈旧度 + creditSummary 三态
+node test/ctx-format.test.mjs         # 上下文占用展示
+```
+
+> **门禁阈值只升不降**；原始输出与未决项记录在 `tasks/` 下各轮的交付文档里。
+> 踩过的真机坑（含根因与修法）见 [`pitfalls.md`](pitfalls.md)，引擎细节见
+> [`dispatch/teaching.md`](dispatch/teaching.md)。
 
 ---
 
