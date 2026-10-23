@@ -3181,7 +3181,10 @@ export function createDispatcher(options = {}) {
   function scanCodebuddyAuthArtifacts() {
     const la = String(process.env.LOCALAPPDATA ?? '').trim();
     const dir = la ? join(la, 'CodeBuddyExtension', 'Data', 'Public', 'auth') : null;
-    const out = { dir, credentials: [], liveCredentials: [], markers: [], hasResidue: false };
+    /* ZB-103：`latestMtimeMs` = 凭据文件里**最新的刷新时间**。用于与探测缓存的时间戳比新旧 ——
+     * 凭据比缓存新，说明那次探测之后又发生了登录/续期，缓存的 `not-logged-in` 已过期
+     * （真机现象：刚登录完，面板却仍显示 ○ 未登录）。 */
+    const out = { dir, credentials: [], liveCredentials: [], markers: [], hasResidue: false, latestMtimeMs: null };
     if (!dir) return out;
     let names = [];
     try { names = readdirSync(dir); } catch { return out; }
@@ -3190,7 +3193,14 @@ export function createDispatcher(options = {}) {
       if (name.endsWith('.logged-out')) out.markers.push(p);
       else if (name.endsWith('.info')) {
         out.credentials.push(p);
-        try { if (statSync(p).size > 0) out.liveCredentials.push(p); } catch { /* 忽略 */ }
+        try {
+          const st = statSync(p);
+          if (st.size > 0) {
+            out.liveCredentials.push(p);
+            const m = Number(st.mtimeMs);
+            if (Number.isFinite(m) && (out.latestMtimeMs === null || m > out.latestMtimeMs)) out.latestMtimeMs = m;
+          }
+        } catch { /* 忽略 */ }
       }
     }
     out.hasResidue = out.markers.length > 0 && out.liveCredentials.length > 0;
@@ -3320,7 +3330,18 @@ export function createDispatcher(options = {}) {
         const j = JSON.parse(readFileSync(cachePath, 'utf8'));
         if (j && typeof j.at === 'number' && Date.now() - j.at < 24 * 3600_000) {
           if (j.ok === true) return true;
-          if (j.ok === false && j.reason === 'not-logged-in') return false;
+          if (j.ok === false && j.reason === 'not-logged-in') {
+            /* ZB-103（真机 bug：刚登录完面板仍显示「○ 未登录」，而 REST 明明已登录）：
+             * 探测缓存里的 `not-logged-in` 可能是**登录之前**写的。若凭据文件比缓存**更新**，
+             * 说明那次探测之后发生过登录/续期 ⇒ 缓存结论已过期，**不能拿它当"未登录"**。
+             * 这种情况退回"凭据在 ⇒ 已登录"，与 ZB-99f 的兜底一致。 */
+            const cacheAt = Number(j.at);
+            const credAt = Number.isFinite(art?.latestMtimeMs) ? art.latestMtimeMs : null;
+            if (credAt !== null && Number.isFinite(cacheAt) && credAt > cacheAt) {
+              return true; // 凭据在那次探测之后刷新过 ⇒ 缓存过期
+            }
+            return false;
+          }
           /* `ok:false` 且 reason 不是 not-logged-in（如 no-model-list-in-error）⇒ 鉴权那关过了。 */
           if (j.ok === false && typeof j.reason === 'string') return true;
         }

@@ -2674,6 +2674,10 @@ window.__ModuleLoader__.load({
       /* ZB-99f：`login({sub:'status'})` 现在也回 **`loggedIn`**（宿主轻量判定：探测缓存 + 凭据），
        * 有了它就能显示「● 已登录」而不是只能到「◐ 凭据在（未验证）」。 */
       const [statusLoggedIn, setStatusLoggedIn] = useState(undefined);
+      /* ZB-103：**用户主动操作**（登录 / 检查状态）得到的结论 —— 优先级最高。
+       * 保证"点完按钮后，顶部常显与下面的结果行**永远一致**"。
+       * undefined = 还没手动查过；true/false = 结论。 */
+      const [manualLoggedIn, setManualLoggedIn] = useState(undefined);
       const hasPropsDetail = !!(engineDetail && typeof engineDetail === 'object'
         && (engineDetail.codebuddy || engineDetail.codebuddyAuth));
       /* ⚠️ `useWire()` 每次渲染返回**新对象** ⇒ `channelsApi` 引用每次都变，
@@ -2735,7 +2739,20 @@ window.__ModuleLoader__.load({
         let timer = null;
         const settle = (r) => {
           if (timer) { clearTimeout(timer); timer = null; }
-          if (aliveRef.current) setSt({ busy: false, result: r });
+          if (aliveRef.current) {
+            setSt({ busy: false, result: r });
+            /* ZB-103（真机 bug：「下面写着 登录态: 已登录（Shuffle），上面顶部却显示 ○ 未登录」）：
+             * 顶部常显读的是**挂载时**的数据，而这一行是**点按钮后的实时结果** —— 用户刚登录完，
+             * REST 已 authenticated=true，顶部却还是旧值。故：**用户主动操作得到的结论优先级最高**，
+             * 写进 `manualLoggedIn` 覆盖其它来源（一次操作、立即一致）。
+             * 取值优先级：`loggedIn`（轻量判定，含凭据/缓存）→ `authenticated`（账号态）。 */
+            if (r && typeof r === 'object') {
+              const lv = (r.loggedIn === true || r.loggedIn === false)
+                ? r.loggedIn
+                : (typeof r.authenticated === 'boolean' ? r.authenticated : undefined);
+              if (lv !== undefined) setManualLoggedIn(lv);
+            }
+          }
         };
         timer = setTimeout(() => settle({ ok: false, error: `${t('wbLoginTimeout')}（${Math.round(timeoutMs / 1000)}s）` }), timeoutMs);
         try {
@@ -2773,9 +2790,11 @@ window.__ModuleLoader__.load({
       const credPresent = !!(wbAuth && Array.isArray(wbAuth.liveCredentials) && wbAuth.liveCredentials.length);
       /* 登录结论的来源优先级：`engineDetail.codebuddy.loggedIn`（探测）→ `login status` 的
        * `loggedIn`（ZB-99f 轻量判定）→ 凭据存在性（◐）→ 未知。 */
-      const effLoggedIn = (wb && (wb.loggedIn === true || wb.loggedIn === false))
-        ? wb.loggedIn
-        : (statusLoggedIn === true || statusLoggedIn === false ? statusLoggedIn : null);
+      const effLoggedIn = (manualLoggedIn === true || manualLoggedIn === false)
+        ? manualLoggedIn
+        : (wb && (wb.loggedIn === true || wb.loggedIn === false))
+          ? wb.loggedIn
+          : (statusLoggedIn === true || statusLoggedIn === false ? statusLoggedIn : null);
       const stateKind = residue ? 'residue'
         : effLoggedIn === true ? 'authed'
           : effLoggedIn === false ? 'notAuthed'

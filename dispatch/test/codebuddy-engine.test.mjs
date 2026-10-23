@@ -512,8 +512,8 @@ console.log('\nG. 登录条位置与数据源（用户要求：只放插件详�
     '★ 有轻量登录判定（零 spawn、零额度）');
   /* 判据必须与 engine-discover 同源：ok:false 且 reason≠not-logged-in ⇒ 鉴权过了 */
   const fn = coreSrc.match(/function lightCodebuddyLoggedIn\(art\)[\s\S]*?\n  \}/);
-  ok(!!fn && /j\.reason === 'not-logged-in'\) return false/.test(fn[0]),
-    '★ 明确把 not-logged-in 判为未登录');
+  ok(!!fn && /j\.reason === 'not-logged-in'/.test(fn[0]) && /return false/.test(fn[0]),
+    '★ 明确把 not-logged-in 判为未登录（缓存不比凭据旧时）');
   ok(!!fn && /typeof j\.reason === 'string'\) return true/.test(fn[0]),
     '★ 其它 reason（如 no-model-list-in-error）判为已登录（通过鉴权）');
   ok(/codebuddyLoginStatus[\s\S]{0,600}loggedIn,/.test(coreSrc),
@@ -521,6 +521,30 @@ console.log('\nG. 登录条位置与数据源（用户要求：只放插件详�
   ok(/setStatusLoggedIn\(r\.loggedIn\)/.test(clientSrc), '★ 客户端收下 status.loggedIn');
   ok(/statusLoggedIn === true \|\| statusLoggedIn === false \? statusLoggedIn : null/.test(clientSrc),
     '★ 三态合并：engineDetail 优先，其次 status.loggedIn');
+}
+
+/* ===== ZB-103：顶部常显「未登录」与下方结果「已登录」不一致 ===== */
+{
+  const coreSrc = readFileSync(join(HERE, '..', 'core', 'dispatch-core.mjs'), 'utf8');
+  const clientSrc = readFileSync(join(HERE, '..', 'client.js'), 'utf8');
+
+  /* ① 宿主：扫描凭据时一并给出**最新刷新时间**，用于与探测缓存比新旧 */
+  ok(/latestMtimeMs: null/.test(coreSrc), '★ scanCodebuddyAuthArtifacts 返回 latestMtimeMs');
+  ok(/m > out\.latestMtimeMs/.test(coreSrc), '取凭据文件里最新的 mtime');
+  /* ② 宿主：缓存里的 not-logged-in 若比凭据旧 ⇒ 过期，不能当"未登录" */
+  const fn = coreSrc.match(/function lightCodebuddyLoggedIn\(art\)[\s\S]*?\n  \}/);
+  ok(!!fn && /credAt > cacheAt/.test(fn[0]),
+    '★ 凭据比探测缓存新 ⇒ 判为已登录（修「刚登录完仍显示未登录」）');
+
+  /* ③ 客户端：**用户主动操作**的结论优先级最高（点完按钮立刻一致） */
+  ok(/const \[manualLoggedIn, setManualLoggedIn\] = useState\(undefined\)/.test(clientSrc),
+    '★ 有 manualLoggedIn 状态');
+  ok(/manualLoggedIn === true \|\| manualLoggedIn === false\)\s*\n\s*\? manualLoggedIn/.test(clientSrc),
+    '★ manualLoggedIn 在 effLoggedIn 里**优先级最高**（压过 engineDetail）');
+  ok(/if \(lv !== undefined\) setManualLoggedIn\(lv\)/.test(clientSrc),
+    '★ 登录/检查状态返回后写回 manualLoggedIn');
+  ok(/r\.loggedIn === true \|\| r\.loggedIn === false\)[\s\S]{0,120}r\.authenticated/.test(clientSrc),
+    '★ 取值优先 loggedIn（轻量判定），其次 authenticated（账号态）');
 }
 
 cleanup();
