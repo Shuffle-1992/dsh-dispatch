@@ -652,7 +652,7 @@ window.__ModuleLoader__.load({
         chanLoading: '通道清单加载中…（宿主刚启动或首次探测中；失败会自动重试，无需刷新）',
         chanLoadRetry: '会自动重试', chanInfoPrefix: '通道清单说明：', chanInfoTitle: '通道清单说明（悬停查看）',  zcRoutePlan: 'BigModel(Plan)', zcRouteFree: 'Start Plan(免费)', zcFreeSuffix: '免费',
         autoApproved: '已放行权限', autoApprovedHint: '该任务派发时显式开启了 OpenCode 的 --auto：放行了所有未显式拒绝的权限（默认不开启，仅调用方显式指定时生效）',
-        giftQuota: '免费额度剩余', giftQuotaUnavailable: '免费额度余量不可用', chanQuotaExhausted: '5 小时窗口已满',
+        giftQuota: '免费额度剩余', giftQuotaTotal: '合计', giftQuotaUnavailable: '免费额度余量不可用', chanQuotaExhausted: '5 小时窗口已满',
         jobCurrent: '当前：', jobLastBeat: '最近心跳', jobStalled: '可能卡住',
         jobStalledHint: '超过 150 秒没有收到 runner 的心跳/输出：可能卡在上游请求、MCP 连接或等锁。可用「终止」后重派，或 action=tail 看最后输出。',
         chanOfflineHint: '未连接宿主：通道/模型来自宿主远端面，连接后这两个下拉才可选',
@@ -813,7 +813,7 @@ window.__ModuleLoader__.load({
         chanLoading: 'Loading channel list… (host just started or first probe in flight; failures retry automatically, no refresh needed)',
         chanLoadRetry: 'will retry automatically', chanInfoPrefix: 'Channel notes: ', chanInfoTitle: 'Channel list notes (hover to view)',  zcRoutePlan: 'BigModel (Plan)', zcRouteFree: 'Start Plan (free)', zcFreeSuffix: 'free',
         autoApproved: 'auto-approved', autoApprovedHint: 'This job explicitly enabled OpenCode --auto: all permissions not explicitly denied were allowed (off by default; only takes effect when the caller sets it explicitly)',
-        giftQuota: 'Free quota left', giftQuotaUnavailable: 'Free-quota balance unavailable', chanQuotaExhausted: '5h window full',
+        giftQuota: 'Free quota left', giftQuotaTotal: 'total', giftQuotaUnavailable: 'Free-quota balance unavailable', chanQuotaExhausted: '5h window full',
         jobCurrent: 'Now: ', jobLastBeat: 'last heartbeat', jobStalled: 'possibly stuck',
         jobStalledHint: 'No runner heartbeat/output for over 150s: it may be stuck on an upstream request, MCP connect or a lock. Kill and re-dispatch, or use action=tail for the last output.',
         chanOfflineHint: 'Host not connected: channel/model come from the host Remote face and unlock once connected',
@@ -931,9 +931,11 @@ window.__ModuleLoader__.load({
      * 因为它们提供同样的模型名，按模型名去重会互相覆盖（真机反馈"ZCode 怎么剩 1 个？"）。
      * 这里给出路由 → 文案的映射（**单一源**，上方「通道」与下方降级区共用）。 */
     const ROUTE_LABEL_KEY = { plan: 'zcRoutePlan', 'account:bigmodel-start-plan': 'zcRouteFree' };
-    /** **免费额度（Start Plan）实际可用的模型**（用户实测：只给 GLM-5.3-Flash）。
-     *  ZCode 配置里两条路由声明了同样的模型名，故"哪些真能用"只能在这里收窄 —— 权益变化时改这一行。 */
-    const ZC_FREE_MODELS = ['GLM-5.3-Flash'];
+    /** **免费额度（Start Plan）实际可用的模型**。
+     *  ZB-105：**已改为跟随宿主**（core 从余额接口的 entitlement 动态取 `models`，读不到才用兜底）；
+     *  这里保留一份**镜像兜底**，仅当宿主那条链路没给 models 时才用。
+     *  2026-10-23 真机实测（1024 程序员节）：GLM-5.3-Flash 3 亿 + GLM-5.3 2 亿，**两个都能跑通**。 */
+    const ZC_FREE_MODELS = ['GLM-5.3', 'GLM-5.3-Flash'];
     /** 模型项显示文案：
      *  · ZCode：`<模型名>`，若该模型来自免费额度路由则加后缀「免费」（同名模型不会混淆）；
      *  · 其它引擎：模型名本身（它们一个模型一条通道，不存在路由维度）。 */
@@ -3019,11 +3021,13 @@ window.__ModuleLoader__.load({
         if (c.enabled) {
           const routeId = String(c.id);
           const rawModels = Array.isArray(c.models) ? c.models : [c.id];
-          /* 免费额度路由**只列真正可用的模型**（用户实测：Start Plan 只给 GLM-5.3-Flash）。
-           * 数据源（ZCode 配置）里两条路由都声明了同名模型，故"哪些能用"只能由这里收窄 ——
-           * 见 `ZC_FREE_MODELS`（可配置常量）。 */
+          /* 免费额度路由**只列真正可用的模型**。
+           * ZB-105：宿主已按余额 entitlement 动态收窄过 `c.models` —— 这里只在**宿主没给**时兜底过滤
+           * （旧宿主/探测失败），避免把"服务端并不提供"的模型列出来。 */
           const isFreeRoute = /^account:.*start-plan$/.test(routeId);
-          const allowed = isFreeRoute ? rawModels.filter((m) => ZC_FREE_MODELS.includes(m)) : rawModels;
+          const allowed = (isFreeRoute && rawModels.length > 1)
+            ? rawModels.filter((m) => ZC_FREE_MODELS.includes(m))
+            : rawModels;
           const models = allowed.length ? allowed : rawModels;
           agg._modelsByRoute[routeId] = models;
           for (const m of models) {
@@ -3970,22 +3974,59 @@ window.__ModuleLoader__.load({
         chanEngineNote,
         /* ── ZB-33：免费额度通道的额度条（仅选中该通道时显示） ── */
         giftSel && giftText
-          ? h('div', { className: 'dsp-field' },
+          ? h('div', { className: 'dsp-field', style: { alignItems: 'flex-start' } },
             h('span', { className: 'dsp-field-k' }, t('giftQuota')),
-            h('span', { className: 'dsp-field-v', style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0' } },
-              giftPct === null
-                ? null
-                : h('span', {
-                  style: { flex: '0 0 64px', height: '6px', borderRadius: '3px', background: T.bgBar, overflow: 'hidden' },
-                  role: 'img', 'aria-label': `${t('giftQuota')} ${giftPct}%`,
-                },
-                  h('span', {
-                    style: {
-                      display: 'block', height: '100%', width: `${giftPct}%`,
-                      background: giftPct <= 15 ? T.danger : T.accent,
+            /* ZB-105（用户要求：「额度显示也要支持 2 种模型」）：
+             * 1024 活动同时给 GLM-5.3-Flash 3 亿 + GLM-5.3 2 亿 ⇒ **逐模型一行**（各自小进度条），
+             * 末尾给合计。单模型活动保持原来的单行渲染（观感不变）。 */
+            (() => {
+              const per = giftQuota && Array.isArray(giftQuota.perModel)
+                ? giftQuota.perModel.filter((x) => x && x.model)
+                : [];
+              if (per.length <= 1) {
+                return h('span', { className: 'dsp-field-v', style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0' } },
+                  giftPct === null
+                    ? null
+                    : h('span', {
+                      style: { flex: '0 0 64px', height: '6px', borderRadius: '3px', background: T.bgBar, overflow: 'hidden' },
+                      role: 'img', 'aria-label': `${t('giftQuota')} ${giftPct}%`,
                     },
-                  })),
-              h('span', { className: 'dsp-note', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' } }, giftText)))
+                      h('span', {
+                        style: {
+                          display: 'block', height: '100%', width: `${giftPct}%`,
+                          background: giftPct <= 15 ? T.danger : T.accent,
+                        },
+                      })),
+                  h('span', { className: 'dsp-note', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' } }, giftText));
+              }
+              const bar = (pct) => (pct === null ? null : h('span', {
+                style: { flex: '0 0 48px', height: '5px', borderRadius: '3px', background: T.bgBar, overflow: 'hidden' },
+                role: 'img', 'aria-label': `${t('giftQuota')} ${pct}%`,
+              },
+                h('span', {
+                  style: { display: 'block', height: '100%', width: `${pct}%`, background: pct <= 15 ? T.danger : T.accent },
+                })));
+              const rowOf = (name, remain, total, key) => {
+                const pct = Number.isFinite(remain) && Number.isFinite(total) && total > 0
+                  ? Math.max(0, Math.min(100, Math.round((remain / total) * 100)))
+                  : null;
+                return h('div', { key, style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0' } },
+                  h('span', { className: 'dsp-note', style: { flex: '0 0 104px', overflow: 'hidden', textOverflow: 'ellipsis' } }, name),
+                  bar(pct),
+                  h('span', { className: 'dsp-note', style: { whiteSpace: 'nowrap' } }, `${fmtCtx(remain)} / ${fmtCtx(total)}${pct === null ? '' : `（${pct}%）`}`));
+              };
+              const remainAll = Number.isFinite(giftQuota.remainingUnits) ? giftQuota.remainingUnits : giftQuota.availableUnits;
+              return h('span', { className: 'dsp-field-v', style: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: '0' } },
+                per.map((pm) => rowOf(
+                  pm.model,
+                  Number.isFinite(pm.remainingUnits) ? pm.remainingUnits : pm.availableUnits,
+                  pm.totalUnits,
+                  pm.model,
+                )),
+                h('div', { key: '__total', style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+                  h('span', { className: 'dsp-note', style: { flex: '0 0 104px', opacity: 0.7 } }, t('giftQuotaTotal')),
+                  h('span', { className: 'dsp-note', style: { opacity: 0.85 } }, `${fmtCtx(remainAll)} / ${fmtCtx(giftQuota.totalUnits)}`)));
+            })())
           : null,
         /* ── ZB-97/100：额度行 —— **有真数据才出现**（用户批评：无接口/免费/取不到 全是噪音）──
          * 所以这里没有 `—` 占位、也不会因为"查不到"而渲染；ZCode 真查到余量时才多这一行。

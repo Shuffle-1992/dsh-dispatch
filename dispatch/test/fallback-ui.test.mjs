@@ -213,11 +213,13 @@ ok(!labels.some((l) => ['disabled', 'enabled', 'low', 'high', 'max'].includes(l)
 ok(!labels.some((l) => /\(\s*\)/.test(l)), '★ 双语标签不出现空括号（任一侧缺失时退回单语）');
 /* ★ ZB-51（用户要求）：ZCode 的模型下拉必须列出**具体模型**
  * （"原本是有 GLM5.3 和 GLM5.3 Flash 的"），且免费额度只列它真正提供的模型
- * （用户实测：Start Plan 只给 GLM-5.3-Flash）。 */
+ * ZB-105：1024 程序员节活动给了 GLM-5.3-Flash 3 亿 + GLM-5.3 2 亿（真机两者都跑通）
+ * ⇒ 免费额度**现在也提供 GLM-5.3**，与套餐项同名但标「免费」区分。 */
 ok(labels.includes('GLM-5.3'), '★ ZCode 模型下拉含 GLM-5.3（套餐）');
 ok(labels.includes('GLM-5.3-Flash'), '★ ZCode 模型下拉含 GLM-5.3-Flash（套餐）');
 ok(labels.includes('GLM-5.3-Flash「免费」'), '★ 免费额度列 GLM-5.3-Flash 并标「免费」（与套餐项不混淆）');
-ok(!labels.includes('GLM-5.3「免费」'), '★ 免费额度**不该**出现 GLM-5.3（Start Plan 只给 Flash）');
+ok(labels.includes('GLM-5.3「免费」'),
+  '★ 免费额度也列 GLM-5.3 并标「免费」（ZB-105：1024 活动两个模型都给额度）');
 ok(selects.some((s) => flattenOptions(s).some((c) => c.props.value === 'high')),
   '③ option value 仍是原始档位字符串（high）—— 中文只在 label');
 /* ZB-52：主/降级「模型」首项现在**都是「顺序派发」**（用户要求「降级也要支持顺序派发」）——

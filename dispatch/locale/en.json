@@ -141,6 +141,7 @@
     "autoApproved": "auto-approved",
     "autoApprovedHint": "This job explicitly enabled OpenCode --auto: all permissions not explicitly denied were allowed (off by default; only takes effect when the caller sets it explicitly)",
     "giftQuota": "Free quota left",
+    "giftQuotaTotal": "total",
     "giftQuotaUnavailable": "Free-quota balance unavailable",
     "chanQuotaExhausted": "5h window full",
     "jobCurrent": "Now: ",

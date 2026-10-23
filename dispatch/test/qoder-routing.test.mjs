@@ -35,6 +35,9 @@ function fakePkg() {
   copyFileSync(join(PKG, 'collab-kit', 'run-line-protocol.mjs'), join(ck, 'run-line-protocol.mjs'));
   copyFileSync(join(PKG, 'collab-kit', 'engine-discover.mjs'), join(ck, 'engine-discover.mjs'));
   copyFileSync(join(PKG, 'dispatch', 'core', 'dispatch-core.mjs'), join(core, 'dispatch-core.mjs'));
+  /* ZB-105：core 现在 import `./gift-quota.mjs`（免费额度模型动态化）—— 隔离复制时必须带上，
+   * 否则 `ERR_MODULE_NOT_FOUND`（本文件已踩一次）。 */
+  copyFileSync(join(PKG, 'dispatch', 'core', 'gift-quota.mjs'), join(core, 'gift-quota.mjs'));
   /* ⚠️ OpenCode 执行器必须是**假的**：测 ⑤ 会走真实通道路径，而 core 一旦探测 OpenCode 就会
    * spawn 这个脚本。若复制**真的** `opencode-run.mjs`，它会去起真的 opencode（临时服务）——
    * 既违反"不碰真 opencode"的纪律，又会**挂死整个测试**（实测：进程卡在 `opencode-run.mjs --`）。

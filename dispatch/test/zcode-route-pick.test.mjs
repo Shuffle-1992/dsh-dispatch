@@ -58,12 +58,14 @@ console.log('\n③ 两个上拉（主通道 + 降级目标）都必须走同一�
 
 console.log('\n④ 免费额度**只列它真正提供的模型**（可配置常量，不写死在逻辑里）');
 {
-  ok(/const ZC_FREE_MODELS = \['GLM-5\.3-Flash'\];/.test(src),
-    '★ 免费额度模型白名单是**具名常量**（权益变化改一行，不散落在逻辑里）');
+  /* ZB-105：1024 程序员节活动给了 GLM-5.3-Flash 3 亿 + GLM-5.3 2 亿（真机两者都跑通），
+   * 白名单从「只有 Flash」扩成两个；宿主侧还会按余额 entitlement 动态优先（读不到才用这份兜底）。 */
+  ok(/const ZC_FREE_MODELS = \['GLM-5\.3', 'GLM-5\.3-Flash'\];/.test(src),
+    '★ 免费额度模型白名单是**具名常量**（含 GLM-5.3；权益再变仍只改这一两行）');
   ok(/const isFreeRoute = \/\^account:\.\*start-plan\$\/\.test\(routeId\);/.test(src),
     '免费路由判据 = `account:*start-plan`');
-  ok(/const allowed = isFreeRoute \? rawModels\.filter\(\(m\) => ZC_FREE_MODELS\.includes\(m\)\) : rawModels;/.test(src),
-    '★ 只有免费路由收窄模型集；套餐路由保留全部（套餐确实提供 GLM-5.3 与 GLM-5.3-Flash）');
+  ok(/\(isFreeRoute && rawModels\.length > 1\)[\s\S]{0,160}rawModels\.filter\(\(m\) => ZC_FREE_MODELS\.includes\(m\)\)/.test(src),
+    '★ 只有免费路由收窄模型集；套餐路由保留全部（宿主已收窄过时不再二次过滤）');
   ok(/const models = allowed\.length \? allowed : rawModels;/.test(src),
     '★ 兜底：白名单写空时不至于把免费路由的模型全清掉（fail-open 到原始列表）');
 }

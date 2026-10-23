@@ -141,6 +141,7 @@
     "autoApproved": "已放行权限",
     "autoApprovedHint": "该任务派发时显式开启了 OpenCode 的 --auto：放行了所有未显式拒绝的权限（默认不开启，仅调用方显式指定时生效）",
     "giftQuota": "免费额度剩余",
+    "giftQuotaTotal": "合计",
     "giftQuotaUnavailable": "免费额度余量不可用",
     "chanQuotaExhausted": "5 小时窗口已满",
     "jobCurrent": "当前：",

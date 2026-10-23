@@ -189,3 +189,53 @@ test('ZB-96 creditSummary：四引擎如实三态（有余额 / 取不到 / 官�
   assert.deepEqual(Object.keys(onlyZ), ['zcode']);
 });
 
+/* ===== ZB-105：多模型免费额度（1024 程序员节：GLM-5.3-Flash 3 亿 + GLM-5.3 2 亿） ===== */
+
+test('ZB-105 giftQuota：多条 entitlement 各自成桶 ⇒ 余额汇总 + models/perModel', () => {
+  const data = {
+    server_time: 1_792_733_010,
+    plans: [{
+      plan_id: 'bigmodel-start-plan',
+      name: 'ZCode 1024 Dev Day',
+      starts_at: 1_792_646_610,
+      ends_at: 1_793_000_000,
+      entitlements: [
+        { entitlement_id: 'e1', show_name: 'GLM-5.3-Flash', grant_units: 300e6, effective_at: 1_792_646_610 },
+        { entitlement_id: 'e2', show_name: 'GLM-5.3', grant_units: 200e6, effective_at: 1_792_646_610 },
+      ],
+    }],
+    balances: [
+      { entitlement_id: 'e1', total_units: 300e6, remaining_units: 300e6, used_units: 0, expires_at: 1_793_000_000 },
+      { entitlement_id: 'e2', total_units: 200e6, remaining_units: 200e6, used_units: 0, expires_at: 1_793_000_000 },
+    ],
+  };
+  const nowMs = 1_792_733_010_000;
+  const q = normalizeQuota({ payload: { data } }, nowMs);
+  assert.equal(q.ok, true);
+  assert.equal(q.totalUnits, 500e6, '两个桶相加 = 5 亿（原先只取第一条 = 3 亿）');
+  assert.equal(q.remainingUnits, 500e6);
+  assert.deepEqual(q.models, ['GLM-5.3-Flash', 'GLM-5.3'], 'models 用于替代 core 里写死的白名单');
+  assert.equal(q.perModel.length, 2, 'perModel 供面板逐模型展示');
+
+  const text = formatGiftQuota(q, nowMs);
+  assert.match(text, /GLM-5\.3-Flash 300\.0M\/300\.0M/, '逐模型第一行');
+  assert.match(text, /GLM-5\.3 200\.0M\/200\.0M/, '逐模型第二行');
+  assert.match(text, /合计 500\.0M\/500\.0M/, '末尾给合计');
+});
+
+test('ZB-105 giftQuota：单模型活动仍走原单行文案（观感不变）', () => {
+  const data = {
+    server_time: 1_792_733_010,
+    plans: [{
+      plan_id: 'bigmodel-start-plan', name: 'Start Plan', starts_at: 1_792_646_610, ends_at: 1_793_000_000,
+      entitlements: [{ entitlement_id: 'e1', show_name: 'GLM-5.3-Flash', grant_units: 300e6, effective_at: 1_792_646_610 }],
+    }],
+    balances: [{ entitlement_id: 'e1', total_units: 300e6, remaining_units: 150e6, used_units: 150e6, expires_at: 1_793_000_000 }],
+  };
+  const nowMs = 1_792_733_010_000;
+  const q = normalizeQuota({ payload: { data } }, nowMs);
+  const text = formatGiftQuota(q, nowMs);
+  assert.match(text, /剩余 150\.0M \/ 300\.0M/, '单模型保持「剩余 X / Y」老文案');
+  assert.doesNotMatch(text, /合计/, '单模型不出现"合计"');
+});
+

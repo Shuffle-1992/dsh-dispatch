@@ -123,24 +123,56 @@ export function normalizeQuota(payload, nowMs = Date.now()) {
   // 多份时取结束最晚的那份（活动叠加时以长期/更晚者为准）
   const plan = starts.slice().sort((a, b) => (toInt(b?.ends_at) ?? 0) - (toInt(a?.ends_at) ?? 0))[0];
   const entitlements = Array.isArray(plan.entitlements) ? plan.entitlements : [];
+  /* ZB-105（1024 程序员节真机：Start Plan 同时给 **GLM-5.3-Flash 3 亿 + GLM-5.3 2 亿**，
+   * 即两条 entitlement、两个独立余额桶）。原先只取 `entitlements[0]` ⇒ 余额只显示一个模型的量，
+   * 且"哪些模型可用"只能靠 core 里写死常量（那次写死就漏了 GLM-5.3）。
+   * 现在**逐个汇总**：总额/剩余累加，并给出 `models` 清单 + `perModel` 明细（面板分别展示）。 */
+  const rows = entitlements.map((ent0) => {
+    const b = balances.find((x) => x?.entitlement_id !== undefined && x.entitlement_id === ent0?.entitlement_id) ?? null;
+    const name = typeof ent0?.show_name === 'string' && ent0.show_name !== '' ? ent0.show_name : null;
+    return {
+      model: name,
+      totalUnits: toInt(b?.total_units) ?? toInt(ent0?.grant_units),
+      usedUnits: toInt(b?.used_units),
+      remainingUnits: toInt(b?.remaining_units),
+      availableUnits: toInt(b?.available_units),
+      endsAt: toInt(b?.expires_at) ?? toInt(plan.ends_at),
+      hasBucket: b !== null,
+    };
+  });
+  /** 求和：全为 null ⇒ null（**不冒充"剩余=总量"**）；否则把 null 当 0 累加。 */
+  const sumOrNull = (vals) => {
+    const nums = vals.filter((v) => Number.isFinite(v));
+    return nums.length ? nums.reduce((s, v) => s + v, 0) : null;
+  };
+  const totalUnits = sumOrNull(rows.map((x) => x.totalUnits));
+  const usedUnits = sumOrNull(rows.map((x) => x.usedUnits));
+  const remainingUnits = sumOrNull(rows.map((x) => x.remainingUnits));
+  const availableUnits = sumOrNull(rows.map((x) => x.availableUnits));
+  /** 免费额度**实际提供的模型名**（供 core 收窄通道 models，替代写死白名单）。 */
+  const models = rows.map((x) => x.model).filter(Boolean);
+  const perModel = rows.filter((x) => x.model).map((x) => ({
+    model: x.model,
+    totalUnits: x.totalUnits,
+    usedUnits: x.usedUnits,
+    remainingUnits: x.remainingUnits,
+    availableUnits: x.availableUnits,
+    endsAt: x.endsAt,
+  }));
+  const anyBucket = rows.some((x) => x.hasBucket);
   const ent = entitlements[0] ?? {};
-  const bucket =
-    balances.find((b) => b?.entitlement_id !== undefined && b.entitlement_id === ent.entitlement_id) ??
-    balances.find((b) => b?.plan_id === plan.plan_id) ??
-    null;
-
-  const totalUnits = toInt(bucket?.total_units) ?? toInt(ent.grant_units);
-  const usedUnits = toInt(bucket?.used_units);
-  const remainingUnits = toInt(bucket?.remaining_units);
-  const availableUnits = toInt(bucket?.available_units);
   const startsAt = toInt(plan.starts_at);
   const effectiveAt = toInt(ent.effective_at);
-  const endsAt = toInt(bucket?.expires_at) ?? toInt(plan.ends_at);
+  /* 到期时间取**最晚**的那条（多模型可能各自到期；过早报 expired 会误伤仍有效的额度）。 */
+  const endsAt = (() => {
+    const ends = rows.map((x) => x.endsAt).filter((v) => Number.isFinite(v) && v > 0);
+    return ends.length ? Math.max(...ends) : toInt(plan.ends_at);
+  })();
 
   let state;
   if (effectiveAt !== null && effectiveAt > 0 && nowMs < effectiveAt * 1000) state = 'pending';
   else if (endsAt !== null && endsAt > 0 && nowMs >= endsAt * 1000) state = 'expired';
-  else if (bucket === null) state = 'pending'; // 无桶 = 还没开始计（同上，别冒充"剩余=总量"）
+  else if (!anyBucket) state = 'pending'; // 无桶 = 还没开始计（同上，别冒充"剩余=总量"）
   else state = 'active';
 
   return {
@@ -149,6 +181,9 @@ export function normalizeQuota(payload, nowMs = Date.now()) {
     planId: String(plan.plan_id),
     planName: typeof plan.name === 'string' && plan.name !== '' ? plan.name : String(plan.plan_id),
     model: typeof ent.show_name === 'string' && ent.show_name !== '' ? ent.show_name : null,
+    /* ZB-105：免费额度覆盖的模型清单（多模型活动靠它，不再写死） */
+    models,
+    perModel,
     totalUnits,
     usedUnits,
     remainingUnits,
@@ -229,6 +264,13 @@ export function formatGiftQuota(quota, nowMs = Date.now()) {
     return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   };
   const parts = [];
+  const pctOf = (remain, total) => (Number.isFinite(remain) && Number.isFinite(total) && total > 0
+    ? `（${Math.round((remain / total) * 100)}%）`
+    : '');
+  /* ZB-105：**多模型活动**（1024 程序员节：GLM-5.3-Flash 3 亿 + GLM-5.3 2 亿）——
+   * 逐模型列出各自余量，再给合计。单模型活动仍走原来的单行文案（不改变既有观感）。 */
+  const per = Array.isArray(quota.perModel) ? quota.perModel.filter((x) => x && x.model) : [];
+  const multi = per.length > 1;
   if (quota.state === 'pending') {
     parts.push(`未生效（${stamp(quota.effectiveAt)} 起）`);
     if (Number.isFinite(quota.totalUnits)) parts.push(`总量 ${m(quota.totalUnits)}`);
@@ -237,12 +279,17 @@ export function formatGiftQuota(quota, nowMs = Date.now()) {
     if (Number.isFinite(quota.usedUnits) && Number.isFinite(quota.totalUnits)) {
       parts.push(`已用 ${m(quota.usedUnits)} / ${m(quota.totalUnits)}`);
     }
+  } else if (multi) {
+    /* 逐模型：`GLM-5.3-Flash 300.0M/300.0M（100%）`；再给合计。 */
+    for (const x of per) {
+      const remain = Number.isFinite(x.remainingUnits) ? x.remainingUnits : x.availableUnits;
+      parts.push(`${x.model} ${m(remain)}/${m(x.totalUnits)}${pctOf(remain, x.totalUnits)}`);
+    }
+    const remainAll = Number.isFinite(quota.remainingUnits) ? quota.remainingUnits : quota.availableUnits;
+    parts.push(`合计 ${m(remainAll)}/${m(quota.totalUnits)}${pctOf(remainAll, quota.totalUnits)}`);
   } else {
     const remain = Number.isFinite(quota.remainingUnits) ? quota.remainingUnits : quota.availableUnits;
-    const pct = Number.isFinite(remain) && Number.isFinite(quota.totalUnits) && quota.totalUnits > 0
-      ? `（${Math.round((remain / quota.totalUnits) * 100)}%）`
-      : '';
-    parts.push(`剩余 ${m(remain)} / ${m(quota.totalUnits)}${pct}`);
+    parts.push(`剩余 ${m(remain)} / ${m(quota.totalUnits)}${pctOf(remain, quota.totalUnits)}`);
   }
   if (quota.state !== 'pending') parts.push(`窗口 ${stamp(quota.startsAt)} → ${stamp(quota.endsAt)}`);
   if (Number.isFinite(quota.endsAt) && quota.endsAt * 1000 > nowMs && quota.state === 'active') {

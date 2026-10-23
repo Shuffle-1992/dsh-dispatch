@@ -92,6 +92,9 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url'; // ZB-44：默认推断 OpenCode 执行器路径（<core 目录>/../../collab-kit/）
 import { createHash, randomBytes } from 'node:crypto'; // ZB-08：createHash 供文件锁路径哈希用
+/* ZB-105：免费额度（Start Plan）**实际支持哪些模型**由余额接口的 entitlement 决定 ——
+ * 从 gift-quota 读，替代 core 里写死的常量（那次写死漏了 1024 活动的 GLM-5.3）。 */
+import { readGiftQuota } from './gift-quota.mjs';
 /* ZB-44（双引擎）：行协议与引擎判据的**唯一权威**（core 与各执行器共用，见该文件顶部注释）。
  * 原先写死的 `[zcode-run]` 正则、引擎名归一、`opencode/<model>` 通道形态判定，全部改从这里取。 */
 import {
@@ -3675,9 +3678,18 @@ export function createDispatcher(options = {}) {
      * 为什么必须在 core 收窄，而不是只做在面板上：否则 `action=channels` 会告诉 agent
      * "免费额度有 GLM-5.3 与 GLM-5.3-Flash"，agent 据此派发就可能选到**该额度并不提供**的模型
      * （`plan` 与免费额度**提供同样的模型名**，但两者是**两套独立实现**：provider 不同、
-     * 端点不同、计费不同）。用户实测：Start Plan 只给 `GLM-5.3-Flash`。
-     * 权益变化时改这一行（面板侧 `ZC_FREE_MODELS` 是同一份约定的镜像）。 */
-    const ZC_FREE_MODELS = ['GLM-5.3-Flash'];
+     * 端点不同、计费不同）。**原先是写死常量，结果 1024 程序员节活动一变就漏了 GLM-5.3**
+     * （活动给 GLM-5.3-Flash 3 亿 + GLM-5.3 2 亿，真机两者都跑通）。
+     * ZB-105：改**动态优先** —— 从余额接口的 entitlement 里拿真实模型清单；
+     * 读不到（客户端没运行 / 日志陈旧）时用**实测兜底**，绝不因为读不到就把清单清空。 */
+    const ZC_FREE_MODELS_FALLBACK = ['GLM-5.3', 'GLM-5.3-Flash'];
+    const ZC_FREE_MODELS = (() => {
+      try {
+        const q = readGiftQuota();
+        if (q && q.ok === true && Array.isArray(q.models) && q.models.length) return q.models;
+      } catch { /* 落兜底 */ }
+      return ZC_FREE_MODELS_FALLBACK;
+    })();
     const zcodeChannelsFinal = zcodeChannelsFiltered.map((c) => {
       if (!/^account:.*start-plan$/.test(String(c.id))) return c;
       const allowed = (Array.isArray(c.models) ? c.models : []).filter((m) => ZC_FREE_MODELS.includes(m));
