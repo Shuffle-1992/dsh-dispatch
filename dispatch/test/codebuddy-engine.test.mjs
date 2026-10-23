@@ -547,6 +547,37 @@ console.log('\nG. 登录条位置与数据源（用户要求：只放插件详�
     '★ 取值优先 loggedIn（轻量判定），其次 authenticated（账号态）');
 }
 
+/* ===== ZB-104：agent 派发时爱自己选通道/模型（用户反馈） ===== */
+{
+  const indexSrc = readFileSync(join(HERE, '..', 'index.js'), 'utf8');
+  const hostSrc = readFileSync(join(HERE, '..', 'wire.host.mjs'), 'utf8');
+
+  /* ① 工具描述**最前面**就要有这条纪律（agent 从头读） */
+  ok(/派发第一纪律：优先遵守面板设置/.test(indexSrc),
+    '★ 工具描述里有「派发第一纪律」');
+  const bodyIdx = indexSrc.indexOf('const TOOL_DESCRIPTION_BODY = [');
+  const ruleIdx = indexSrc.indexOf('派发第一纪律');
+  const firstItemIdx = indexSrc.indexOf("'- action=dispatch：派发一个 run");
+  ok(bodyIdx >= 0 && ruleIdx > bodyIdx && ruleIdx < firstItemIdx,
+    '★ 该纪律排在描述数组**第一项之前**（比 action 说明更早被读到）');
+  /* ② 两个参数说明都必须写清"默认不要传"（原来 model 完全没写，是主因） */
+  ok(/model: \{[\s\S]{0,200}⛔ \*\*默认不要传\*\*/.test(indexSrc),
+    '★ model 参数说明写明「⛔ 默认不要传」（原来完全没提）');
+  ok(/provider: \{[\s\S]{0,200}⛔ \*\*默认不要传\*\*/.test(indexSrc),
+    '★ provider 参数说明写明「⛔ 默认不要传」');
+
+  /* ③ 光靠描述不够：**结果里给反馈**（形成闭环） */
+  ok(/const panelNote = \(\(\) => \{/.test(hostSrc), '★ dispatch 返回里算 panelNote');
+  ok(/notice: panelNote/.test(hostSrc), '★ 显式覆盖面板设置时返回 notice');
+  ok(/显式指定了通道/.test(hostSrc) && /显式指定了模型/.test(hostSrc),
+    '★ 通道与模型两种越权都有对应文案');
+  ok(/不要传 provider \/ model/.test(hostSrc), '文案明确告诉 agent 下次别传');
+
+  /* ④ `op` / `sub` 别名 —— 传错会**误启动登录服务**（真机踩过，有副作用） */
+  ok(/p\.sub \?\? p\.op \?\? p\.action2/.test(hostSrc),
+    '★ login 的 sub 接受 op 别名（避免误触发 start）');
+}
+
 cleanup();
 console.log(`\n===== ZB-84 WorkBuddy/CodeBuddy 引擎：${pass} PASS / ${fails.length} FAIL =====`);
 if (fails.length) {

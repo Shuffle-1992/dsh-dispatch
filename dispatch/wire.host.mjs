@@ -635,9 +635,32 @@ export function createActionHandler(dispatcher, config = {}) {
           const policy = await applyQuotaPolicy(dispatcher, spec, config);
           if (policy.redirect) spec.provider = policy.redirect.to;
           const job = dispatcher.dispatch(spec); // 参数不合法时 core 抛 TypeError，走 catch 返回 error
+          /* ZB-104（用户反馈：「让 Agent 进行派发操作，都喜欢自己选通道和模型，应该优先遵守面板设置的参数」）：
+           * **不阻断**（有时确实必须显式指定：跨引擎交接、用户点名换通道），
+           * 但把"这次没用面板设置"这个事实**明确说出来** —— 描述里的纪律 + 结果里的反馈形成闭环，
+           * agent 下一次就不会再自作聪明。判据只看 provider/model 是否与面板默认不同。 */
+          const panelNote = (() => {
+            let panelCh = null;
+            try { panelCh = typeof dispatcher.getChannel === 'function' ? dispatcher.getChannel() : null; } catch { panelCh = null; }
+            const panelProvider = panelCh?.provider ?? policy.defaultProvider ?? null;
+            const panelModel = panelCh?.model ?? null;
+            const explicitProvider = p.provider != null && p.provider !== '' ? String(p.provider) : null;
+            const explicitModel = p.model != null && p.model !== '' ? String(p.model) : null;
+            if (explicitProvider && panelProvider && explicitProvider !== String(panelProvider)) {
+              return `⚠ 本次**显式指定了通道**「${explicitProvider}」，没用面板默认「${panelProvider}」。`
+                + '用户预期是"面板选什么就派什么" —— 除非面板通道不可用（enabled:false / recentQuotaExhausted / 上次 paused），'
+                + '否则下次 dispatch **不要传 provider / model**。';
+            }
+            if (explicitModel && panelModel && explicitModel !== String(panelModel)) {
+              return `⚠ 本次**显式指定了模型**「${explicitModel}」，没用面板默认「${panelModel}」。`
+                + '除非面板模型不可用（userDisabled / 上次 paused），否则下次 dispatch **不要传 model**。';
+            }
+            return null;
+          })();
           return {
             ok: true,
             job: slimJob(job),
+            ...(panelNote ? { notice: panelNote } : {}),
             ...(policy.redirect
               ? {
                 redirectedFrom: policy.redirect.from,
@@ -866,7 +889,10 @@ export function createActionHandler(dispatcher, config = {}) {
          * 而无参数启动 CLI 在非 TTY 下会静默退出 —— 用户没有任何可点的自助入口。
          * 全部走官方 REST（真机实测），派发台**不读不写凭据**。 */
         case 'login': {
-          const sub = String(p.sub ?? p.action2 ?? 'start').trim().toLowerCase();
+          /* ZB-104：`op` 也认 —— 真机踩过：agent 按工具描述传 `op:'status'`，
+           * 但这里只认 `sub`，于是 `?? 'start'` 兜底 ⇒ **误启动了一个登录服务**（有副作用！）。
+           * 现在 sub / op / action2 三个名字都接受，日志里也走同一条路。 */
+          const sub = String(p.sub ?? p.op ?? p.action2 ?? 'start').trim().toLowerCase();
           if (sub === 'stop') return { ok: true, ...dispatcher.stopCodebuddyLogin() };
           if (sub === 'status') return await dispatcher.codebuddyLoginStatus();
           if (sub !== 'start') return { ok: false, error: `未知 login 子动作：${sub}（可用 start|status|stop）` };

@@ -354,8 +354,8 @@ const TOOL_PARAMETERS = {
    * 事故现场（2026-10-11，keysion 会话）：agent 按教学读 channels 后想设免费额度通道为默认，
    * 却撞上 `invalid arguments: "provider" must be one of ["plan","personal"]` ⇒ 被迫用 `plan`
    * （付费套餐，5h 窗口已满）⇒ 三个作业全部 429 ⇒ 它转而用后台 pwsh 直跑 runner 绕过派发台。 */
-  model: { type: 'string', description: 'dispatch：模型（如 GLM-5.3 / GLM-5.3-Flash / deepseek-flash；实际可用值以 action=channels 清单为准，其它模型经 action=channel 设默认后使用）' },
-  provider: { type: 'string', description: 'dispatch：通道 id。**通常不要传** —— 不传 = 用用户在面板 / `action=channel` 选定的默认通道（推荐做法）；只有确实要临时换通道时才传。可用值：`plan` 套餐 / `personal` 个人 Key / `account:<family>-start-plan` 免费额度 / **OpenCode 免费模型通道 id 形如 `opencode/deepseek-v4.1-flash-free`、Qoder 通道形如 `qoder/Qwen3.8-Max`、WorkBuddy 通道形如 `codebuddy/glm-5.1`（清单以 `action=channels` 为准）** / 清单里任意真实 id。传入的通道若"最近撞过额度"，派发会**自动改派**到你选定的可用通道并在返回里说明（`redirectedFrom`）' },
+  model: { type: 'string', description: 'dispatch：模型。⛔ **默认不要传** —— 不传 = 用用户在面板「模型」里选定的那个（用户会随任务切换，agent 无从知道）。只有已确认面板所选模型不可用（channels 里 userDisabled / 派发 paused）或用户明确要求换模型时才传；实际可用值以 action=channels 清单为准' },
+  provider: { type: 'string', description: 'dispatch：通道 id。⛔ **默认不要传** —— 不传 = 用用户在面板 / `action=channel` 选定的默认通道（用户预期"我选什么就派什么"）。只有已确认面板通道不可用（enabled:false / recentQuotaExhausted / 上次 paused）或用户明确要求换通道时才传，并在回报里说明为什么没用面板通道。可用值：`plan` 套餐 / `personal` 个人 Key / `account:<family>-start-plan` 免费额度 / **OpenCode 免费模型通道 id 形如 `opencode/deepseek-v4.1-flash-free`、Qoder 通道形如 `qoder/Qwen3.8-Max`、WorkBuddy 通道形如 `codebuddy/glm-5.1`（清单以 `action=channels` 为准）** / 清单里任意真实 id。传入的通道若"最近撞过额度"，派发会**自动改派**到你选定的可用通道并在返回里说明（`redirectedFrom`）' },
   /* 引擎（ZCode / OpenCode / Qoder / WorkBuddy）：`engine` 同样**不用 enum** —— 与 model/provider 同一条纪律
    * （ZB-37 真机事故：enum 会挡住清单里枚举外的真实取值），权威来源是 action=channels 的
    * channels[].engine。通常也不必传：provider 传 `opencode/<model>` / `qoder/<model>` /
@@ -404,6 +404,15 @@ const TOOL_PARAMETERS = {
 };
 
 const TOOL_DESCRIPTION_BODY = [
+/* ZB-104（用户反馈真机现象：「让 Agent 进行派发操作，都喜欢自己选通道和模型」）：
+ * 把「优先遵守面板设置」提到描述**最前面** —— agent 从头读，第一条就是硬约束。
+ * 只写在 provider/model 参数说明里不够：措辞软、且在长文中部，实际不生效。 */
+'⛔ **派发第一纪律：优先遵守面板设置**。调 `dispatch` 时**默认不要传 `provider` / `model` / `thinking`** —— '
++ '不传 = 用用户此刻在面板选定的通道 / 模型 / 思考强度（用户会随任务切换，你无从知道该用哪个）。'
++ '**擅自替用户选通道/模型会让「面板设置」形同虚设** —— 用户预期是"我选什么就派什么"。',
+'只有**已确认面板配置不可用**时才显式指定，判据按顺序：① `action=channels` 里该通道 `enabled:false` 或 `userDisabled`；'
++ '② `recentQuotaExhausted` 命中（刚撞过额度）；③ 上一次派发 `paused`（not-logged-in / quota-exhausted）且正是该通道；'
++ '④ 用户明确要求换通道/模型。→ 这时才传 `provider`（可配 `model`），并**在回报里说明为什么没用面板通道**。',
   '- action=dispatch：派发一个 run。**立即返回**，不等任务跑完（返回时 state 通常是 queued）。拿结果有两条路：等**落地自动唤醒**（见下条，推荐），或主动 action=wait / action=tail。kind 判据：**prompt=完整指令**（一次性问答/明确步骤）；**target=目标描述**（只说"要达成什么"，ZCode 自主规划并自续跑直到达成，适合无人值守委托；与 prompt/task 互斥是 CLI 限制）；**task=任务包文件绝对路径**（含交付物/验收标准的正式任务，由 runner 读文件内联）。必须带对应内容字段 prompt|task|target。可选：model（GLM-5.3 / GLM-5.3-Flash）、provider（plan=套餐通道 / personal=个人 Key）、mode（build|edit|plan|yolo，默认 edit）、**thinking（思考强度，见下方专条）**、timeoutMin（正数分钟，无上限；runner 生效下限 1 分钟）、memoryBench（true 附加 --memory-bench，仅 kind=prompt）、**auto（true = 显式放行引擎未显式拒绝的权限；默认 false，仅 engine=opencode/qoder）**、tag、lock（repo|none，默认 repo）、**write（本任务要写的文件列表 —— 锁的粒度就是它）**、cwd、resume。**三引擎（ZCode + OpenCode + Qoder）**：`provider: "opencode/<model>"`（如 `opencode/deepseek-v4.1-flash-free`）或 `qoder/<model>`（如 `qoder/Qwen3.8-Max`）即派给**本地真实**对应引擎进程（各自免费/自带额度模型，不伪装身份、**不读写用户自己的引擎配置与数据**）；也可显式传 `engine`，但通常不必——core 按 `opencode/<model>` / `qoder/<model>` 通道 id 自动识别。OpenCode / Qoder **不支持** `mode` / `memoryBench`（传了会被拒，返回可读报错）。**权限放行**：OpenCode / Qoder 的工具调用可能需要审批 —— 派发台默认**不**放行（安全默认，绝不自作主张开 `--auto` / `bypass_permissions`）；确需放行时用显式 **`auto: true`**（仅对 engine=opencode/qoder 有意义，开启后 job.autoApproved 可审计、且跨 retry 沿用）。总开关关闭时被拒绝（返回 ok:false + switch 状态），不创建 job。',
   /* ZB-22：落地自动唤醒 —— 这是「派发台能不能像 DSH 后台任务一样用」的关键。
    * 现场症状：派发后会话不等待、直接往下走/结束，任务跑完没人叫醒它，用户得自己再发一句。 */
