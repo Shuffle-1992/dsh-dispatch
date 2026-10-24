@@ -1169,7 +1169,13 @@ export function createDispatcher(options = {}) {
         j.parseWarnings = j.parseWarnings.slice(-PARSE_WARNINGS_CAP);
       }
     }
-    atomicWrite(jobsFile, `${JSON.stringify({ version: 1, savedAt: new Date(nowMs()).toISOString(), jobs: all }, null, 2)}\n`);
+    /* ZB-119（GLM-5.3 审查 LOW）：**jobs.json 用紧凑序列化**（不带 `null,2` 缩进）。
+     * 它是热路径上最大的文件（JOBS_FILE_CAP=1000 条，每条含 tailLines 最多 200 行），
+     * pretty-print 会让体积膨胀约 40%，而节流后每次 flush 都要写一遍。
+     * 这个文件是**机器生成**的（不存在手工编辑的正当场景）—— 排障要看格式的话用：
+     *   node -e "console.log(JSON.stringify(require('<path>/state/jobs.json'),null,2))"
+     * 注意：其余几个小配置文件（channel / split / effortCache）仍用 pretty（体积可忽略，便于人看）。 */
+    atomicWrite(jobsFile, `${JSON.stringify({ version: 1, savedAt: new Date(nowMs()).toISOString(), jobs: all })}\n`);
   }
 
   /**
