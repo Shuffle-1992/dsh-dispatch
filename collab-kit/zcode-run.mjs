@@ -1162,6 +1162,14 @@ const r = spawnSync(process.execPath, [CLI, ...args], {
 });
 const elapsed = ((Date.now() - started) / 1000).toFixed(1);
 const timedOut = r.error?.code === 'ETIMEDOUT' || r.signal === 'SIGTERM';
+/* ZB-117（GLM-5.3 审查 LOW，已核实）：`spawnSync` 的 stdout 超过 `maxBuffer`（64MB）时
+ * `r.error.code = ENOBUFS`（**不是** ETIMEDOUT），stdout 被截断 ⇒ 下面解析 JSON 必然失败，
+ * 但原先没有任何提示，看起来像"CLI 输出格式变了"。显式识别并给出可读原因。 */
+const outputOverflow = r.error?.code === 'ENOBUFS';
+if (outputOverflow) {
+  console.error(`[zcode-run] 输出超过 maxBuffer（64MB）被截断（ENOBUFS）—— 结果解析可能失败；` +
+    '这是 CLI 输出异常膨胀（通常是会话里刷了超大文件/日志），不是任务本身失败');
+}
 const stdout = r.stdout ?? '';
 const stderr = r.stderr ?? '';
 writeFileSync(outLog, stdout);

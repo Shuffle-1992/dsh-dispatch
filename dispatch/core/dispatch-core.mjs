@@ -173,10 +173,10 @@ const QODER_MODEL_LEVELS = {
 /** ZB-75：**思考档位核对**用的"关闭思考"档位集 —— 用户本就要不思考时，静默不算"不符"。 */
 const THINK_OFF_LEVELS = new Set(['none', 'disabled']);
 
-/** ZB-75：Qoder **引擎级**档位并集的闭包缓存（`listChannels()` 每次探测后写入）——
- *  供 `suggestStrongerLevel()` 在"该模型没有逐模型声明"时兜底。初值 null = 还没探测过
- *  （此时不猜，直接不给向上建议）。 */
-let qoderLevelsCache = null;
+/** ZB-75：Qoder **引擎级**档位并集的缓存（`listChannels()` 每次探测后写入）——
+ *  供 `suggestStrongerLevel()` 在"该模型没有逐模型声明"时兜底。
+ *  ⚠️ ZB-117（Flash 审查 LOW，已核实）：**必须放在 createDispatcher 闭包内**（见下方声明）——
+ *  原先放在模块级，多个 dispatcher 实例（测试里很常见）会共享同一份缓存 ⇒ 实例间串味。 */
 
 
 /** 引擎 → 该引擎的行正则表（缓存：解析是热路径，不能每行都重建正则）。 */
@@ -313,7 +313,23 @@ const PAUSE_SIGNATURES = [
    *  · `exceed quota limit`（空格形式）—— 免费额度 `1005` 错误的原文，旧模式只有下划线 `quota_exceeded`；
    *  · `quota-exhausted`（连字符字面量）—— gift 层自己打的 `pause-signature quota-exhausted` 也认不出，
    *    等于"上游判了额度、core 却归 unknown"，用户看到的是"失败/未知原因"而不是可读的额度暂停。 */
-  { reason: 'quota-exhausted', patterns: [/quota_exceeded/i, /exceed quota limit/i, /quota-exhausted/i, /coding_plan_required/i, /rate_limited/i, /insufficient/i, /\b429\b/, /balance/i] },
+  { reason: 'quota-exhausted', patterns: [
+    /quota_exceeded/i,
+    /exceed quota limit/i,
+    /quota-exhausted/i,
+    /coding_plan_required/i,
+    /rate_limited/i,
+    /* ZB-117（GLM-5.3 审查 LOW，已核实）：**收紧两个宽词**。
+     * 原 `/\b429\b/` 与 `/balance/i` 会命中任务输出里**任何** "429"（行号、文件号、错误码片段）
+     * 或 "balance"（变量名、业务词），把普通失败误判成额度耗尽 ——
+     * 与 ZB-112「超时被误报额度耗尽」是同一类问题的另一面（那次是文本里扫到 429）。
+     * 改为要求**上下文词**：必须像 HTTP 状态码、或额度/余额相关短语才算。 */
+    /HTTP[\s/]*429/i,                                   // `HTTP 429` / `HTTP/1.1 429`
+    /\b429\s+(?:Too Many Requests|rate.?limit)/i,        // `429 Too Many Requests`
+    /insufficient[\s_-]*(?:balance|funds|credits?|quota)/i, // `insufficient balance/quota`
+    /(?:balance|quota|credits?)[\s_-]*(?:is\s+)?(?:insufficient|exhausted|depleted|empty)/i,
+    /余额不足|额度不足|配额不足/,
+  ] },
 ];
 /** 自动降级链只接这几种「换通道可能有意义」的暂停；config-error 属参数错误，unknown 不自动动。
  *  ZB-71：`provider-blocked`（按 IP 封锁免费模型）必须在这里 —— 换通道是唯一有效的动作。 */
@@ -812,6 +828,10 @@ export function createDispatcher(options = {}) {
   const dirState = join(workRoot, 'state');
   const dirLogs = join(workRoot, 'logs');
   const jobsFile = join(dirState, 'jobs.json');
+  /* ZB-117（GLM-5.3-Flash 审查 LOW，已核实）：Qoder 引擎级档位并集缓存 —— **实例级**。
+   * 原先声明在模块级 ⇒ 多个 dispatcher 实例（测试里很常见）共享同一份缓存，
+   * 一个实例探测到的档位会串到另一个实例的 `suggestStrongerLevel()` 里。 */
+  let qoderLevelsCache = null;
   /* task-11（M2）：**状态目录的唯一所有者是 core** —— 其它层（wire / notify）要落自己的状态文件
    * （dismissed.json / wake-stats.json）时只准经这里取名，不许自己 `dirname(jobsFile)` 反推。
    * 反推的后果：core 换布局（或路径语义变化）时，消费者会静默写到错位置。 */
@@ -1855,6 +1875,11 @@ export function createDispatcher(options = {}) {
       };
       stream.on('end', flush);
       stream.on('error', flush);
+      /* ZB-117（GLM-5.3 审查 LOW，已核实）：**还要监听 `close`**。
+       * `end` 只在流正常读完时触发、`error` 只在出错时触发 —— 而流被 `destroy()` 时
+       * 可能**只发 `close`**（不发 end/error），此时 flush 永不执行 ⇒ 捕获文件 fd 泄漏。
+       * flush 本身幂等（buf 清空 + fd 置 null），重复触发无害。 */
+      stream.on('close', flush);
     };
     feed(child.stdout, captureOut);
     feed(child.stderr, captureErr);

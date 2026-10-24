@@ -475,7 +475,23 @@ export function matchQuotaExhausted(channel, exhausted) {
   for (const key of Object.keys(exhausted)) {
     for (const id of ids) {
       const bare = id.replace(/^plan:/, '');
-      if (id === key || bare === key || id.includes(key) || key.includes(bare)) return exhausted[key];
+      /* ZB-117（GLM-5.3 审查 LOW，已核实）：**去掉任意子串匹配**（原 `id.includes(key) || key.includes(bare)`），
+       * 但**保留两条语义等价** —— 它们不是误标，是 runner 的文档化行为：
+       *   ① `plan` 别名 ≡「第一个启用的 *coding-plan，其次 *start-plan」⇒ 台账里记哪条套餐，
+       *      都算 plan 撞顶（既有测试锁定：`plan` 别名命中 `builtin:bigmodel-coding-plan`）；
+       *   ② `a` 是 `b` 的 `:` 分段前缀（如 `account:x` 与 `account:x:model`）。
+       * 原先的任意子串会让前缀相近的通道互相误标（例如 `coding-plan` 与 `start-plan` 之外的无关 id）。 */
+      if (id === key || bare === key) return exhausted[key];
+      /* `plan` 别名 ≡「runner 自动选择的那条套餐」—— 台账里**任何** `*plan` 类 provider 都算它撞顶
+       * （真机：`plan:bigmodel-coding-plan`；测试里也有 `plan:test-plan`）。 */
+      if (id === 'plan' && /[-:]plan$/.test(key)) return exhausted[key];
+      if (key === 'plan' && /[-:]plan$/.test(bare)) return exhausted[key];
+      /* 段前缀 / 段后缀：台账 key 是**归一后的短名**（如 `bigmodel-coding-plan`，由
+       * `recentQuotaExhausted` 把 `plan:bigmodel-coding-plan` 剥掉前缀得到），
+       * 而通道 id 是完整形式（`builtin:bigmodel-coding-plan`）⇒ 必须承认「以 `:` 分段结尾」。
+       * 既有测试锁定这一条（`真实 id 命中`）。 */
+      if (id.startsWith(`${key}:`) || key.startsWith(`${id}:`)) return exhausted[key];
+      if (id.endsWith(`:${key}`) || bare.endsWith(`:${key}`) || key.endsWith(`:${bare}`)) return exhausted[key];
     }
   }
   return null;
@@ -748,11 +764,17 @@ export function createActionHandler(dispatcher, config = {}) {
           if (!Number.isFinite(sec) || sec <= 0) return { ok: false, error: 'wait 的 timeoutSec 必须为正数' };
           const settled = await new Promise((done) => {
             const t0 = Date.now();
+            let un = null;
+            /* ZB-117（GLM-5.3 审查 LOW，已核实）：**落地后要清掉等待定时器**。
+             * 原先只有 `.unref()` —— 它只保证"不阻止进程退出"，定时器本身仍会存活到点
+             * （wait 的 sec 来自任务 timeoutMin，可能 10+ 分钟）⇒ 每次 wait 都遗留一个待期定时器。
+             * finish 里 clearTimeout，并把定时器句柄存到外层。 */
+            let waitTimer = null;
             const finish = (j, timedOut) => {
+              if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; }
               try { un?.(); } catch { /* 已退订 */ }
               done({ j, timedOut, waitedSec: Math.round((Date.now() - t0) / 1000) });
             };
-            let un = null;
             const check = (j) => {
               if (j && SETTLED_STATES.has(j.state)) finish(j, false);
             };
@@ -760,11 +782,12 @@ export function createActionHandler(dispatcher, config = {}) {
             un = dispatcher.subscribe((ev) => {
               if (ev.type === 'job-updated' && ev.job?.id === id) check(dispatcher.get(id));
             });
-            setTimeout(() => {
+            waitTimer = setTimeout(() => {
               const cur = dispatcher.get(id);
               if (cur && SETTLED_STATES.has(cur.state)) finish(cur, false);
               else finish(cur ?? null, true);
-            }, sec * 1000).unref?.();
+            }, sec * 1000);
+            waitTimer.unref?.();
           });
           return {
             ok: true,
