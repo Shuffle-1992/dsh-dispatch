@@ -373,7 +373,7 @@ const TOOL_PARAMETERS = {
    * deepseek 系 disabled|low|high|max），以 channels[].thinkingLevels 为准；语义详述在描述正文。
    * ZB-29d：不传 thinking = 按通道默认思考强度（channel.reasoningLevel，action=channel 可设，未设置=agent）。 */
   thinking: { type: 'string', description: 'dispatch：思考强度（Thought Level）。`agent`=Agent决定（默认）：由你根据任务改传具体档位；**不传 = 按通道默认思考强度执行**（action=channel 可设，未设置即 agent）。档位集合见 action=channels 返回的 thinkingLevels。仅对新建会话生效' },
-  timeoutMin: { type: 'number', description: 'dispatch：超时分钟（必须 > 0，无上限；runner 生效下限 1 分钟）。⚠️ **超时最常见的根因是子代理**：被派发的 CLI 自己再派子代理会撞上账号并发上限（ZCode 免费额度实测=3）被挤掉，然后串行重试白耗时间。**所以提示词里必须明确写「禁止派任何子代理/子任务，全部串行完成」**，并给出时间预算（如"30 分钟内完成，先出结论再补细节"）。' },
+  timeoutMin: { type: 'number', description: 'dispatch：超时分钟（必须 > 0；**上限约 35791 分钟**（24.8 天，Node 定时器上限 2^31-1 ms —— 超过会被静默钳成 1ms 导致看门狗误杀，故显式拒绝）；runner 生效下限 1 分钟）。⚠️ **超时最常见的根因是子代理**：被派发的 CLI 自己再派子代理会撞上账号并发上限（ZCode 免费额度实测=3）被挤掉，然后串行重试白耗时间。**所以提示词里必须明确写「禁止派任何子代理/子任务，全部串行完成」**，并给出时间预算（如"30 分钟内完成，先出结论再补细节"）。' },
   memoryBench: { type: 'boolean', description: 'dispatch：附加 --memory-bench（仅 kind=prompt 支持）' },
   tag: { type: 'string', description: 'dispatch：台账 tag（缺省由 runner 生成）' },
   lock: { type: 'string', enum: ['repo', 'none'], description: 'dispatch：仓库写锁。repo（默认）= 锁仓库；none = 明确不取锁。**锁哪些文件用 write 指定**（memory/both 已于 ZB-16 删除）' },
@@ -677,7 +677,9 @@ export function apply(ctx, config = {}) {
   }
 
   const handleAction = createActionHandler(dispatcher, config);
-  const wire = attachHostWire(ctx, dispatcher, config);
+  /* ZB-118（GLM-5.3-Flash 审查 MED）：把**同一个** handler 传给 wire —— 原先 attachHostWire
+   * 内部还会自建一个（face 再建一个），一次 apply 共 3 个实例靠模块级 `dismissedByFile` 保持一致。 */
+  const wire = attachHostWire(ctx, dispatcher, config, { handleAction });
 
   /* ───────── ZB-22：任务落地自动唤醒（会话不必自己回来轮询）─────────
    * agents 服务**既不写进静态 inject，也不用 ctx.inject 等它就绪**：投递那一刻才解析
@@ -786,9 +788,16 @@ export function apply(ctx, config = {}) {
           }
         }
       }
-      /* ZB-63（F6）：原先这里还有一行 `dispatcher.dispose?.()` —— core 的 createDispatcher
-       * **从来没有** dispose（全仓 grep 无消费者，`?.()` 永远不执行），是纯噪声：
-       * 读代码的人会以为卸载时还有一份释放逻辑在跑。真需要的释放（kill 在跑的 job）就在上面。 */
+      /* ZB-118（GLM-5.3 审查 MED，已核实）：**core 的 dispose 现已存在**（清并发自动重试定时器 /
+       * 看门狗 / 登录服务）。原先这里只 kill running/queued，**管不到 paused** ——
+       * 而 paused 任务的并发自动重试定时器会在 25 秒后把 job 重新拉起来
+       * （插件已卸载，任务却还在跑）。ZB-63 当时删掉 `dispatcher.dispose?.()` 是因为它不存在，
+       * 现在它真的存在了，必须调。 */
+      try {
+        dispatcher.dispose?.();
+      } catch (e) {
+        log('warn', `卸载时 dispatcher.dispose 失败：${e?.message ?? e}`);
+      }
     }
   };
   if (typeof ctx?.effect === 'function') ctx.effect(() => disposeAll);

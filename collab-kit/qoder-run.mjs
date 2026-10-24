@@ -28,6 +28,8 @@
  *   · 权限放行**默认关**：只有 core 显式传 `--auto` 才映射为 `--permission-mode bypass_permissions`。
  */
 import { spawn, spawnSync } from 'node:child_process';
+import { readDispatchSwitch, SWITCH_FILE } from './dispatch-switch.mjs'; // ZB-118：派发总开关门禁（与 zcode-run 同契约）
+import { killTree } from './kill-tree.mjs'; // ZB-118：统一树杀（带超时，防 taskkill 挂死）
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -546,7 +548,13 @@ function taskBody(opt) {
     if (opt.memoryBan) text += `\n\n---\n【硬约束】不要写任何 CLI 的记忆库/自动记忆提取；不要修改 ~/.qoder* 下的用户数据。\n`;
     return text;
   }
-  if (opt.kind === 'target') return `目标：${opt.target}\n\n请自主规划并执行，直到达成该目标。`;
+  if (opt.kind === 'target') {
+    /* ZB-118（GLM-5.3-Flash 审查 MED）：**target 分支也要注入禁令** ——
+     * 原先只有 task/prompt 两个分支注入，target 静默漏掉（`opt.memoryBan` 却是 true）。 */
+    let t = `目标：${opt.target}\n\n请自主规划并执行，直到达成该目标。`;
+    if (opt.memoryBan) t += `\n\n【硬约束】不要写任何 CLI 的记忆库/自动记忆提取；不要修改 ~/.qoder* 下的用户数据。\n`;
+    return t;
+  }
   let text = String(opt.prompt ?? '');
   if (opt.memoryBan) text += `\n\n【硬约束】不要写任何 CLI 的记忆库/自动记忆提取；不要修改 ~/.qoder* 下的用户数据。\n`;
   return text;
@@ -554,6 +562,11 @@ function taskBody(opt) {
 
 async function runOnce(opt, cli) {
   const body = taskBody(opt);
+  /* ZB-118（GLM-5.3-Flash 审查 MED，已核实）：**打印确认行**。
+   * core 靠 `memory-ban=on` 行判断"runner 确实接受并注入了禁令"（`job.memoryBanRunner`）；
+   * 原先 qoder/codebuddy 接受 `--memory-ban` 且真的注入了 prompt，却**从不打印这一行**
+   * ⇒ 对 2/4 引擎这个审计位恒为 null（看起来像"没注入"）。 */
+  if (opt.memoryBan) process.stdout.write(`${PREFIX} memory-ban=on（已在提示词末尾注入记忆禁令）\n`);
   const args = buildQoderArgs({ ...opt, prompt: body, target: body });
   const requestedMode = decidePermissionMode(opt);
 
@@ -585,7 +598,8 @@ async function runOnce(opt, cli) {
   /* 心跳：每 10s 一行 progress（让面板能看到"在做什么 + 多久没动静"）。
    * 绝不因为心跳而额外开子进程 —— 真机教训：并发 CLI agent 会互相干扰。 */
   let timedOut = false;
-  const killTree = (pid) => { try { spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }); } catch { try { process.kill(pid); } catch { /* 尽力 */ } } };
+  /* ZB-118（GLM-5.3 审查 MED）：killTree 已抽到共享模块 —— 原局部实现**无超时**，
+   * 一旦 taskkill 挂住会把整个 runner 卡死（任务永远不落终态）。 */
   const timer = setTimeout(() => { timedOut = true; killTree(child.pid); }, opt.timeoutMin * 60_000);
   const hb = setInterval(() => {
     const s = agg.summary();
@@ -762,6 +776,19 @@ async function main(argv) {
     return 1;
   }
   if (opt.help) { process.stdout.write(HELP); return 0; }
+
+  /* ZB-118（GLM-5.3 审查 MED，已核实）：**派发总开关门禁**（与 zcode-run 同契约）。
+   * 原先只有 zcode-run 有这道闸，本执行器直调即可绕过派发总开关。退出码 3 = 因开关关闭而拒绝。 */
+  {
+    const sw = readDispatchSwitch();
+    if (!sw.enabled) {
+      process.stderr.write(`${PREFIX} ⛔ 派发总开关为「关闭」，拒绝派发（未启动任何进程、未消耗任何额度）。\n`);
+      process.stderr.write(`${PREFIX} 开关文件: ${SWITCH_FILE}\n`);
+      if (sw.note) process.stderr.write(`${PREFIX} 备注: ${sw.note}\n`);
+      process.stderr.write(`${PREFIX} 需要恢复派发时: node <本仓库>/collab-kit/dispatch-switch.mjs --project <宿主项目> on\n`);
+      return 3;
+    }
+  }
 
   let disc;
   try {

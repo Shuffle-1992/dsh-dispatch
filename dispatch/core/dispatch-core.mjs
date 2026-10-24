@@ -1298,19 +1298,25 @@ export function createDispatcher(options = {}) {
     }
   }
 
-  /** 判断某任务此刻能否拿到锁（只判不锁），用于「为什么在排队」的提示。 */
-  function lockBlockersFor(spec) {
+  /** 判断某任务此刻能否拿到锁（只判不锁），用于「为什么在排队」的提示。
+   *
+   *  ZB-118（GLM-5.3 审查 MED，已核实）：原来靠 `spec.__jobId` 排除"自己的锁"，
+   *  但**全仓库零处给 `__jobId` 赋值** —— 死契约 ⇒ `rec.jobId === undefined` 恒为 false，
+   *  `crossLevelBlocked({ id: undefined })` 的 `!==` 也恒真 ⇒ 该函数永远"把自己当别人"。
+   *  改为**显式传 jobId**（可选；不传时保持旧语义，既有测试不受影响）。 */
+  function lockBlockersFor(spec, jobId = null) {
     const locks = locksFor(spec);
     const blockers = [];
     for (const l of locks) {
       if (!existsSync(l.path)) continue;
       const rec = readLockFile(l.path);
-      if (!rec || rec.jobId === spec.__jobId) continue;
+      if (!rec) continue;
+      if (jobId != null && rec.jobId === jobId) continue; // 自己持有的锁不算阻塞
       if (isStaleLock(rec, l.path, nowMs())) continue;
       blockers.push(l.name === 'file' ? `file:${l.file}` : l.name);
     }
     /* ZB-16：把跨层级阻塞也算进去，否则"为什么排队"会漏报（用户看面板时会困惑）。 */
-    const cross = crossLevelBlocked({ id: spec.__jobId }, locks);
+    const cross = crossLevelBlocked({ id: jobId }, locks);
     if (cross) blockers.push(`cross:${cross}`);
     return blockers;
   }
@@ -4180,7 +4186,19 @@ export function createDispatcher(options = {}) {
     if (spec.auto === true && engine !== 'opencode' && engine !== 'qoder' && engine !== 'codebuddy') {
       throw new TypeError('dispatch(spec): auto 仅对 engine=opencode / engine=qoder / engine=codebuddy 有意义（它放行引擎未显式拒绝的权限）；zcode 没有等价的放行旗标，请去掉 auto');
     }
-    if (spec.timeoutMin != null && !(Number(spec.timeoutMin) > 0)) throw new TypeError('dispatch(spec): timeoutMin 必须为正数');
+    /* ZB-118（GLM-5.3 审查 MED，已核实）：timeoutMin **只校验了下界**，而 Node 的 `setTimeout`
+     * 上限是 2^31-1 ms —— 超过会被**静默钳成 1ms**，于是派发侧的看门狗一启动就开火误杀。
+     * 这里显式挡掉（上限约 35791 分钟 ≈ 24.8 天）。 */
+    if (spec.timeoutMin != null) {
+      const tv = Number(spec.timeoutMin);
+      if (!(tv > 0)) throw new TypeError('dispatch(spec): timeoutMin 必须为正数');
+      if (tv * 60000 > 2147483647) {
+        throw new TypeError(
+          `dispatch(spec): timeoutMin 过大（${tv} 分钟）—— Node 定时器上限约 35791 分钟（24.8 天），`
+          + '超过会被静默钳成 1ms，导致看门狗一启动就开火误杀',
+        );
+      }
+    }
     /* ZB-72（2026-10-18 真机实测新增）：`cwd` 的 **Windows 8.3 短名展开**。
      *
      * 现场：用 `C:\Users\ADMINI~1\AppData\Local\Temp\…`（`%TEMP%` 的展开值，`ADMINI~1` 是
@@ -4662,6 +4680,20 @@ export function createDispatcher(options = {}) {
     return true;
   }
 
+  /** ZB-118（GLM-5.3 审查 MED，已核实）：**卸载清理**（原先 core 根本没有 dispose）。
+   *  插件卸载时 index.js 只 kill running/queued，**管不到 paused** —— 而并发自动重试的定时器
+   *  会在 25 秒后把 paused 的 job 重新拉起来（用户已卸载插件，任务却还在跑）。
+   *  这里一次性清掉所有定时器 + 登录服务 + 落盘脏标记。幂等，可重复调用。 */
+  function dispose() {
+    if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
+    persistDirty = false;
+    for (const t of concurrencyRetryTimers.values()) { try { clearTimeout(t); } catch { /* 已触发 */ } }
+    concurrencyRetryTimers.clear();
+    for (const t of watchdogs.values()) { try { clearTimeout(t); } catch { /* 已触发 */ } }
+    watchdogs.clear();
+    try { stopCodebuddyLogin(); } catch { /* 登录服务没起/已停：尽力 */ }
+  }
+
   function snapshot() {
     const counts = {};
     for (const j of jobs.values()) counts[j.state] = (counts[j.state] ?? 0) + 1;
@@ -4712,7 +4744,8 @@ export function createDispatcher(options = {}) {
     subscribe,
     restore,
     listFileLocks, // ZB-08：文件锁表（UI「单写者」分区改为展示它）
-    lockBlockersFor, // ZB-08：某 spec 此刻被什么挡住（「为什么在排队」）
+    lockBlockersFor, // ZB-08：某 spec 此刻被什么挡住（「为什么在排队」）；ZB-118 支持第二个参数传 jobId（排除自己的锁）
+    dispose, // ZB-118：卸载清理（清所有定时器 + 登录服务）—— 插件卸载时必须调用
     // Z6：通道 / 续跑 / 降级链
     getChannel,
     setChannel,

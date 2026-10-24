@@ -1023,8 +1023,11 @@ export function createActionHandler(dispatcher, config = {}) {
  * @param {object|null} dispatcher createDispatcher() 实例；null 时方法返回可读错误/reject
  * @param {object} config 插件 config（需要 ledgerPath 供 quota/quotaPlan 使用）
  */
-export function createRemoteFace(dispatcher, config = {}) {
-  const handleAction = createActionHandler(dispatcher, config);
+export function createRemoteFace(dispatcher, config = {}, opts = {}) {
+  /* ZB-118（GLM-5.3-Flash 审查 MED，已核实）：**可复用外部 handler**（原先每次调用都新建一个）。
+   * 一次插件 apply 会建 3 个 createActionHandler 实例（工具 / attachHostWire / face），
+   * 三者靠模块级状态（如 `dismissedByFile`）保持一致 —— 任一实例状态不同步就会行为分叉。 */
+  const handleAction = opts.handleAction ?? createActionHandler(dispatcher, config);
   let channelsCache = null; // { at, value } —— listChannels 每次起 runner 子进程探测，缓存 5s
   const NOT_READY = 'dispatcher 未初始化：请在插件 config 配置 runnerPath 与 workRoot 后重载插件';
 
@@ -1493,9 +1496,11 @@ export const TYPERT = {
  *   - diagnostics：ZB-01 注册留痕 { available, strategy, ok, error, visibleAfter, matchedFace, fallbackTried }
  *   - dispose()：插件卸载时由 index.js 的 ctx.effect 调用
  */
-export function attachHostWire(ctx, dispatcher, config = {}) {
-  const handleAction = createActionHandler(dispatcher, config);
-  const face = createRemoteFace(dispatcher, config);
+export function attachHostWire(ctx, dispatcher, config = {}, opts = {}) {
+  /* ZB-118（GLM-5.3-Flash 审查 MED）：与 createRemoteFace 同款 —— 复用外部 handler，
+   * 避免一次 apply 出现 3 个实例（工具 / 本函数 / face）靠模块级变量保持一致。 */
+  const handleAction = opts.handleAction ?? createActionHandler(dispatcher, config);
+  const face = createRemoteFace(dispatcher, config, { handleAction }); // 把同一个 handler 传下去，face 不再自建
 
   /* ---- 最后一跳·宿主侧：face 注册为 cordis 服务 `dispatch` ----
    * ctx.provide 即官方注册口（cordis reflect.provide：登记进共享 props 表、

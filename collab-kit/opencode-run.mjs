@@ -93,6 +93,7 @@
  *    `unknownEvents`，进度照常。
  */
 import { spawn, spawnSync } from 'node:child_process';
+import { readDispatchSwitch, SWITCH_FILE } from './dispatch-switch.mjs'; // ZB-118：派发总开关门禁（与 zcode-run 同契约）
 import {
   closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, writeFileSync, writeSync,
 } from 'node:fs';
@@ -712,17 +713,8 @@ function resolveContextWindow(cli, model, env = process.env) {
   return Number.isFinite(hit?.contextWindow) ? hit.contextWindow : null;
 }
 
-/** 杀进程树（Windows 用 taskkill /T；其余平台杀进程组）。永不抛。 */
-function killTree(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return;
-  if (process.platform === 'win32') {
-    try {
-      spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 15_000 });
-    } catch { /* ignore */ }
-    return;
-  }
-  try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ }
-}
+/* ZB-118（GLM-5.3 审查 MED）：killTree 已抽到共享模块（三个执行器原先各写一份且行为不一致）。 */
+import { killTree } from './kill-tree.mjs';
 
 /* ---------------- 主流程 ---------------- */
 
@@ -1149,6 +1141,20 @@ async function main(argv) {
   if (opt.help) {
     process.stdout.write(HELP);
     return 0;
+  }
+  /* ZB-118（GLM-5.3 审查 MED，已核实）：**派发总开关门禁**（与 zcode-run 同契约）。
+   * 原先只有 zcode-run 实现了这道闸，opencode/qoder/codebuddy 三个执行器**直调即可绕过**
+   * 派发总开关（开关关闭时仍会起进程、耗额度）。退出码 3 = 因总开关关闭而拒绝
+   * （与参数错误 1、超时 124 区分）。只读探测（--list-models/--version）在此之前已 return，不过闸。 */
+  {
+    const sw = readDispatchSwitch();
+    if (!sw.enabled) {
+      process.stderr.write(`${PREFIX} ⛔ 派发总开关为「关闭」，拒绝派发（未启动任何进程、未消耗任何额度）。\n`);
+      process.stderr.write(`${PREFIX} 开关文件: ${SWITCH_FILE}\n`);
+      if (sw.note) process.stderr.write(`${PREFIX} 备注: ${sw.note}\n`);
+      process.stderr.write(`${PREFIX} 需要恢复派发时: node <本仓库>/collab-kit/dispatch-switch.mjs --project <宿主项目> on\n`);
+      return 3;
+    }
   }
   const cli = findOpencodeCli();
   if (!cli) {

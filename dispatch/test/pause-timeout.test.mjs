@@ -127,12 +127,17 @@ test('paused 触发：命中签名 → paused + pausedAt；未命中 → failed 
   }
 });
 
-test('timeoutMin 校验：>0 合法（无上限），非正数报错', () => {
+test('timeoutMin 校验：>0 合法（ZB-118 起有实际上的限），非正数/超限报错', () => {
   const d = createDispatcher({ runnerPath: FAKE_RUNNER, workRoot: newWorkRoot(), maxConcurrent: 1 });
   assert.throws(() => d.dispatch({ kind: 'prompt', prompt: 'x', timeoutMin: 0 }), TypeError);
   assert.throws(() => d.dispatch({ kind: 'prompt', prompt: 'x', timeoutMin: -3 }), TypeError);
-  const j = d.dispatch({ kind: 'prompt', prompt: 'x', timeoutMin: 99999 });
-  assert.ok(j && j.id, '大值合法（无上限；文档说明 runner 生效下限 1 分钟）');
+  /* ZB-118（GLM-5.3 审查 MED）：**有意改变旧语义** —— 原先"无上限"，但 Node 的 setTimeout
+   * 上限是 2^31-1 ms，超过会被**静默钳成 1ms** ⇒ 看门狗一启动就开火误杀。
+   * 现在显式挡掉（上限约 35791 分钟 ≈ 24.8 天）；1 天这类正常大值仍然合法。 */
+  assert.throws(() => d.dispatch({ kind: 'prompt', prompt: 'x', timeoutMin: 99999 }), TypeError,
+    '超过 Node 定时器上限必须报错（否则看门狗误杀）');
+  const j = d.dispatch({ kind: 'prompt', prompt: 'x', timeoutMin: 1440 }); // 1 天
+  assert.ok(j && j.id, '正常大值合法（1440 分钟 = 1 天；runner 生效下限 1 分钟）');
   return waitTerminal(d, j.id);
 });
 

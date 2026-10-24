@@ -76,6 +76,9 @@ import { fileURLToPath } from 'node:url';
 import { homedir, tmpdir, platform, userInfo } from 'node:os';
 import { createDecipheriv, createHash } from 'node:crypto';
 import { request as httpsRequest } from 'node:https';
+/* ZB-118（GLM-5.3-Flash 审查 MED）：接入**唯一权威**的行协议定义（原先这里是手抄字面量）。
+ * 目前只把 `done` 行的前缀接上（改动面最小、漂移风险最高的那一处）；其余行前缀值相同，暂保持字面量。 */
+import { prefixFor } from './run-line-protocol.mjs';
 
 /**
  * 项目根（`<root>/collab/` 所在的目录）——本工具**不再假定自己是某个项目的子目录**。
@@ -1240,7 +1243,12 @@ const ctxPct =
     : '';
 
 console.log(
-  `[zcode-run] done exit=${code}${timedOut ? ' (超时)' : ''} elapsed=${elapsed}s` +
+  /* ZB-118（GLM-5.3-Flash 审查 MED，已核实）：**done 行的前缀改从协议文件取**。
+   * `run-line-protocol.mjs` 是全仓唯一权威的"行语法"定义（另外 3 个执行器都 import 它），
+   * 而 zcode-run 原先把它**手抄**成字面量 `[zcode-run]` —— 协议一旦改前缀，这里就会静默漂移
+   * （ZB-31 就是"表变了但代码写死"）。其余行前缀仍是字面量（值相同、改动面太大），
+   * 但 core 解析 done 行靠的就是这一行，先把最关键的那处接上。 */
+  `${prefixFor('zcode')} done exit=${code}${timedOut ? ' (超时)' : ''} elapsed=${elapsed}s` +
     (r.signal ? ` signal=${r.signal}` : '') +
     (result?.sessionId ? ` session=${result.sessionId}` : '') +
     (actual.provider ? ` provider=${actual.provider}` : '') +
