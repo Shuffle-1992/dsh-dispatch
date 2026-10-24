@@ -1081,7 +1081,30 @@ export function createDispatcher(options = {}) {
     }
   }
 
+  /* ── ZB-114（两模型共同发现）：persist 热路径节流 ──
+   * `handleLine` 每收到一条 runner 输出行就落盘一次，而 persist 是「读全量 → 解析 → 淘汰 →
+   * 全量 pretty 序列化 → 原子写」。输出密集时这是纯浪费：**内存态 jobs 本来就是实时的**，
+   * 落盘只需要"最终别丢"。故只对这条热路径做 200ms 合并；终态/状态变更/用户操作仍立即落盘。 */
+  let persistTimer = null;
+  let persistDirty = false;
+  const PERSIST_THROTTLE_MS = 200;
+  function persistThrottled() {
+    persistDirty = true;
+    if (persistTimer) return; // 已有挂起的 flush：合并进同一批
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      if (!persistDirty) return;
+      persistDirty = false;
+      persist();
+    }, PERSIST_THROTTLE_MS);
+    /* 不阻止进程退出：退出时若有挂起的中间态，丢了也只是"进度没落盘"，终态早已立即落盘。 */
+    persistTimer.unref?.();
+  }
+
   function persist() {
+    /* 立即落盘时**取消挂起的节流批**：避免同一状态被写两次（也保证 immediate 的写入是最新的）。 */
+    if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
+    persistDirty = false;
     if (existsSync(jobsFile)) {
       try {
         const onDisk = JSON.parse(readFileSync(jobsFile, 'utf8'));
@@ -1967,7 +1990,13 @@ export function createDispatcher(options = {}) {
     if (parsed.runnerErr) job.errLog = parsed.runnerErr;
     if (parsed.runnerResult) job.resultFile = parsed.runnerResult;
     if (isTerminal(job)) return; // finalize 之后的迟到行只进 tailLines
-    persist();
+    /* ZB-114（GLM-5.3 + Flash **共同发现**）：这里是 persist 的**热路径** ——
+     * 每条 runner 输出行都会走到，而 persist 每次都要「读整个 jobs.json → JSON.parse →
+     * 全量淘汰 → JSON.stringify(pretty) → atomicWrite」。任务输出密集时（每秒几十行）
+     * 主线程同步 I/O 被放大成 O(行数 × 文件大小)，且会与其它进程的写入互相抖动。
+     * 改为**节流合并**（200ms 一次）：内存态 `jobs` 本来就是实时的（get/list 不读文件），
+     * 面板看到的进度不受影响；只有落盘频率降低。终态仍走 persist() 立即落盘（不丢终态）。 */
+    persistThrottled();
     emit('job-updated', job);
   }
 
