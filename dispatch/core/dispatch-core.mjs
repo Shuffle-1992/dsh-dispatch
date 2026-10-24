@@ -3610,15 +3610,15 @@ export function createDispatcher(options = {}) {
    *  再接上**探测式**的 OpenCode 免费模型通道。解析失败 → {channels:[], warnings}，绝不猜测。
    *  首条是 runner 文档化的 plan 别名；数组顺序恒为「先 zcode 全部，再 opencode 全部」。
    *  ZB-44：每个通道都带 `engine`（zcode 显式标出，绝不留 undefined）；顶层带 `engines`（供客户端分组）。 */
-  async function listChannels() {
-    if (channelsImpl) {
-      /* 注入式清单（测试/宿主替身）：原样返回，只补一个 engines（形状契约，不覆盖注入方自己的值）。 */
-      const injected = await channelsImpl();
-      return injected && typeof injected === 'object' && !Array.isArray(injected)
-        ? { engines: [...ENGINES], ...injected }
-        : injected;
-    }
-    const warnings = [];
+  /** ZB-116（GLM-5.3 审查 MED）：**ZCode 通道探测 + 构造**从 `listChannels` 抽出。
+   *  原先它内联在 listChannels 里约 130 行（探测 → 解析 → 构造 → 白名单 → 免费额度收窄），
+   *  让主函数膨胀到 317 行、远超 100 行红线，也让"哪段属于哪个引擎"看不清。
+   *  其它三个引擎早已是独立函数（detectOpenCodeChannels / detectQoderChannels / detectCodebuddyChannels），
+   *  这里只是补齐 ZCode 这一份，保持对称。
+   *  @param {string[]} warnings 收集器（与主函数共用，按序 append）
+   *  @returns {Promise<Array>} ZCode 通道（已白名单过滤 + 免费额度模型收窄）
+   */
+  async function detectZcodeChannels(warnings) {
     let text = null;
     if (channelsProbeImpl) {
       try {
@@ -3665,7 +3665,8 @@ export function createDispatcher(options = {}) {
     if (parsed.rows.length === 0) {
       /* 既有语义（有测试锁定）：zcode 骨架解析不出任何 provider 行 ⇒ 空清单 + 可读原因，不猜。
        * 此时**不**再去探测 OpenCode：清单的骨架来自 ZCode runner，骨架都没有就无从谈"当前可用通道"。 */
-      return { channels: [], engines: [...ENGINES], opencodeVersion: null, warnings: [...warnings, '无法解析通道清单，不猜测（检查 runner 与 ~/.zcode/v2/config.json）'] };
+      warnings.push('无法解析通道清单，不猜测（检查 runner 与 ~/.zcode/v2/config.json）');
+      return [];
     }
     const names = readConfigNames();
     const cache = readPlanCache(warnings);
@@ -3748,6 +3749,82 @@ export function createDispatcher(options = {}) {
       warnings.push(`[info] ZCode 通道按白名单只保留 ${ZCODE_CHANNEL_ALLOWLIST.join(' / ')}；已剔除 ${zcodeDropped.length} 条：${zcodeDropped.map((c) => c.id).join(', ')}`);
     }
 
+    /* ZB-51：**免费额度（Start Plan）实际可用的模型**必须在这里收窄 —— 这里是**单一权威**
+     * （面板与 agent 工具 `action=channels` 都读这份清单）。
+     *
+     * 为什么必须在 core 收窄，而不是只做在面板上：否则 `action=channels` 会告诉 agent
+     * "免费额度有 GLM-5.3 与 GLM-5.3-Flash"，agent 据此派发就可能选到**该额度并不提供**的模型
+     * （`plan` 与免费额度**提供同样的模型名**，但两者是**两套独立实现**：provider 不同、
+     * 端点不同、计费不同）。**原先是写死常量，结果 1024 程序员节活动一变就漏了 GLM-5.3**
+     * （活动给 GLM-5.3-Flash 3 亿 + GLM-5.3 2 亿，真机两者都跑通）。
+     * ZB-105：改**动态优先** —— 从余额接口的 entitlement 里拿真实模型清单；
+     * 读不到（客户端没运行 / 日志陈旧）时用**实测兜底**，绝不因为读不到就把清单清空。 */
+    const ZC_FREE_MODELS_FALLBACK = ['GLM-5.3', 'GLM-5.3-Flash'];
+    const ZC_FREE_MODELS = (() => {
+      try {
+        const q = readGiftQuota();
+        if (q && q.ok === true && Array.isArray(q.models) && q.models.length) return q.models;
+      } catch { /* 落兜底 */ }
+      return ZC_FREE_MODELS_FALLBACK;
+    })();
+    return zcodeChannelsFiltered.map((c) => {
+      if (!/^account:.*start-plan$/.test(String(c.id))) return c;
+      const allowed = (Array.isArray(c.models) ? c.models : []).filter((m) => ZC_FREE_MODELS.includes(m));
+      return allowed.length ? { ...c, models: allowed } : c; // 白名单写空时 fail-open（不清空）
+    });
+  }
+
+  /** ZB-116（GLM-5.3 审查 MED）：**引擎自动发现 + 诊断**从 `listChannels` 抽出。
+   *  原先内联 32 行（发现层调用 + WorkBuddy 登录产物诊断 + 逐引擎"未找到/未登录"留痕），
+   *  与"通道清单组装"是两件事：前者是**诊断信息**，后者才是清单本身。
+   *  失败绝不影响清单（它只是诊断），故整段包在 try 里、返回 null 即"不产出假条目"。
+   *  @param {string[]} warnings 收集器（按序 append）
+   *  @returns {Promise<object|null>} engineDetail（discoveryEnabled=false 时为 null）
+   */
+  async function collectEngineDetail(warnings) {
+    if (!discoveryEnabled) return null;
+    let engineDetail = null;
+    try {
+      const disc = await engineDiscovery();
+      engineDetail = summarizeEngineDiscovery(disc);
+      /* ZB-95：把 WorkBuddy 的**登录产物只读诊断**挂进 engineDetail —— 面板据此**常显登录态**
+       * （已登录 / 未登录 / 标记残留），不必等派发失败才发现。
+       * 放在 engineDetail 里而不是顶层字段：客户端已有若干处必须保留 engineDetail 的既有约束，
+       * 挂在这里等于"自动跟着走"，不用再逐个 setChannelsInfo 补一遍。
+       * 纯只读（只判存在性/大小），且**失败绝不影响通道清单**。 */
+      try { engineDetail.codebuddyAuth = scanCodebuddyAuthArtifacts(); } catch { /* 诊断失败不影响清单 */ }
+      for (const e of ENGINES) {
+        const d = disc?.[e];
+        if (!d) continue;
+        if (!d.found) {
+          /* 找不到引擎 ≠ 插件坏了：把原因与修法一起说出来（reason 里已含查过多少处 + 怎么修） */
+          warnings.push(`未检测到 ${e} 引擎：${d.reason}`);
+        } else if (d.loggedIn === false) {
+          /* 有 CLI 但未登录是**最容易被误判成"执行器坏了"**的状态 —— 显式提示登录方式。
+           * ZB-87：加 `[info]` 前缀 —— 这是**预期/可修状态**（点插件详情页的「登录」即可），
+           * 不是故障；不带前缀会被客户端渲染成红色「通道清单加载失败」，把用户吓一跳（真机反馈）。 */
+          warnings.push(`[info] ${e} 已找到但未登录（${d.loginEvidence ?? ''}）：${(d.warnings ?? [])[0] ?? '请先登录'}`);
+        }
+      }
+    } catch (e) {
+      /* 发现层出问题绝不影响通道清单本身（它只是诊断信息） */
+      warnings.push(`引擎自动发现失败（不影响通道清单）：${e?.message ?? e}`);
+    }
+    return engineDetail;
+  }
+
+  async function listChannels() {
+    if (channelsImpl) {
+      /* 注入式清单（测试/宿主替身）：原样返回，只补一个 engines（形状契约，不覆盖注入方自己的值）。 */
+      const injected = await channelsImpl();
+      return injected && typeof injected === 'object' && !Array.isArray(injected)
+        ? { engines: [...ENGINES], ...injected }
+        : injected;
+    }
+    const warnings = [];
+    /* ZB-116：ZCode 探测 + 构造已抽成独立函数（见 detectZcodeChannels），主函数只做组装。 */
+    const zcodeChannelsFinal = await detectZcodeChannels(warnings);
+
     /* ZB-44：OpenCode 通道 = **探测结果**（每次跑 --list-models，不写死枚举）。每个模型一个通道，
      * 通道 id 就用 `opencode/<model>` 原样 —— 面板/工具选它即选中该免费模型（通道即执行目标）。 */
     const oc = await detectOpenCodeChannels();
@@ -3813,29 +3890,8 @@ export function createDispatcher(options = {}) {
         : {}),
     }));
 
-    /* ZB-51：**免费额度（Start Plan）实际可用的模型**必须在这里收窄 —— 这里是**单一权威**
-     * （面板与 agent 工具 `action=channels` 都读这份清单）。
-     *
-     * 为什么必须在 core 收窄，而不是只做在面板上：否则 `action=channels` 会告诉 agent
-     * "免费额度有 GLM-5.3 与 GLM-5.3-Flash"，agent 据此派发就可能选到**该额度并不提供**的模型
-     * （`plan` 与免费额度**提供同样的模型名**，但两者是**两套独立实现**：provider 不同、
-     * 端点不同、计费不同）。**原先是写死常量，结果 1024 程序员节活动一变就漏了 GLM-5.3**
-     * （活动给 GLM-5.3-Flash 3 亿 + GLM-5.3 2 亿，真机两者都跑通）。
-     * ZB-105：改**动态优先** —— 从余额接口的 entitlement 里拿真实模型清单；
-     * 读不到（客户端没运行 / 日志陈旧）时用**实测兜底**，绝不因为读不到就把清单清空。 */
-    const ZC_FREE_MODELS_FALLBACK = ['GLM-5.3', 'GLM-5.3-Flash'];
-    const ZC_FREE_MODELS = (() => {
-      try {
-        const q = readGiftQuota();
-        if (q && q.ok === true && Array.isArray(q.models) && q.models.length) return q.models;
-      } catch { /* 落兜底 */ }
-      return ZC_FREE_MODELS_FALLBACK;
-    })();
-    const zcodeChannelsFinal = zcodeChannelsFiltered.map((c) => {
-      if (!/^account:.*start-plan$/.test(String(c.id))) return c;
-      const allowed = (Array.isArray(c.models) ? c.models : []).filter((m) => ZC_FREE_MODELS.includes(m));
-      return allowed.length ? { ...c, models: allowed } : c; // 白名单写空时 fail-open（不清空）
-    });
+    /* ZB-116：免费额度模型收窄已随 ZCode 段搬进 detectZcodeChannels（它只作用于 zcode 通道），
+     * 这里不再重复。 */
 
     const all = [...zcodeChannelsFinal, ...opencodeChannels, ...qoderChannels, ...codebuddyChannels]
       /* ZB-58（逐模型开关）：给每条通道打上 `userDisabled` 标记 —— **不删除**。
@@ -3884,35 +3940,8 @@ export function createDispatcher(options = {}) {
     /* ZB-51（T2）：把**自动发现**的结论一并返回 —— 面板/工具据此显示"引擎形态/版本/登录态"，
      * 并能在某个引擎不可用时给出**可操作**的原因（而不是让用户对着空通道猜）。
      * 替身场景（discoveryEnabled=false）⇒ 保持 `engineDetail: null`，不产出满屏"未探测"的假条目。 */
-    let engineDetail = null;
-    try {
-      if (discoveryEnabled) {
-        const disc = await engineDiscovery();
-        engineDetail = summarizeEngineDiscovery(disc);
-        /* ZB-95：把 WorkBuddy 的**登录产物只读诊断**挂进 engineDetail —— 面板据此**常显登录态**
-         * （已登录 / 未登录 / 标记残留），不必等派发失败才发现。
-         * 放在 engineDetail 里而不是顶层字段：客户端已有若干处必须保留 engineDetail 的既有约束，
-         * 挂在这里等于"自动跟着走"，不用再逐个 setChannelsInfo 补一遍。
-         * 纯只读（只判存在性/大小），且**失败绝不影响通道清单**。 */
-        try { engineDetail.codebuddyAuth = scanCodebuddyAuthArtifacts(); } catch { /* 诊断失败不影响清单 */ }
-        for (const e of ENGINES) {
-          const d = disc?.[e];
-          if (!d) continue;
-          if (!d.found) {
-            /* 找不到引擎 ≠ 插件坏了：把原因与修法一起说出来（reason 里已含查过多少处 + 怎么修） */
-            warnings.push(`未检测到 ${e} 引擎：${d.reason}`);
-          } else if (d.loggedIn === false) {
-            /* 有 CLI 但未登录是**最容易被误判成"执行器坏了"**的状态 —— 显式提示登录方式。
-             * ZB-87：加 `[info]` 前缀 —— 这是**预期/可修状态**（点插件详情页的「登录」即可），
-             * 不是故障；不带前缀会被客户端渲染成红色「通道清单加载失败」，把用户吓一跳（真机反馈）。 */
-            warnings.push(`[info] ${e} 已找到但未登录（${d.loginEvidence ?? ''}）：${(d.warnings ?? [])[0] ?? '请先登录'}`);
-          }
-        }
-      }
-    } catch (e) {
-      /* 发现层出问题绝不影响通道清单本身（它只是诊断信息） */
-      warnings.push(`引擎自动发现失败（不影响通道清单）：${e?.message ?? e}`);
-    }
+    /* ZB-116：引擎自动发现 + 诊断段已抽成独立函数（见 collectEngineDetail），主函数只做组装。 */
+    const engineDetail = await collectEngineDetail(warnings);
 
     return {
       channels: all,
