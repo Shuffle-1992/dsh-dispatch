@@ -35,3 +35,9 @@ refs/dsh-host-cli/
 
 # 第三方可用样例（只读参考，不入库）：profile 里已安装的 whale-pet 插件
 refs/plugin-whale-pet/
+
+# 备份/临时文件（本地改动时的 .bak-日期，不入库）
+*.bak
+*.bak-*
+*.orig
+*.rej
