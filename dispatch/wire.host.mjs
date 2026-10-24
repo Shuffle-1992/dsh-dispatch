@@ -800,14 +800,72 @@ export function createActionHandler(dispatcher, config = {}) {
            * 与 `impl.channels()`（面板路径）共用同一份诊断信息。**两条路径都要透传**，
            * 否则 Agent 用工具查通道时看不到"引擎形态/版本/登录态"，排障只能靠猜。
            * （面板路径已透传；这里此前漏了 —— 只有"重启后实际调用工具"才暴露出来。） */
-          return {
+          const full = {
             ok: true,
             ...attachGiftQuota(r.channels ?? [], config.ledgerPath),
-            warnings: r.warnings ?? [],
+            warnings: [...(r.warnings ?? [])],
             ...(r.engines ? { engines: r.engines } : {}),
             ...(r.engineDetail ? { engineDetail: r.engineDetail } : {}),
             ...(r.opencodeVersion != null ? { opencodeVersion: r.opencodeVersion } : {}),
           };
+          /* ── ZB-108（用户要求）：**只把「选项的通道和模型」暴露给 Agent** ──
+           * 用户原话：「并且，只将选项的通道和模型暴露给Agent，现在Agent老是喜欢自选通道和模型，
+           * 没有按面板设置的遵循。」—— 光靠工具描述里的纪律约束不住，**从数据上收窄**才彻底。
+           *
+           * 暴露范围 = 面板当前选中的通道（其引擎下的可用模型）+ 用户配置的**降级链目标**
+           * （降级链就是用户自己认可的备选，撞额度时按它换是"遵守设置"而不是自作主张）。
+           * 面板路径（impl.channels）**不受影响** —— 那里仍返回全量，用户要能切换。
+           * ⚠️ 该过滤只在 dispatcher 就绪时做；任何异常都退化为不过滤（宁可多给，不要查不到）。 */
+          try {
+            const sel = typeof dispatcher.getChannel === 'function' ? dispatcher.getChannel() : null;
+            const fb = typeof dispatcher.getFallbackChain === 'function' ? dispatcher.getFallbackChain() : null;
+            const selProvider = sel?.provider ? String(sel.provider) : null;
+            if (selProvider) {
+              const allowProviders = [selProvider, ...((fb && Array.isArray(fb.chain)) ? fb.chain : [])]
+                .map((x) => String(x)).filter(Boolean);
+              const matches = (c) => {
+                const id = String(c?.id ?? '');
+                return allowProviders.some((p) => id === p || id.startsWith(`${p}/`) || String(c?.engine ?? '') === p);
+              };
+              const before = full.channels ?? [];
+              const visible = before.filter(matches);
+              if (visible.length > 0 && visible.length < before.length) {
+                const selModelId = sel?.model ? String(sel.model) : null;
+                full.channels = visible.map((c) => ({
+                  ...c,
+                  /* 标出"面板当前选中的那个"——agent 默认就该用它，不必自己挑。 */
+                  ...((selModelId && (String(c.id) === selModelId || String(c.id) === `${selProvider}/${selModelId}`))
+                    ? { selected: true } : {}),
+                }));
+                /* 引擎诊断与额度汇总同步收窄，避免从旁路泄露"还能换哪些引擎"。 */
+                const keepEngines = new Set(visible.map((c) => String(c.engine ?? '')).filter(Boolean));
+                if (full.engineDetail && typeof full.engineDetail === 'object') {
+                  const kept = {};
+                  for (const [k, v] of Object.entries(full.engineDetail)) {
+                    if (k === 'codebuddyAuth') { if (keepEngines.has('codebuddy')) kept[k] = v; continue; }
+                    if (keepEngines.has(k)) kept[k] = v;
+                  }
+                  full.engineDetail = kept;
+                }
+                if (full.creditSummary && typeof full.creditSummary === 'object') {
+                  const kept = {};
+                  for (const [k, v] of Object.entries(full.creditSummary)) if (keepEngines.has(k)) kept[k] = v;
+                  full.creditSummary = kept;
+                }
+                full.warnings.push(
+                  `[info] 为遵守面板设置，通道清单**只列出当前选中的通道**（${selProvider}）及其降级链目标；`
+                  + '其它引擎/模型不在此列出。要换通道请在面板里改，或配置降级链 —— 不要凭印象指定未列出的 provider/model。',
+                );
+                full.selectionScope = {
+                  provider: selProvider,
+                  model: selModelId,
+                  fallbackChain: (fb && Array.isArray(fb.chain)) ? fb.chain : [],
+                  note: 'agent 可用的全部通道范围（面板设置 + 降级链）',
+                };
+              }
+            }
+          } catch { /* 收窄失败 ⇒ 退化为全量（宁可多给，不要查不到） */ }
+          return full;
         }
         case 'channel': {
           if (p.provider != null && p.provider !== '') {

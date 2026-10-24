@@ -66,4 +66,17 @@ assert.match(SRC.zh, /"chanFreeQuotaExhausted": "免费额度已用尽"/, '免�
 assert.match(SRC.client, /chanFreeQuotaExhausted/, '★ 客户端按通道类型选文案');
 assert.match(SRC.client, /\^account:\[a-z\]\+-start-plan\$\/\.test/, '判据 = start-plan 通道形态');
 
+/* ── E. 并发满 ⇒ **自动排队等待**（用户要求：「并发满，应该排队，等待」）── */
+assert.match(SRC.core, /CONCURRENCY_RETRY_DELAY_MS = \d[\d_]*/, '★ 有自动重试间隔常量');
+assert.match(SRC.core, /CONCURRENCY_MAX_RETRIES = \d+/, '★ 有自动重试次数上限（不能无限重试）');
+assert.match(SRC.core, /concurrencyRetryTimers/, '有 timer 表（便于跟踪/清理）');
+const fin = SRC.core.match(/function finalizeJob\(job,[\s\S]*?\n  \}/);
+assert.ok(fin, '能取出 finalizeJob');
+assert.match(fin[0], /pause\.reason === 'concurrency-limited'/, '★ finalizeJob 对并发暂停做特殊处理');
+assert.match(fin[0], /已自动排队：第 \$\{tries\}\/\$\{CONCURRENCY_MAX_RETRIES\} 次/, '★ detail 里说明"已自动排队 + 第几次"');
+/* timer 回调必须自检状态：被 kill / 手动 retry 后不能再把 job 拉起来 */
+assert.match(fin[0], /cur\.state !== 'paused' \|\| cur\.pauseReason !== 'concurrency-limited'\) return/,
+  '★ 重试前自检状态（kill/手动 retry 后作废，避免重复拉起）');
+assert.match(fin[0], /已自动重试 \$\{CONCURRENCY_MAX_RETRIES\} 次仍无并发槽位/, '★ 超上限才真停下并说明原因');
+
 console.log('===== ZB-107 并发已满 ≠ 额度耗尽：全部通过 =====');

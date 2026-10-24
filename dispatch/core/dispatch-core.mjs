@@ -1935,6 +1935,30 @@ export function createDispatcher(options = {}) {
     if (pause) {
       job.pauseReason = pause.reason;
       job.pauseDetail = pause.detail;
+      /* ZB-109（用户要求「并发满，应该排队，等待」）：并发限制是**暂时**的 ——
+       * 后台按固定间隔自动重试，job 会自己恢复，用户不必手动 retry。
+       * 状态保持 `paused`（面板仍显示"并发已满"），但 detail 里说明会自动排队；
+       * 超过上限才真正停下（说明不是偶发并发，值得人看）。 */
+      if (state === 'paused' && pause.reason === 'concurrency-limited') {
+        const tries = (job.concurrencyRetries ?? 0) + 1;
+        job.concurrencyRetries = tries;
+        if (tries <= CONCURRENCY_MAX_RETRIES) {
+          job.pauseDetail = `${pause.detail ? `${pause.detail}；` : ''}已自动排队：第 ${tries}/${CONCURRENCY_MAX_RETRIES} 次，约 ${Math.round(CONCURRENCY_RETRY_DELAY_MS / 1000)} 秒后自动重试`;
+          const prevTimer = concurrencyRetryTimers.get(job.id);
+          if (prevTimer) clearTimeout(prevTimer);
+          const timer = setTimeout(() => {
+            concurrencyRetryTimers.delete(job.id);
+            /* 仅在仍是"并发暂停"时才重试 —— 期间若被 kill/dismiss/手动 retry，状态已变，不能重复拉起。 */
+            const cur = jobs.get(job.id);
+            if (!cur || cur.state !== 'paused' || cur.pauseReason !== 'concurrency-limited') return;
+            try { retry(job.id); } catch { /* 尽力：失败就停在 paused，用户可手动重试 */ }
+          }, CONCURRENCY_RETRY_DELAY_MS);
+          timer.unref?.();
+          concurrencyRetryTimers.set(job.id, timer);
+        } else {
+          job.pauseDetail = `${pause.detail ? `${pause.detail}；` : ''}已自动重试 ${CONCURRENCY_MAX_RETRIES} 次仍无并发槽位，已停止自动重试（可稍后手动 retry）`;
+        }
+      }
     }
     job.finishedAt = new Date(nowMs()).toISOString();
     if (state === 'paused') job.pausedAt = job.finishedAt; // ZB-28：进入 paused 的时刻（= finishedAt，显式字段便于检索/展示）
@@ -3121,6 +3145,15 @@ export function createDispatcher(options = {}) {
    */
   let cbLoginSession = null; // { child, port, password, token, startedAt }
   const CB_LOGIN_TTL_MS = 15 * 60_000;
+
+  /* ── ZB-109（用户要求：「并发满，应该排队，等待」）──
+   * 并发限制是**暂时**的（等前一个任务结束就有槽位），不该像额度耗尽那样停下来要人处理。
+   * 做法：命中 `concurrency-limited` 暂停时，后台按固定间隔**自动重试**（状态仍显示暂停，但会自己恢复）；
+   * 超过上限才真正停下（那时说明不是偶发并发，值得人看）。
+   * 为什么不用"改回 queued + 等 pump"：pump 会立刻重新拉起 ⇒ 马上又撞并发，等于空转烧额度。 */
+  const CONCURRENCY_RETRY_DELAY_MS = 25_000;
+  const CONCURRENCY_MAX_RETRIES = 8; // 8 × 25s ≈ 3.3 分钟，足够一个并发任务跑完
+  const concurrencyRetryTimers = new Map(); // jobId -> timer（kill/dismiss/新 attempt 时清理）
 
   /** 取一个空闲端口（listen(0) 让系统分配，立刻关闭）；失败回退随机高端口。 */
   function pickFreePort() {
