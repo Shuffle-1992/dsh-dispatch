@@ -114,6 +114,7 @@ const LOCK_STALE_MS = 2 * 60 * 60 * 1000; // 锁过期阈值：2h（任务包规
 const LOCK_ACQUIRE_RETRIES = 5;
 const TAIL_CAP = 200; // 内存 tailLines 上限
 const JOBS_FILE_CAP = 1000; // jobs.json 持久化条数上限（防无限增长）
+const PARSE_WARNINGS_CAP = 50; // ZB-115：parseWarnings 上限（原先无上限，随 jobs.json 无界膨胀）
 const RENAME_RETRIES = 4;
 
 /* ---------------- 执行器汇总行解析（格式权威 = collab-kit/run-line-protocol.mjs） ----------------
@@ -476,7 +477,11 @@ function parseLineForEngine(text, engine) {
      * zcode = 确认已写入临时 provider 配置（reasoning-level=<档> target=<provider>/<model>）；
      * opencode = 确认实际生效的模型变体（variant=<档> model=<modelId>，无 provider 注入）。
      * 两者落到**同一组** job 字段（reasoningLevelApplied / reasoningTarget）。 */
-    return APPLIED_MAPPER[e](m);
+    /* ZB-115（审查 MED）：两张并行表（APPLIED_RE_OF / APPLIED_MAPPER）只靠约定同步 ——
+     * 漏一张就会在**热路径**（每行都过这里）抛 `APPLIED_MAPPER[e] is not a function`。
+     * 与 235 行给 APPLIED_RE_OF 加兜底同款：取不到 mapper 就当"无额外字段"返回空对象。 */
+    const mapper = APPLIED_MAPPER[e];
+    return mapper ? mapper(m) : {};
   }
   /* ZB-75：观测到的思考状态（Qoder 专用）—— 落到 job.thinkingObserved / thinkingBlocks，
    * 供 `finalizeJob` 核对"请求要思考、实际却没思考"（= 档位被静默降级）。 */
@@ -1135,6 +1140,14 @@ export function createDispatcher(options = {}) {
         evicted.add(j.id);
       }
       all = [...jobs.values()].sort((a, b) => String(a.queuedAt).localeCompare(String(b.queuedAt)));
+    }
+    /* ZB-115（审查 MED）：`parseWarnings` 原先**无上限** —— `tailLines` 有 TAIL_CAP=200，
+     * 它没有。行格式漂移（或 runner 反复吐同一条噪音）时数组会无界增长，并随 jobs.json 一起膨胀。
+     * 落盘前统一截断（保留最近的 N 条）；放在这里是因为 persist 是唯一的统一出口。 */
+    for (const j of jobs.values()) {
+      if (Array.isArray(j.parseWarnings) && j.parseWarnings.length > PARSE_WARNINGS_CAP) {
+        j.parseWarnings = j.parseWarnings.slice(-PARSE_WARNINGS_CAP);
+      }
     }
     atomicWrite(jobsFile, `${JSON.stringify({ version: 1, savedAt: new Date(nowMs()).toISOString(), jobs: all }, null, 2)}\n`);
   }
@@ -3220,6 +3233,11 @@ export function createDispatcher(options = {}) {
    * 登录服务是**内存态**（不落 jobs.json、不占并发/锁），15 分钟无操作自动关闭。
    */
   let cbLoginSession = null; // { child, port, password, token, startedAt }
+  /* ZB-115（审查 MED）：**进行中的启动 Promise**（并发去重）——
+   * 旧实现里两个并发 startCodebuddyLogin 会双双通过开头的 `stopCodebuddyLogin()`（此时仍 null），
+   * 然后各自 await pickFreePort + spawn，后到者覆盖 cbLoginSession ⇒ 先到者的登录服务进程
+   * **泄漏**（没有任何人 stop 它，直到 TTL 惰性回收也回收不到它）。 */
+  let cbLoginInFlight = null;
   const CB_LOGIN_TTL_MS = 15 * 60_000;
 
   /* ── ZB-109（用户要求：「并发满，应该排队，等待」）──
@@ -3345,6 +3363,11 @@ export function createDispatcher(options = {}) {
   function stopCodebuddyLogin() {
     const s = cbLoginSession;
     cbLoginSession = null;
+    /* ZB-115：清掉进行中的启动 Promise —— 否则 stop 之后的下一次 start 会**复用**那个
+     * 仍在跑（且会把自己 spawn 的进程写回 cbLoginSession）的旧 Promise。
+     * ⚠️ 已知限制：若 stop 与启动**真正并发**（A 启动中、用户立刻点停止），A 完成后仍可能
+     * 写回 session；该边缘场景由 15 分钟 TTL 兜底回收，不做 token 级取消（复杂度不值得）。 */
+    cbLoginInFlight = null;
     if (!s) return { ok: true, stopped: false, logoutMarkerResidue: false };
     let graceful = false;
     try { graceful = s.child?.kill?.() ?? false; } catch { graceful = false; }
@@ -3373,6 +3396,11 @@ export function createDispatcher(options = {}) {
    *                    account?:object|null, hint?:string, error?:string}>}
    */
   async function startCodebuddyLogin() {
+    /* ZB-115（审查 MED）：**并发去重** —— 进行中就直接复用同一个 Promise。
+     * 旧实现的两个并发调用会双双通过下面的 stop（此时 cbLoginSession 仍是 null），
+     * 各自 await 端口 + spawn，后到者覆盖 cbLoginSession ⇒ 先到者的登录服务进程泄漏。 */
+    if (cbLoginInFlight) return cbLoginInFlight;
+    cbLoginInFlight = (async () => {
     if (!codebuddyRunnerPath) return { ok: false, error: 'WorkBuddy 执行器未配置（codebuddyRunnerPath 为空）' };
     if (!existsSync(codebuddyRunnerPath)) return { ok: false, error: `WorkBuddy 执行器不存在：${codebuddyRunnerPath}` };
     stopCodebuddyLogin(); // 幂等：重开前先清掉旧的
@@ -3435,6 +3463,12 @@ export function createDispatcher(options = {}) {
         ? '请在浏览器打开 authUrl 完成登录，完成后点「检查登录状态」；账号态显示已登录时也建议完成一次授权（真机实测 CLI 与桌面账号态可能不一致）'
         : '未取到登录链接（account/login 未返回 authUrl）：可直接打开 webui 在网页里登录',
     };
+    })();
+    try {
+      return await cbLoginInFlight;
+    } finally {
+      cbLoginInFlight = null;
+    }
   }
 
   /** 查询登录状态（GET /api/v1/auth/account/status）。登录服务未启动/超时 ⇒ 可读错误。 */
