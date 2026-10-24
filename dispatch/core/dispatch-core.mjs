@@ -301,7 +301,18 @@ const PAUSE_SIGNATURES = [
    * ③ **不进** AUTO_FALLBACK_REASONS：换通道治不了登录（新通道照样要登录）；
    * 也**不进**顺序派发延续面：同引擎换个模型一样失败。 */
   { reason: 'not-logged-in', patterns: [/Authentication required/i, /Please use \/login/i, /not logged in/i] },
-  { reason: 'quota-exhausted', patterns: [/quota_exceeded/i, /coding_plan_required/i, /rate_limited/i, /insufficient/i, /\b429\b/, /balance/i] },
+  /* ZB-107（真机 2026-10-24，用户纠正）：**并发已满 ≠ 额度耗尽**。
+   * 免费额度通道的账号并发上限实测 = 3（严谨复测：并发 3 全过、并发 4 挂 1），
+   * 超了上游报 `providerCode=3008 "user concurrency limit exceeded"`。
+   * 必须排在 quota-exhausted **之前**匹配（后者的 `insufficient`/`balance` 等模式不会命中它，
+   * 但如果 gift 层把文案写成 quota 就会被抢走 —— 故顺序在这里明确固定）。
+   * 处置语义：**等前一个任务结束再试**即可，不是额度没了；顺序派发（串行）天然能绕开它。 */
+  { reason: 'concurrency-limited', patterns: [/concurrency limit/i, /too many concurrent/i, /concurrency-limited/i] },
+  /* ZB-107：补两个**真机漏网**的模式（实测 classifyPause 对真机文本返回 unknown）：
+   *  · `exceed quota limit`（空格形式）—— 免费额度 `1005` 错误的原文，旧模式只有下划线 `quota_exceeded`；
+   *  · `quota-exhausted`（连字符字面量）—— gift 层自己打的 `pause-signature quota-exhausted` 也认不出，
+   *    等于"上游判了额度、core 却归 unknown"，用户看到的是"失败/未知原因"而不是可读的额度暂停。 */
+  { reason: 'quota-exhausted', patterns: [/quota_exceeded/i, /exceed quota limit/i, /quota-exhausted/i, /coding_plan_required/i, /rate_limited/i, /insufficient/i, /\b429\b/, /balance/i] },
 ];
 /** 自动降级链只接这几种「换通道可能有意义」的暂停；config-error 属参数错误，unknown 不自动动。
  *  ZB-71：`provider-blocked`（按 IP 封锁免费模型）必须在这里 —— 换通道是唯一有效的动作。 */

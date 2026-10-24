@@ -652,7 +652,8 @@ window.__ModuleLoader__.load({
         chanLoading: '通道清单加载中…（宿主刚启动或首次探测中；失败会自动重试，无需刷新）',
         chanLoadRetry: '会自动重试', chanInfoPrefix: '通道清单说明：', chanInfoTitle: '通道清单说明（悬停查看）',  zcRoutePlan: 'BigModel(Plan)', zcRouteFree: 'Start Plan(免费)', zcFreeSuffix: '免费',
         autoApproved: '已放行权限', autoApprovedHint: '该任务派发时显式开启了 OpenCode 的 --auto：放行了所有未显式拒绝的权限（默认不开启，仅调用方显式指定时生效）',
-        giftQuota: '免费额度剩余', giftQuotaTotal: '合计', giftQuotaUnavailable: '免费额度余量不可用', chanQuotaExhausted: '5 小时窗口已满',
+        giftQuota: '免费额度剩余', giftQuotaTotal: '合计', giftQuotaUnavailable: '免费额度余量不可用',
+        chanQuotaExhausted: '5 小时窗口已满', chanFreeQuotaExhausted: '免费额度已用尽',
         jobCurrent: '当前：', jobLastBeat: '最近心跳', jobStalled: '可能卡住',
         jobStalledHint: '超过 150 秒没有收到 runner 的心跳/输出：可能卡在上游请求、MCP 连接或等锁。可用「终止」后重派，或 action=tail 看最后输出。',
         chanOfflineHint: '未连接宿主：通道/模型来自宿主远端面，连接后这两个下拉才可选',
@@ -702,7 +703,7 @@ window.__ModuleLoader__.load({
          * `modelAvailCount` 含 `{n}` / `{total}` 占位符，由 `tFmt()` 填充（t() 本身只做静态查表）。
          * ⚠️ 与 locale/zh.json、locale/en.json **逐键逐值一致**（single-source ⑤ 守门）。 */
         modelSwitchCol: '可用', modelDisabledTag: '已关闭', modelAvailCount: '可用 {n}/{total}',
-        paused: '已暂停', pQuota: '额度耗尽', pEntitled: '未开通', pSigning: '需签名', pConfig: '配置错误', pBlocked: '免费模型被封锁', pPerm: '工具权限未放行', pNotLoggedIn: 'CLI 未登录', pUnknown: '未知原因',
+        paused: '已暂停', pQuota: '额度耗尽', pConcurrency: '并发已满', pEntitled: '未开通', pSigning: '需签名', pConfig: '配置错误', pBlocked: '免费模型被封锁', pPerm: '工具权限未放行', pNotLoggedIn: 'CLI 未登录', pUnknown: '未知原因',
         lockWait: '排队等待', timedOut: '超时终止',
         timedOutRunner: 'runner 超时（exit 124，--timeout-min 到点）', timedOutWatchdog: '看门狗强制终止（timeoutMin+120s 宽限后未退出）',
         resumeSame: '同通道续跑', retryHandoff: '换通道重跑', noSession: '无会话，不能同通道续跑',
@@ -813,7 +814,8 @@ window.__ModuleLoader__.load({
         chanLoading: 'Loading channel list… (host just started or first probe in flight; failures retry automatically, no refresh needed)',
         chanLoadRetry: 'will retry automatically', chanInfoPrefix: 'Channel notes: ', chanInfoTitle: 'Channel list notes (hover to view)',  zcRoutePlan: 'BigModel (Plan)', zcRouteFree: 'Start Plan (free)', zcFreeSuffix: 'free',
         autoApproved: 'auto-approved', autoApprovedHint: 'This job explicitly enabled OpenCode --auto: all permissions not explicitly denied were allowed (off by default; only takes effect when the caller sets it explicitly)',
-        giftQuota: 'Free quota left', giftQuotaTotal: 'total', giftQuotaUnavailable: 'Free-quota balance unavailable', chanQuotaExhausted: '5h window full',
+        giftQuota: 'Free quota left', giftQuotaTotal: 'total', giftQuotaUnavailable: 'Free-quota balance unavailable',
+        chanQuotaExhausted: '5h window full', chanFreeQuotaExhausted: 'free quota exhausted',
         jobCurrent: 'Now: ', jobLastBeat: 'last heartbeat', jobStalled: 'possibly stuck',
         jobStalledHint: 'No runner heartbeat/output for over 150s: it may be stuck on an upstream request, MCP connect or a lock. Kill and re-dispatch, or use action=tail for the last output.',
         chanOfflineHint: 'Host not connected: channel/model come from the host Remote face and unlock once connected',
@@ -862,7 +864,7 @@ window.__ModuleLoader__.load({
         seqLoading: 'Loading channels and models…', seqSaving: 'Saving…', seqSortCol: 'Order',
         /* ZB-58: per-model enable switch column + "off" tag + available counter in the block header. */
         modelSwitchCol: 'Available', modelDisabledTag: 'Off', modelAvailCount: '{n}/{total} available',
-        paused: 'Paused', pQuota: 'Quota exhausted', pEntitled: 'Not entitled', pSigning: 'Signing required', pConfig: 'Config error', pBlocked: 'Free models blocked', pPerm: 'Tool permission not granted', pNotLoggedIn: 'CLI not signed in', pUnknown: 'Unknown',
+        paused: 'Paused', pQuota: 'Quota exhausted', pConcurrency: 'Concurrency limit reached', pEntitled: 'Not entitled', pSigning: 'Signing required', pConfig: 'Config error', pBlocked: 'Free models blocked', pPerm: 'Tool permission not granted', pNotLoggedIn: 'CLI not signed in', pUnknown: 'Unknown',
         lockWait: 'Queue wait', timedOut: 'Timed out',
         timedOutRunner: 'runner timeout (exit 124, --timeout-min elapsed)', timedOutWatchdog: 'watchdog kill (still running after timeoutMin+120s grace)',
         resumeSame: 'Resume (same channel)', retryHandoff: 'Rerun on new channel', noSession: 'No session to resume',
@@ -2477,7 +2479,7 @@ window.__ModuleLoader__.load({
      * 另含 config-error（不降级、但同样要显示）；cross-check.test.mjs 守门。 */
     /* ZB-71：新增 `provider-blocked`（OpenCode 免费模型按 IP 封锁）—— 客户端必须同步，
      * 否则卡片上只会显示"未知原因"（cross-check.test.mjs 会因此变红，正是它该做的）。 */
-    const PAUSE_LABEL_KEY = { 'quota-exhausted': 'pQuota', 'plan-not-entitled': 'pEntitled', 'provider-signing': 'pSigning', 'config-error': 'pConfig', 'provider-blocked': 'pBlocked', 'permission-blocked': 'pPerm', 'not-logged-in': 'pNotLoggedIn' };
+    const PAUSE_LABEL_KEY = { 'quota-exhausted': 'pQuota', 'concurrency-limited': 'pConcurrency', 'plan-not-entitled': 'pEntitled', 'provider-signing': 'pSigning', 'config-error': 'pConfig', 'provider-blocked': 'pBlocked', 'permission-blocked': 'pPerm', 'not-logged-in': 'pNotLoggedIn' };
     const pauseLabel = (r) => t(PAUSE_LABEL_KEY[r] ?? 'pUnknown');
     /* ZB-29e（用户要求）：思考强度档位**中文显示** —— 值与传输一律用原始字符串（disabled/enabled/
      * low/high/max），只在显示层映射中文标签；未知档位（上游新增）原样显示，绝不隐藏、不猜语义。
@@ -3566,7 +3568,13 @@ window.__ModuleLoader__.load({
       const channelOptionNode = (c) => {
         const reasons = (c._reasons ?? []).slice();
         if (!c.enabled) reasons.push(`${t('chanDisabled')}：${c.reason ?? '-'}`);
-        if (c.recentQuotaExhausted) reasons.push(t('chanQuotaExhausted'));
+        if (c.recentQuotaExhausted) {
+          /* ZB-107（用户纠正）：「5 小时窗口已满」**只对付费套餐成立**。
+           * 免费额度（Start Plan）是**活动总量额度**（如 5 亿 tokens，到期即结束），
+           * **没有 5 小时滚动窗口** —— 对它说"5 小时窗口已满"会让人以为等 5 小时就能恢复。 */
+          const isFree = /^account:[a-z]+-start-plan$/.test(String(c.id ?? ''));
+          reasons.push(t(isFree ? 'chanFreeQuotaExhausted' : 'chanQuotaExhausted'));
+        }
         return h('option', { key: c.id, value: c.id, ...(c.enabled ? {} : { disabled: true }) },
           `${c.name ?? c.id}${reasons.length ? `（${reasons.join('；')}）` : ''}`);
       };

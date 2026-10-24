@@ -156,14 +156,26 @@ export async function runGiftJob(input) {
    * `GLM-5.3` 在免费额度通道被判 `1005 exceed quota limit`，必须让调用方一眼看懂怎么改。 */
   const pe = result.providerError;
   if (result.exitCode !== 0 && pe && (pe.code !== null || pe.message)) {
+    const pmsg = String(pe.message ?? '');
     console.error(
       `[gift] 上游业务错误 providerCode=${pe.code ?? '-'} providerId=${pe.providerId ?? '-'} ` +
-        `modelId=${pe.modelId ?? '-'} retryable=${pe.retryable ?? '-'} message="${String(pe.message).slice(0, 160)}"` +
-        (/exceed quota limit/i.test(String(pe.message))
+        `modelId=${pe.modelId ?? '-'} retryable=${pe.retryable ?? '-'} message="${pmsg.slice(0, 160)}"` +
+        (/exceed quota limit/i.test(pmsg)
           ? ` ｜ 提示：免费额度权益通常只授予**特定模型**（以 action=quota 的 giftQuota.model 为准）——用未授予的模型会被判 1005；不改 model 直接重试一定还会失败`
           : ''),
     );
-    console.error(`[gift] pause-signature quota-exhausted（上游额度/权益判定）：${String(pe.message).slice(0, 200)}`);
+    /* ZB-107（真机 2026-10-24）：**并发限制 ≠ 额度耗尽**。
+     * 免费额度通道的账号并发上限实测 = 3；超了上游报
+     * `providerCode=3008 message="user concurrency limit exceeded"`。
+     * 原先一律判 `quota-exhausted` ⇒ 面板显示"额度/权益问题"，用户会以为额度没了而白等/白换通道，
+     * 实际**等前一个任务结束就能跑**。故独立成 `concurrency-limited`。
+     * （免费额度是**活动总量额度**、到期即止，**没有 5 小时滚动窗口** —— 那是付费套餐的概念。） */
+    const isConcurrency = /concurrency limit|too many concurrent|concurrent(?:ly)? limited/i.test(pmsg);
+    if (isConcurrency) {
+      console.error(`[gift] pause-signature concurrency-limited（账号并发已满，等前一个任务结束再试）：${pmsg.slice(0, 200)}`);
+    } else {
+      console.error(`[gift] pause-signature quota-exhausted（上游额度/权益判定）：${pmsg.slice(0, 200)}`);
+    }
   } else if (result.exitCode !== 0 && failureText.trim() !== '') {
     for (const hint of PAUSE_HINTS) {
       if (hint.re.test(failureText)) {
