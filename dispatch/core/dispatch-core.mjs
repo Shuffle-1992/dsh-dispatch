@@ -2054,7 +2054,14 @@ export function createDispatcher(options = {}) {
     job.elapsedSec = Number(((Date.parse(job.finishedAt) - Date.parse(job.startedAt ?? job.finishedAt)) / 1000).toFixed(3));
     job.tailLines = tails.get(job.id) ?? [];
 
-    if (normalizeEngine(job.spec?.engine) !== 'opencode') mergeFromLedger(job);
+    /* ZB-116（GLM-5.3 审查 MED，已核实）：**台账回读按引擎白名单**。
+     * `dispatch-runs.jsonl` 是 **ZCode 侧**产物 —— 三个执行器自己都写明了：
+     *   opencode-run.mjs:79「不写 dispatch-runs.jsonl 台账 —— 那是 ZCode 侧的」
+     *   qoder-run.mjs:153 / codebuddy-run.mjs:181「本就不写 dispatch-runs.jsonl 台账」
+     * 但旧判据只跳过 opencode，qoder/codebuddy 仍照常回读 ZCode 台账 ⇒ 当它们的 tag
+     * 撞上历史 ZCode 记录时，会把**别人的** provider/sessionId/usage 填进自己的 job
+     * （数据污染，且几乎无法察觉）。改为：只有 zcode 才回读。 */
+    if (normalizeEngine(job.spec?.engine) === 'zcode') mergeFromLedger(job);
     if (!job.summarySeen && !job.ledgerMatched) {
       job.parseWarnings.push(`no ${prefixFor(job.spec?.engine)} summary parsed and no ledger record matched`);
     }
@@ -3104,11 +3111,14 @@ export function createDispatcher(options = {}) {
   }
 
   /** Qoder 只读探测（spawn 一次，带超时；永不抛）。 */
-  async function runQoderProbe(args, timeoutMs = 30000) {
+  /** ZB-116（GLM-5.3 审查 MED，已核实）：Qoder / CodeBuddy 的探测原本是**逐字重复**的两份实现
+   *  （只有 runnerPath 不同）。抽成一份参数化实现 —— 否则一份修了超时处理、另一份没修，
+   *  就是 ZB-31 式漂移（那次就是"表变了但代码写死"）。 */
+  async function runEngineProbe(runnerPath, args, timeoutMs = 30000) {
     return new Promise((done) => {
       let child;
       try {
-        child = spawnImpl(process.execPath, [qoderRunnerPath, ...args], { cwd: runnerCwd, env: { ...process.env } });
+        child = spawnImpl(process.execPath, [runnerPath, ...args], { cwd: runnerCwd, env: { ...process.env } });
       } catch (e) {
         done({ ok: false, error: e?.message ?? String(e) });
         return;
@@ -3125,6 +3135,11 @@ export function createDispatcher(options = {}) {
       child.on('error', (e) => { clearTimeout(timer); done({ ok: false, error: e?.message ?? String(e) }); });
       child.on('close', (code) => { clearTimeout(timer); done({ ok: code === 0, code, stdout, stderr }); });
     });
+  }
+
+  /** Qoder 只读探测（spawn 一次，带超时；永不抛）。签名保持 (args, timeoutMs) 供既有源码锁断言。 */
+  async function runQoderProbe(args, timeoutMs = 30000) {
+    return runEngineProbe(qoderRunnerPath, args, timeoutMs);
   }
 
   /**
@@ -3194,25 +3209,9 @@ export function createDispatcher(options = {}) {
     };
   }
 
-  /** CodeBuddy 只读探测（spawn 一次，带超时；永不抛）。 */
+  /** CodeBuddy 只读探测（spawn 一次，带超时；永不抛）。签名保持 (args, timeoutMs) 供既有源码锁断言。 */
   async function runCodebuddyProbe(args, timeoutMs = 30000) {
-    return new Promise((done) => {
-      let child;
-      try {
-        child = spawnImpl(process.execPath, [codebuddyRunnerPath, ...args], { cwd: runnerCwd, env: { ...process.env } });
-      } catch (e) {
-        done({ ok: false, error: e?.message ?? String(e) });
-        return;
-      }
-      let stdout = ''; let stderr = '';
-      const timer = setTimeout(() => { try { child.kill(); } catch { /* 尽力 */ } done({ ok: false, error: 'timeout' }); }, timeoutMs);
-      child.stdout?.setEncoding?.('utf8');
-      child.stderr?.setEncoding?.('utf8');
-      child.stdout?.on('data', (c) => { stdout += c; });
-      child.stderr?.on('data', (c) => { stderr += c; });
-      child.on('error', (e) => { clearTimeout(timer); done({ ok: false, error: e?.message ?? String(e) }); });
-      child.on('close', (code) => { clearTimeout(timer); done({ ok: code === 0, code, stdout, stderr }); });
-    });
+    return runEngineProbe(codebuddyRunnerPath, args, timeoutMs);
   }
 
   /* ── ZB-87：WorkBuddy / CodeBuddy **登录助手**（不依赖 TUI 的登录通道）──
@@ -4098,6 +4097,13 @@ export function createDispatcher(options = {}) {
   }
 
   function validateSpec(spec) {
+    /* ZB-116（GLM-5.3 审查 MED，已核实）：**每次校验前清空一次性信箱**。
+     * 原先 `pendingCwdNotes.push(r.note)` 发生在校验中段（处理 cwd 时），而之后还有
+     * reasoningLevel / timeoutMin / write 等校验可能抛错 —— 一旦抛错，残留的 note 会被
+     * **下一次派发**（另一个 job）领走，于是"cwd 被改写"的说明串到别人的 job 上
+     * （与上方 692 行注释自称的"抛错时内容自然作废"正好相反）。
+     * 清空放在入口：无论上次校验成功与否，本次校验开始时信箱必为空。 */
+    pendingCwdNotes.length = 0;
     if (!spec || !KINDS.has(spec.kind)) throw new TypeError(`dispatch(spec): spec.kind 必须是 ${[...KINDS].join('|')}`);
     /* ZB-44：显式 engine 必须是合法值（列出合法值）—— 拼错的引擎名必须报错，绝不静默回落成 zcode。
      * null/undefined/空串视为「未指定」（面板/工具的可选参数经常传空串）。 */
