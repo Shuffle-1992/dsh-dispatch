@@ -44,7 +44,9 @@ test('ZB-40 ①：心跳行可被解析（完整形态 + 省略 lastTool/session
 });
 
 test('ZB-40 ②：slimJob 依心跳给出 stalled / lastProgressAgoSec', () => {
-  const base = { id: 'j-x', state: 'running', spec: { kind: 'prompt' }, tailLines: [] };
+  /* ZB-113：`stalled` 只在"该引擎会发心跳"时才成立 —— 基准改用 opencode（它 22 处 progress）。
+   * ZCode 的例外见本测试末尾的断言（它用 spawnSync 阻塞、运行期间零输出 ⇒ 永远没有心跳）。 */
+  const base = { id: 'j-x', state: 'running', spec: { kind: 'prompt', engine: 'opencode' }, tailLines: [] };
   const fresh = slimJob({ ...base, lastProgressAt: Date.now() - 5_000, progress: { stage: 'waiting-turn' } });
   assert.equal(fresh.stalled, false, '5s 前有心跳 ⇒ 不算卡住');
   assert.equal(fresh.lastProgressAgoSec, 5);
@@ -58,6 +60,12 @@ test('ZB-40 ②：slimJob 依心跳给出 stalled / lastProgressAgoSec', () => {
 
   const done = slimJob({ ...base, state: 'done', lastProgressAt: null });
   assert.equal(done.stalled, false, '终态不算卡住');
+
+  /* ZB-113（GLM-5.3-Flash 审查 HIGH#4，已核实）：ZCode 执行器用 spawnSync 同步阻塞、
+   * 运行期间零输出 ⇒ 它**不可能**有 progress 心跳。旧判据对每个 running 的 ZCode 任务恒判
+   * `stalled=true`，面板给所有 ZCode 任务挂「可能卡住」徽标（真机观感就是这样，误导用户）。 */
+  const zcode = slimJob({ id: 'j-z', state: 'running', spec: { kind: 'prompt', engine: 'zcode' }, tailLines: [], lastProgressAt: null });
+  assert.equal(zcode.stalled, false, '★ 不发心跳的引擎（ZCode）不算 stalled');
 });
 
 test('ZB-40 ③：runner 侧形态（turn.failed 分支 / 心跳模板 / 模型⇄权益校验）', () => {

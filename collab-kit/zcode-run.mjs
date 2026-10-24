@@ -69,7 +69,7 @@
  *   ⚠️ 实现用 `node:https` 而非 `fetch`：实测本 runner 场景下 `fetch`（undici）后
  *      `process.exit()` 会在 Windows 触发 libuv 断言崩溃（退出码 -1073740791）。
  */
-import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, rmSync, readdirSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve, dirname, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -943,6 +943,18 @@ if (GIFT_MODE) {
 /* ---------- 生成临时个人 provider 配置（套餐注入 / --model 改写；原配置不动，副本跑完即删） ---------- */
 let modelPath = personalPath;
 let tempDir = '';
+/* ZB-113（审查 HIGH#6）：**清扫上次被强杀残留的临时配置目录**（里面有明文 API Key）。
+ * exit/SIGTERM/SIGINT 钩子都捕获不到 SIGKILL（taskkill /F、OOM、崩溃），只能靠下次启动兜底。
+ * 只删 10 分钟前的（避免误删同时并发的另一个 runner 实例正在用的目录）。 */
+try {
+  for (const d of readdirSync(tmpdir())) {
+    if (!/^zcode-cfg-\d+-\d+$/.test(d)) continue;
+    const p = join(tmpdir(), d);
+    try {
+      if (Date.now() - statSync(p).mtimeMs > 10 * 60_000) rmSync(p, { recursive: true, force: true });
+    } catch { /* 单个目录失败不影响其它 */ }
+  }
+} catch { /* tmpdir 不可读：跳过清扫 */ }
 /* ZB-29：思考强度的落点。defaultModelSelection 需要**真实 providerId**：
  *  · plan 通道 = runner 选中的 builtin key（providerId 变量，如 builtin:bigmodel-coding-plan）；
  *  · personal 通道 = 个人配置里实际 provider 规则的 id（从源配置读，读不到就放弃注入并警告）。
@@ -1063,6 +1075,18 @@ if (needTempConfig) {
     mkdirSync(tempDir, { recursive: true });
     modelPath = join(tempDir, 'provider_config.json');
     writeFileSync(modelPath, JSON.stringify(cfg, null, 2));
+    /* ZB-113：明文 Key 已落盘 ⇒ 立刻装兜底清理（正常路径 1145 行还会再清一次，幂等）。
+     * SIGKILL 无法捕获（残余由下次启动的陈旧残留清扫兜底），但 SIGTERM/SIGINT/正常退出都能收干净。 */
+    {
+      const wipe = () => {
+        if (!tempDir) return;
+        try { rmSync(tempDir, { recursive: true, force: true }); } catch { /* 尽力 */ }
+        tempDir = '';
+      };
+      process.on('exit', wipe);
+      process.on('SIGINT', () => { wipe(); process.exit(130); });
+      process.on('SIGTERM', () => { wipe(); process.exit(143); });
+    }
   } catch (err) {
     console.error(`[zcode-run] 临时 provider 配置生成失败: ${err.message}`);
     process.exit(1);
@@ -1142,6 +1166,13 @@ const stdout = r.stdout ?? '';
 const stderr = r.stderr ?? '';
 writeFileSync(outLog, stdout);
 writeFileSync(errLog, stderr);
+/* ZB-113（审查 HIGH#6，已核实）：临时配置里含**明文 API Key**，而原先只有这一处清理 ——
+ * 它在 spawnSync 正常返回之后才执行；runner 被 SIGTERM/taskkill 强杀时进程直接退出，
+ * 这行永远跑不到 ⇒ 明文 Key 的 provider_config.json 残留在 %TEMP%。
+ * 现在改为：① tempDir 一创建就注册 exit/SIGINT/SIGTERM 兜底（SIGKILL 无法捕获，属残余风险，
+ * 由启动时的陈旧残留清扫兜底）；② 这里保留显式清理（正常路径立刻回收）。
+ * 纪律边界（已按产品裁决写进 README/pitfalls）：执行器**可以读取**凭据用于启动官方 CLI，
+ * 但禁止记录、打印、外传、长期落盘。 */
 if (tempDir) {
   try { rmSync(tempDir, { recursive: true, force: true }); } catch { /* 临时配置清理失败不掩盖结果 */ }
 }

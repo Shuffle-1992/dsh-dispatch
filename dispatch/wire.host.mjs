@@ -119,6 +119,9 @@ export function writeSwitch(enabled, { by = 'ui/tool', note = '' } = {}, path = 
 export const TAIL_DEFAULT_LINES = 30;
 /** Host→客户端推送节流：dispatcher 每解析一行都可能 emit，这里限频。 */
 const PUSH_THROTTLE_MS = 300;
+/** ZB-113：**会发 progress 心跳**的引擎（决定 `stalled` 是否可用「无心跳=卡住」推论）。
+ *  zcode-run 用 spawnSync 同步阻塞、发不出心跳 ⇒ 不在名单内（详见 slimJob 里的注释）。 */
+const HEARTBEAT_ENGINES = new Set(['opencode', 'qoder', 'codebuddy']);
 /** Remote 面服务名（官方惯例为小驼峰，如 pluginRegistryProbe / pluginManager）。 */
 export const FACE_NAME = 'dispatch';
 /** 宿主→客户端变更事件名（官方命名惯例："<区域>/<事件>"，如 plugin-manager/changed）。 */
@@ -230,7 +233,19 @@ export function slimJob(job) {
     progress: job.progress ?? null,
     lastProgressAgoSec: Number.isFinite(job.lastProgressAt) ? Math.round((Date.now() - job.lastProgressAt) / 1000) : null,
     stalledSec: job.lastProgressAt ? Math.round((Date.now() - job.lastProgressAt) / 1000) : null,
-    stalled: job.state === 'running' && (!job.lastProgressAt || Date.now() - job.lastProgressAt > 150_000),
+    /* ZB-113（GLM-5.3-Flash 审查 HIGH#4，已核实）：**没有心跳的引擎不该被判 stalled**。
+     *
+     * 实测：`zcode-run.mjs` 全文 0 处 progress（它用 `spawnSync` 同步阻塞，阻塞期间根本没法发心跳），
+     * 而 opencode 22 处 / qoder 2 处 / codebuddy 2 处都有。
+     * 旧判据 `!job.lastProgressAt || ...` 对**每个 running 的 ZCode 任务恒真**
+     * ⇒ 面板给所有 ZCode 任务挂「可能卡住」徽标，误导用户（真机就是这个观感）。
+     *
+     * 修法：只有"该引擎会发心跳"时才用「无心跳 = 卡住」这条推论。
+     * ⚠️ 代价：ZCode 任务**目前无法**用心跳判卡住 —— 要根治得把 zcode-run 从 spawnSync
+     * 改成异步 spawn（大改动，风险高），届时再补心跳。在那之前，ZCode 的进度只能看 tail/elapsed。 */
+    stalled: job.state === 'running'
+      && HEARTBEAT_ENGINES.has(String(job.spec?.engine ?? '').toLowerCase())
+      && (!job.lastProgressAt || Date.now() - job.lastProgressAt > 150_000),
     tailCount: Array.isArray(tailLines) ? tailLines.length : 0,
     parseWarnings: (parseWarnings ?? []).slice(-5),
     /* ZB-75：思考档位核对结论（不符时给出 requested/observed/suggested）——
@@ -272,7 +287,11 @@ export function briefJob(job) {
   const progress = job.progress && typeof job.progress === 'object' ? job.progress : null;
   const attempts = Array.isArray(job.attempts) ? job.attempts : [];
   const paused = job.state === 'paused';
-  const stalled = job.state === 'running' && (!job.lastProgressAt || Date.now() - job.lastProgressAt > 150_000);
+  /* ZB-113（Flash 审查 HIGH#4）：与 slimJob 同一判据 —— 无心跳引擎（ZCode）不算 stalled，
+   * 否则每个 running 的 ZCode 任务都被标「可能卡住」，且 briefJob 会算出 `lastProgressAgoSec: NaN`。 */
+  const stalled = job.state === 'running'
+    && HEARTBEAT_ENGINES.has(String(spec.engine ?? '').toLowerCase())
+    && (!job.lastProgressAt || Date.now() - job.lastProgressAt > 150_000);
   /* 空值不占位：宿主 spill 预算按 **chars/4** 估算（dsh-token-meter CHARS_PER_TOKEN=4），
    * 而键名本身才是大头（一条记录 ~490 B 里约一半是键名）——省略 null 字段既省预算也更少噪音。
    * ⚠️ 只删 null/undefined：`exitCode: 0`、`hopCount: 0` 是有意义的值，不能当空值删掉。 */

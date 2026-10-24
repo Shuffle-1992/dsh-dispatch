@@ -345,9 +345,9 @@ const TOOL_PARAMETERS = {
   by: { type: 'string', description: 'switch：操作者标识（写入 updatedAt/updatedBy，缺省 ui/tool）' },
   note: { type: 'string', description: 'switch：切换原因备注（写入 note）' },
   kind: { type: 'string', enum: ['prompt', 'task', 'target'], description: 'dispatch：派发类型（prompt=完整指令 / target=目标描述，ZCode 自续跑直到达成 / task=任务包文件绝对路径）' },
-  prompt: { type: 'string', description: 'dispatch(kind=prompt)：发给 ZCode 的提示词' },
-  task: { type: 'string', description: 'dispatch(kind=task)：任务文件绝对路径' },
-  target: { type: 'string', description: 'dispatch(kind=target)：目标描述' },
+  prompt: { type: 'string', description: 'dispatch(kind=prompt)：发给 ZCode 的提示词。⚠️ **必须在提示词里明确写「不要使用子代理/子任务」**（见 timeoutMin 说明）' },
+  task: { type: 'string', description: 'dispatch(kind=task)：任务文件绝对路径（任务包里也应写明不要用子代理）' },
+  target: { type: 'string', description: 'dispatch(kind=target)：目标描述（同样应写明不要用子代理）' },
   /* ZB-37（真机事故修复）：`model` / `provider` **不能用 enum** —— 与上面 thinking 同一条纪律：
    * 合法取值随账号/清单变（模型：GLM-5.3 系 / deepseek-flash / …；通道：plan / personal /
    * `builtin:*` / **`account:<family>-start-plan`（免费额度）**），权威来源是 `action=channels`。
@@ -373,7 +373,7 @@ const TOOL_PARAMETERS = {
    * deepseek 系 disabled|low|high|max），以 channels[].thinkingLevels 为准；语义详述在描述正文。
    * ZB-29d：不传 thinking = 按通道默认思考强度（channel.reasoningLevel，action=channel 可设，未设置=agent）。 */
   thinking: { type: 'string', description: 'dispatch：思考强度（Thought Level）。`agent`=Agent决定（默认）：由你根据任务改传具体档位；**不传 = 按通道默认思考强度执行**（action=channel 可设，未设置即 agent）。档位集合见 action=channels 返回的 thinkingLevels。仅对新建会话生效' },
-  timeoutMin: { type: 'number', description: 'dispatch：超时分钟（必须 > 0，无上限；runner 生效下限 1 分钟）' },
+  timeoutMin: { type: 'number', description: 'dispatch：超时分钟（必须 > 0，无上限；runner 生效下限 1 分钟）。⚠️ **超时最常见的根因是子代理**：被派发的 CLI 自己再派子代理会撞上账号并发上限（ZCode 免费额度实测=3）被挤掉，然后串行重试白耗时间。**所以提示词里必须明确写「禁止派任何子代理/子任务，全部串行完成」**，并给出时间预算（如"30 分钟内完成，先出结论再补细节"）。' },
   memoryBench: { type: 'boolean', description: 'dispatch：附加 --memory-bench（仅 kind=prompt 支持）' },
   tag: { type: 'string', description: 'dispatch：台账 tag（缺省由 runner 生成）' },
   lock: { type: 'string', enum: ['repo', 'none'], description: 'dispatch：仓库写锁。repo（默认）= 锁仓库；none = 明确不取锁。**锁哪些文件用 write 指定**（memory/both 已于 ZB-16 删除）' },

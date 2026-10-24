@@ -569,9 +569,22 @@ function acquireLockFile(file, info, nowMs) {
       const rec = readLockFile(file);
       if (rec && rec.jobId === info.jobId) return true; // 重入幂等
       if (isStaleLock(rec, file, nowMs)) {
+        /* ZB-113（审查 HIGH#3，已核实）：**TOCTOU** —— 旧代码 `readLockFile`(569) 与 `unlinkSync`(573)
+         * 之间是跨进程竞态窗口：若期间过期锁被清掉、另一进程 B 已用 `wx` 建好**新锁**，
+         * 这里的 unlink 就会删掉 B 的新锁，随后我方 wx 成功 ⇒ **两个进程同时持锁**，
+         * "单写者"互斥被静默击穿（直接威胁宿主仓库数据完整性）。
+         *
+         * 修法：用 **rename** 代替 unlink —— rename 是原子操作，只有一个进程能把旧锁"搬走"，
+         * 其余进程得到 ENOENT。搬走者拿到处置权后删掉临时名，再进入下一轮 wx 抢新锁；
+         * 抢锁的唯一仲裁点仍是 `openSync(file,'wx')`（原子），所以不会双持。
+         * 临时名带 pid+时间戳，避免两个进程撞同一个 trash 名。 */
+        const trash = `${file}.stale.${process.pid}.${nowMs}`;
         try {
-          unlinkSync(file);
-        } catch { /* 被别人抢先清理：下一轮 wx 重试 */ }
+          renameSync(file, trash);
+        } catch {
+          continue; // ENOENT：已被别人搬走/清理 —— 直接下一轮 wx 重试
+        }
+        try { unlinkSync(trash); } catch { /* 临时名清理失败不影响抢锁 */ }
         continue;
       }
       return false; // 锁被活着的持有者占用
@@ -1717,8 +1730,18 @@ export function createDispatcher(options = {}) {
     const captureErr = join(dirLogs, `${job.id}.err.log`);
     job.captureOut = captureOut;
     job.captureErr = captureErr;
-    writeFileSync(captureOut, '');
-    writeFileSync(captureErr, '');
+    try {
+      writeFileSync(captureOut, '');
+      writeFileSync(captureErr, '');
+    } catch (e) {
+      /* ZB-113（GLM-5.3-Flash 审查 HIGH#2，已核实）：capture 日志创建失败**不能把 job 卡死在 running**。
+       * 此刻 state 已是 running、锁已持有、没有 child、也不会有 close 事件 ⇒ 永不 finalize
+       * ⇒ 该 job 的仓库锁一直占着，整个队列卡死到重启（而 kill() 对无 child 的 running 也救不回来）。
+       * 按"环境/配置错误"落 failed，与下方 spawn-throw 同款处理。 */
+      job.parseWarnings.push(`capture-log-throw: ${e?.message ?? e}`);
+      finalizeJob(job, { state: 'failed', exitCode: null, pause: { reason: 'config-error', detail: `无法创建 capture 日志（${captureOut}）：${e?.message ?? e}` } });
+      return;
+    }
 
     /* 执行器缺失/未配置 ⇒ **可读失败**：不 spawn、不崩（增量引擎的缺失绝不该影响 ZCode 派发与 DSH 本体）。
      * spawn 一个不存在的脚本只会得到一句 "Cannot find module"，对排障毫无帮助，故这里前置判定。
@@ -4517,7 +4540,17 @@ export function createDispatcher(options = {}) {
     const child = children.get(id);
     if (child) {
       try {
-        child.kill();
+        /* ZB-113（审查 HIGH#5，已核实）：**Windows 必须树杀**。
+         * `child.kill()` 只结束 runner 进程本身，而 runner 是 `spawn` 出引擎 CLI 的父进程 ——
+         * 父进程被单杀后，引擎 CLI 成为**孤儿**继续跑：继续耗额度、继续写工作区文件，
+         * 面板上却已显示 killed（用户以为停了）。本文件 3218 行附近的登录助手早已自证
+         * "必须 taskkill /T /F"（否则它自己的 child 也清不干净）。
+         * 非 Windows 用 child.kill()（POSIX 上子进程会随父进程组终止的常见约定由 runner 自身处理）。 */
+        if (process.platform === 'win32' && child.pid) {
+          nodeSpawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+        } else {
+          child.kill();
+        }
       } catch (e) {
         job.parseWarnings.push(`kill-failed: ${e.message}`);
         return false;
