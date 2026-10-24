@@ -897,12 +897,24 @@ if (GIFT_MODE) {
     try {
       const { readGiftQuota } = await import('../dispatch/core/gift-quota.mjs'); // 额度读取在插件核心（只读 ZCode 日志）
       const q = readGiftQuota();
-      if (q?.ok === true && q.state === 'active' && typeof q.model === 'string' && q.model !== '' && q.model !== opt.model) {
+      /* ZB-41（2026-10-24，用户指出「两个模型都有免费额度」）：原实现只按**单一** q.model 判定
+       * 「权益只授予这一个模型」，于是 GLM-5.3 被无条件改写成 GLM-5.3-Flash —— 而同一份额度数据里
+       * `perModel` 明确显示 GLM-5.3 仍有 196.1M/200M 余额（权益是**逐模型**授予的）。
+       * 现改为按**授予集合**判定：models ∪ perModel[].model ∪ model；请求模型在集合内就照用，
+       * 只有确实不在集合里才替换（并列出授予清单，便于核对）。 */
+      const granted = new Set([
+        ...(typeof q?.model === 'string' && q.model ? [q.model] : []),
+        ...(Array.isArray(q?.models) ? q.models : []),
+        ...(Array.isArray(q?.perModel) ? q.perModel.map((x) => x?.model).filter(Boolean) : []),
+      ].filter((x) => typeof x === 'string' && x !== ''));
+      if (q?.ok === true && q.state === 'active' && typeof opt.model === 'string'
+        && granted.size > 0 && !granted.has(opt.model)) {
+        const fallback = typeof q.model === 'string' && q.model ? q.model : [...granted][0];
         console.error(
-          `[zcode-run] ⚠️ 模型替换：--model ${opt.model} → ${q.model}` +
-            `（免费额度权益「${q.planName ?? q.planId}」只授予 ${q.model}；用未授予的模型会被上游判 1005 exceed quota limit）`,
+          `[zcode-run] ⚠️ 模型替换：--model ${opt.model} → ${fallback}` +
+            `（免费额度权益「${q.planName ?? q.planId}」授予：${[...granted].join(', ')}；用未授予的模型会被上游判 1005 exceed quota limit）`,
         );
-        opt.model = q.model;
+        opt.model = fallback;
       }
     } catch {
       /* 读不到权益就不猜：按用户给的模型继续，真失败会在 result 里带 providerError */
