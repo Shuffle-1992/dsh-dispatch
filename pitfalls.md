@@ -881,3 +881,66 @@ Explore 子代理**（client.js 纪律 / collab-kit 一致性 / 测试门禁）�
   听起来只有 1 个派发，实际是 4 个并发请求。
 - 若确实需要并行（比如多角度审查），**用派发台本身并发多个 job**（受 `maxConcurrent` 闸控制、
   可观测、可降级），而不是让被派发的 CLI 自己偷偷派子代理。
+
+---
+
+## 2026-10-25 ZB-120/121：**静态审查找不到、只有真机测试才暴露的 3 个问题**
+
+背景：两份模型审查报告（GLM-5.3 / GLM-5.3-Flash）的 38 条发现全部处理完后，
+用户问「没有可优化的内容了？」。静态再扫 5 个维度（空 catch / TODO / `==` / 超长函数 / 测试覆盖）
+**全部不是问题**。于是改成**真机派发测试**，结果又挖出 3 个真 bug —— 都是纯代码审查看不出来的。
+
+### ① 免费额度（app-server）通道**不支持 `--resume`** ⇒ 自动重试必然失败
+现场：任务撞 `concurrency-limited`（`providerCode=3009 model concurrency limit exceeded`）
+⇒ 自动重试按预期触发（25 秒后新建 job、`concurrencyRetries` 从 1 继承）——
+**但新 job 1 秒就失败**：`[zcode-run] 免费额度（app-server）通道暂不支持 --resume`。
+
+根因：原 job 跑了 72 秒、**真的产生了 sessionId**，`retry()` 的「同通道 + 有 sessionId ⇒ 续跑」
+判据让它走了 `--resume`，而 app-server 后端每次都新建 CLI 会话。
+⇒ 自动重试在这条通道上 **100% 失败**，且报 `pauseReason=unknown`（看起来像莫名其妙的错误）。
+
+**修法**：resume 判据补一条 —— 目标通道形如 `account:*-start-plan`（app-server 后端）时
+**一律走交接重跑**，绝不 `--resume`。
+
+**教训**：`retry` 的「能不能续跑」不能只看"有没有 sessionId"——
+还要看**这条通道的后端支不支持会话续跑**。gift/app-server 是"一次性会话"语义。
+
+### ② `stalled` 不能按**引擎**猜心跳行为 —— 同一引擎两种模式完全不同
+ZB-113 的修法是白名单：`HEARTBEAT_ENGINES = {opencode,qoder,codebuddy}`，排除 zcode，
+理由是"zcode-run 用 spawnSync 阻塞、发不出心跳"。
+
+真机推翻了它：**同一个 ZCode 引擎**——
+- **print 模式**（spawnSync 调 CLI）：运行期间零输出 ⇒ 无心跳；
+- **免费额度 / app-server 模式**：每 10 秒一行 `[zcode-run] progress stage=...` ⇒ **有心跳**。
+
+实测 193 秒的 gift 任务：`progress: {stage:"waiting-turn", chars:575, tools:252}`、
+`lastProgressAgoSec: 3`、`stalled: false`。白名单会把这份心跳**白白忽略**（真卡住也报不出来）。
+
+**修法**：改看**事实**（`job.lastProgressAt` 有无值）——
+有值 ⇒ 该引擎/该模式确实会发心跳 ⇒ 超时可判卡住；无值 ⇒ 无从判断 ⇒ **不报**。
+
+**教训（可推广）**：「按对象类别猜行为」几乎总会错，因为**同一类对象的子模式可能不同**。
+能观测的事实（有没有心跳）比推断的类别（哪个引擎）可靠。同理也适用于
+"某引擎一定有 X / 某引擎一定没有 Y" 这类假设 —— 先用一次真机跑验证，再写判据。
+
+### ③ `memoryBanRunner` 对 prompt 类型恒 null 是**设计如此**（不是 bug）
+排查时容易误判成"审计位失效"。实际两条注入路径：
+- **prompt / target** ⇒ **插件侧** `withMemoryBan()` 把禁令拼进内容 ⇒ `memoryBanApplied: true`；
+- **task** ⇒ 才传 `--memory-ban` 旗标、由 **runner** 注入并打印 `memory-ban=on` ⇒ `memoryBanRunner: true`。
+
+**教训**：看到 `xxRunner: null` 先确认**这条注入路径**是不是根本不经过 runner，再判断是不是 bug。
+
+### 顺带：kill / 锁 / 树杀 的真机验证方法（可复用）
+这几条路径最难测（单元测试覆盖不到），但**风险最高**（锁泄漏会让整个队列卡死）。做法：
+1. 派一个 `lock: 'repo'` 的长任务（prompt 里明确要求它慢慢做 2-3 分钟）；
+2. 确认 `lockPaths.repo` 有值、`.data/locks/repo.lock` 文件存在且含该 job 的 id+pid；
+3. `action=kill`；
+4. 验证：`state=killed`、**`repo.lock` 已被删除**、**没有该时刻启动的残留进程**（树杀生效）；
+5. 立刻再派一个 `lock: 'repo'` 的任务，确认 `lockWait: null`（锁真的可复用、没泄漏）。
+
+本轮实测这 5 步全过。
+
+### 结论：审查报告的覆盖率 ≠ 系统的健康度
+- 静态审查（两个模型 × 38 条）能找出**结构性/逻辑性**问题；
+- 但**跨组件交互**（重试 × 通道类型、心跳 × 引擎模式）只有真机跑才能暴露；
+- 建议每次大改后至少做一轮「真机派发 + 关键路径验证」，不只跑单元测试。
