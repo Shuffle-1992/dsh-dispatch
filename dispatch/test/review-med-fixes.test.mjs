@@ -51,3 +51,24 @@ test('ZB-115 ③：startCodebuddyLogin 并发去重（复用进行中的 Promise
   assert.ok(stopFn, '能取出 stop 开头');
   assert.match(stopFn[1], /cbLoginInFlight = null;/, '★ stop 清 in-flight');
 });
+
+/* ── ④ 四个 buildArgs 共用公共段（消除四份逐字复制） ── */
+test('ZB-116 ④：四个执行器的参数构造共用 buildKindArgs / buildTailArgs', () => {
+  /* 公共段必须存在且各被四个引擎引用 —— 否则又回到"复制四份必然漂移" */
+  assert.match(CORE, /function buildKindArgs\(spec, opts = \{\}\)/, 'kind 公共段存在');
+  assert.match(CORE, /function buildTailArgs\(spec\)/, 'tail 公共段存在');
+  for (const fn of ['buildRunnerArgs', 'buildOpenCodeArgs', 'buildQoderArgs', 'buildCodebuddyArgs']) {
+    const m = CORE.match(new RegExp(`function ${fn}\\(spec, opts = \\{\\}\\) \\{([\\s\\S]*?)\\r?\\n  \\}`));
+    assert.ok(m, `能取出 ${fn} 主体`);
+    assert.match(m[1], /buildKindArgs\(spec, opts\)/, `★ ${fn} 用 buildKindArgs`);
+    assert.match(m[1], /buildTailArgs\(spec\)/, `★ ${fn} 用 buildTailArgs`);
+    /* 反向：不能再自己拼 kind 段（--task / --prompt 不该出现在引擎函数里） */
+    assert.doesNotMatch(m[1], /args\.push\('--prompt'/, `★ ${fn} 不再自己拼 --prompt`);
+    assert.doesNotMatch(m[1], /args\.push\('--task'/, `★ ${fn} 不再自己拼 --task`);
+  }
+  /* 引擎差异必须**保留**：思考强度参数名各不相同 */
+  assert.match(CORE, /'--reasoning-level', spec\.reasoningLevel/, 'ZCode 用 --reasoning-level');
+  assert.match(CORE, /'--variant', spec\.reasoningLevel/, 'OpenCode 用 --variant');
+  assert.match(CORE, /'--reasoning-effort', spec\.reasoningLevel/, 'Qoder 用 --reasoning-effort');
+  assert.match(CORE, /'--effort', spec\.reasoningLevel/, 'CodeBuddy 用 --effort');
+});

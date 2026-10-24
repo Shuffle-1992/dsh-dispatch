@@ -1625,22 +1625,37 @@ export function createDispatcher(options = {}) {
     return `${base}\n\n${MEMORY_BAN_TEXT}`;
   }
 
-  function buildRunnerArgs(spec, opts = {}) {
+  /* ── ZB-116（GLM-5.3 审查 MED）：四个执行器的参数构造有**逐字重复**的公共段 ──
+   * 文件头早就自警"复制两份必然漂移"，实际已经复制了四份。这里把两段**完全一致**的部分抽出来，
+   * 引擎差异（model/provider/mode/思考强度参数名）仍留在各自函数里。
+   * ⚠️ 抽取**不改变任何参数顺序**（各引擎原有顺序逐项保持），避免影响执行器解析与既有测试。 */
+
+  /** kind 段（四执行器完全一致）：task ⇒ `--task <abs>` + `--memory-ban`（禁令由执行器注入）；
+   *  prompt/target ⇒ 插件直接把禁令拼进内容（`withMemoryBan`）。 */
+  function buildKindArgs(spec, opts = {}) {
     const args = [];
     if (spec.kind === 'task') {
-      args.push('--task', resolve(String(spec.task))); // 绝对路径，防 runner 相对自身根解析
-      /* ZB-28：task 的记忆禁令改由 **runner 侧注入** —— runner 读任务包内联成 prompt 时
-       * 追加同款禁令文本（--memory-ban 旗标），并在 stdout 打 `memory-ban=on`
-       * （core 解析为 job.memoryBanRunner=true，即「runner 确认已注入」）。
-       * 旧版 runner 不认识该旗标会 exit 1「未知参数」—— fail-fast，绝不静默裸奔；
-       * runner 与本插件同仓库（collab-kit/）发货，正常成对升级。 */
+      args.push('--task', resolve(String(spec.task))); // 绝对路径，防执行器相对自身根解析
       if (!opts.noMemoryBan) args.push('--memory-ban');
     } else {
-      // 默认注入记忆禁令；opts.noMemoryBan 供测试/特殊场景关闭
       const injected = opts.noMemoryBan ? null : withMemoryBan(spec);
       const body = injected ?? (spec.kind === 'target' ? String(spec.target ?? '') : String(spec.prompt ?? ''));
       args.push(spec.kind === 'target' ? '--target' : '--prompt', body);
     }
+    return args;
+  }
+
+  /** 尾部公共段（四执行器完全一致）：tag / timeoutMin / cwd。 */
+  function buildTailArgs(spec) {
+    const args = [];
+    if (spec.tag) args.push('--tag', spec.tag);
+    if (spec.timeoutMin != null) args.push('--timeout-min', String(spec.timeoutMin));
+    if (spec.cwd) args.push('--cwd', spec.cwd);
+    return args;
+  }
+
+  function buildRunnerArgs(spec, opts = {}) {
+    const args = buildKindArgs(spec, opts);
     if (spec.resume) args.push('--resume', spec.resume);
     if (spec.memoryBench) args.push('--memory-bench'); // runner 限制：仅 --prompt 可用（dispatch 已校验）
     if (spec.model) args.push('--model', spec.model);
@@ -1652,10 +1667,7 @@ export function createDispatcher(options = {}) {
      * job.reasoningLevelApplied 有值，进程上显示实际档位而非「Agent决定」字样。
      * 仅新建会话生效（resume 由 runner 警告并忽略）。 */
     if (spec.reasoningLevel) args.push('--reasoning-level', spec.reasoningLevel);
-    if (spec.tag) args.push('--tag', spec.tag);
-    if (spec.timeoutMin != null) args.push('--timeout-min', String(spec.timeoutMin));
-    if (spec.cwd) args.push('--cwd', spec.cwd);
-    return args;
+    return [...args, ...buildTailArgs(spec)];
   }
 
   /**
@@ -1672,15 +1684,7 @@ export function createDispatcher(options = {}) {
    * 思考强度：`--variant <档>` **仅当档位是具体值**；`'agent'`（Agent决定）= 不覆盖，交给执行器按模型默认档。
    */
   function buildOpenCodeArgs(spec, opts = {}) {
-    const args = [];
-    if (spec.kind === 'task') {
-      args.push('--task', resolve(String(spec.task))); // 绝对路径，防执行器相对自身根解析
-      if (!opts.noMemoryBan) args.push('--memory-ban');
-    } else {
-      const injected = opts.noMemoryBan ? null : withMemoryBan(spec);
-      const body = injected ?? (spec.kind === 'target' ? String(spec.target ?? '') : String(spec.prompt ?? ''));
-      args.push(spec.kind === 'target' ? '--target' : '--prompt', body);
-    }
+    const args = buildKindArgs(spec, opts);
     if (spec.resume) args.push('--resume', spec.resume); // OpenCode 侧 `-s <sessionID>` 的等价长参数
     /* ZB-45：**显式**放行（默认关 —— 硬约束「不默认开 --auto」）。
      * 只有 `spec.auto === true` 才加；其它任何取值（缺省/false/undefined）一律不加。
@@ -1688,10 +1692,7 @@ export function createDispatcher(options = {}) {
     if (spec.auto === true) args.push('--auto');
     if (spec.model) args.push('--model', spec.model);
     if (spec.reasoningLevel && spec.reasoningLevel !== 'agent') args.push('--variant', spec.reasoningLevel);
-    if (spec.tag) args.push('--tag', spec.tag);
-    if (spec.timeoutMin != null) args.push('--timeout-min', String(spec.timeoutMin));
-    if (spec.cwd) args.push('--cwd', spec.cwd);
-    return args;
+    return [...args, ...buildTailArgs(spec)];
   }
 
   /**
@@ -1706,23 +1707,12 @@ export function createDispatcher(options = {}) {
    * 记忆禁令的处理与另两个引擎一致（task ⇒ 执行器 `--memory-ban`；prompt/target ⇒ 直接拼进内容）。
    */
   function buildQoderArgs(spec, opts = {}) {
-    const args = [];
-    if (spec.kind === 'task') {
-      args.push('--task', resolve(String(spec.task)));
-      if (!opts.noMemoryBan) args.push('--memory-ban');
-    } else {
-      const injected = opts.noMemoryBan ? null : withMemoryBan(spec);
-      const body = injected ?? (spec.kind === 'target' ? String(spec.target ?? '') : String(spec.prompt ?? ''));
-      args.push(spec.kind === 'target' ? '--target' : '--prompt', body);
-    }
+    const args = buildKindArgs(spec, opts);
     if (spec.resume) args.push('--resume', spec.resume);
     if (spec.auto === true) args.push('--auto');
     if (spec.model) args.push('--model', spec.model);
     if (spec.reasoningLevel && spec.reasoningLevel !== 'agent') args.push('--reasoning-effort', spec.reasoningLevel);
-    if (spec.tag) args.push('--tag', spec.tag);
-    if (spec.timeoutMin != null) args.push('--timeout-min', String(spec.timeoutMin));
-    if (spec.cwd) args.push('--cwd', spec.cwd);
-    return args;
+    return [...args, ...buildTailArgs(spec)];
   }
 
   /**
@@ -1736,24 +1726,13 @@ export function createDispatcher(options = {}) {
    * 记忆禁令的处理与另三个引擎一致（task ⇒ 执行器 `--memory-ban`；prompt/target ⇒ 直接拼进内容）。
    */
   function buildCodebuddyArgs(spec, opts = {}) {
-    const args = [];
-    if (spec.kind === 'task') {
-      args.push('--task', resolve(String(spec.task)));
-      if (!opts.noMemoryBan) args.push('--memory-ban');
-    } else {
-      const injected = opts.noMemoryBan ? null : withMemoryBan(spec);
-      const body = injected ?? (spec.kind === 'target' ? String(spec.target ?? '') : String(spec.prompt ?? ''));
-      args.push(spec.kind === 'target' ? '--target' : '--prompt', body);
-    }
+    const args = buildKindArgs(spec, opts);
     if (spec.resume) args.push('--resume', spec.resume);
     if (spec.auto === true) args.push('--auto');
     if (spec.model) args.push('--model', spec.model);
     /* 档位：'agent'（Agent决定）= 不覆盖 ⇒ **不传** --effort（与 OpenCode 的 `--variant` 同语义）。 */
     if (spec.reasoningLevel && spec.reasoningLevel !== 'agent') args.push('--effort', spec.reasoningLevel);
-    if (spec.tag) args.push('--tag', spec.tag);
-    if (spec.timeoutMin != null) args.push('--timeout-min', String(spec.timeoutMin));
-    if (spec.cwd) args.push('--cwd', spec.cwd);
-    return args;
+    return [...args, ...buildTailArgs(spec)];
   }
 
   function startJob(job) {
