@@ -135,3 +135,29 @@ test('timeoutMin 校验：>0 合法（无上限），非正数报错', () => {
   assert.ok(j && j.id, '大值合法（无上限；文档说明 runner 生效下限 1 分钟）');
   return waitTerminal(d, j.id);
 });
+
+/* ── ZB-112（用户真机指出）：「额度非常充足，显示额度不够」──
+ * 现场：GLM-5.3-Flash 审查任务跑满 25 分钟被 runner 杀（exit=124），面板却显示"已暂停：额度耗尽"，
+ * 而实际额度 88%/91%。根因：任务跑久了输出里必然有 429/限流字样（它自己派的子代理撞的、重试过的），
+ * `classifyPause` 从文本里扫到 `/429/` 就判 quota-exhausted —— 超时被"猜"成了额度耗尽。
+ * 钉住：**超时是确定事实（exit 124 + `(超时)` 标记），必须优先判定，绝不从文本猜额度**。 */
+test('ZB-112：超时 + 输出里含 429 ⇒ 仍 failed（绝不判额度耗尽）', async () => {
+  /* 注意 fake-runner 的实现：设了 FAKE_PAUSE_TEXT 就**提前** `process.exit(FAKE_EXIT_CODE ?? 1)`，
+   * 所以这里必须显式给 FAKE_EXIT_CODE=124 才能造出"超时 + stderr 有 429"的组合
+   * （另一条既有测试用 FAKE_TIMEOUT_DONE 覆盖"done 行带 `(超时)`"的形态）。 */
+  setEnv({ FAKE_SLEEP_MS: '30', FAKE_EXIT_CODE: '124', FAKE_PAUSE_TEXT: 'HTTP 429 rate limited (retry-after 600)' });
+  delEnv('FAKE_TIMEOUT_DONE');
+  try {
+    const d = createDispatcher({ runnerPath: FAKE_RUNNER, workRoot: newWorkRoot(), maxConcurrent: 1 });
+    const j = d.dispatch({ kind: 'prompt', prompt: 'x', tag: 'zt', timeoutMin: 5 });
+    const done = await waitTerminal(d, j.id);
+    assert.equal(done.state, 'failed', '超时不是暂停（ZB-28 既有语义：failed + timedOut 字段）');
+    assert.equal(done.exitCode, 124);
+    assert.equal(done.timedOut, true);
+    assert.equal(done.timedOutBy, 'runner');
+    assert.notEqual(done.pauseReason, 'quota-exhausted', '★ 绝不把"跑太久被超时"报成"额度耗尽"');
+    assert.notEqual(done.state, 'paused', '超时不该进 paused 队列等人工处理');
+  } finally {
+    delEnv('FAKE_SLEEP_MS', 'FAKE_EXIT_CODE', 'FAKE_PAUSE_TEXT');
+  }
+});

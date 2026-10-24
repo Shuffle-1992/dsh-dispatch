@@ -1834,7 +1834,31 @@ export function createDispatcher(options = {}) {
         // Z6：非 0 退出先按输出签名识别暂停；命中已知签名 → paused（不占锁，等用户续跑/交接）；
         // unknown 只记 pauseReason 字段，状态保持 failed（Z1 语义不变）。
         let pause = null;
-        if (!requested && code !== 0) pause = classifyPause(tails.get(job.id) ?? []);
+        if (!requested && code !== 0) {
+          /* ZB-112（用户真机指出）：「额度非常充足，显示额度不够」——**超时 ≠ 额度耗尽**。
+           *
+           * 现场：GLM-5.3-Flash 审查任务跑满 25 分钟被 runner 杀（exit=124，finish.kind=timeout），
+           * 但面板显示"已暂停：额度耗尽"，而实际额度 88%/91%。
+           * 原因：任务跑久了，输出里必然出现 429/限流字样（它自己派的子代理撞的、重试过的），
+           * `classifyPause` 从文本里扫到 `/429/` 就判 quota-exhausted。
+           *
+           * 超时是**确定事实**（exit 码 + done 行的 `(超时)` 标记），不该从文本里猜 —— 必须优先判定。 */
+          const isTimeout = code === 124 || job.timedOut === true;
+          if (isTimeout) {
+            job.timedOut = true;
+            job.timedOutBy = job.timedOutBy ?? 'runner';
+            /* ZB-112（用户真机指出「额度非常充足，显示额度不够」）：
+             * 超时**不是暂停**（ZB-28 既有语义：state='failed' + timedOut/timedOutBy 字段，
+             * 客户端据 timedOut 显示"超时终止 / runner 超时（exit 124…）"）——
+             * 但**绝不能再去跑 classifyPause**：任务跑久了输出里必然有 429/限流字样
+             * （它自己派的子代理撞的、重试过的），从文本里扫到 `/429/` 就判 quota-exhausted，
+             * 于是面板把"跑太久被超时杀掉"报成"额度耗尽"。
+             * 超时是**确定事实**（exit 码 + done 行 `(超时)` 标记），不从文本猜。 */
+            pause = null;
+          } else {
+            pause = classifyPause(tails.get(job.id) ?? []);
+          }
+        }
         if (pause && pause.reason === 'unknown') {
           job.pauseReason = 'unknown';
           job.pauseDetail = pause.detail;
@@ -3550,8 +3574,17 @@ export function createDispatcher(options = {}) {
         let out = '';
         const timer = setTimeout(() => {
           try { child.kill(); } catch { /* 已退出 */ }
+          /* ZB-111（GLM-5.3 审查 HIGH#4，已核实）：超时后**必须收敛 Promise**。
+           * 旧代码只 `child.kill()` 不 `done()` —— 而 `child.on('close')` 是唯一 resolve 点：
+           * ① Windows 上 SIGTERM 对 CLI 常不生效，子进程不退出 ⇒ 没有 close；
+           * ② `child.stderr` 全程未消费，管道写满后子进程阻塞在写 ⇒ 也不会 close。
+           * 任一发生，Promise 永不 settle ⇒ wire 层 `channelsProbeInFlight` 永久占位，
+           * 且自愈机制（1s TTL）被"永不返回的 in-flight"废掉 ⇒ **action=channels / 面板通道永久挂起**。
+           * 补 `done()`（Promise resolve 幂等，与 close 路径重复无害）+ 消费 stderr 防管道阻塞。 */
+          done(out || null);
         }, 15000);
         child.stdout?.setEncoding('utf8');
+        child.stderr?.resume(); // 丢弃 stderr（不读内容），只为防管道写满阻塞子进程
         child.stdout?.on('data', (d) => { out += d; });
         child.on('error', () => {
           clearTimeout(timer);
@@ -4269,6 +4302,13 @@ export function createDispatcher(options = {}) {
     if (job.state === 'queued' || job.state === 'running') {
       throw new Error(`retry: job ${jobId} 仍在 ${job.state}，等它落到 paused/终态再续`);
     }
+    /* ZB-111（审查 MED）：`concurrencyRetryTimers` 的注释承诺"kill/dismiss/新 attempt 时清理"，
+     * 但原先只在 kill 里清（且当时 kill 根本没清）。这里补上"新 attempt"这条：
+     * 手动 retry / 自动降级都会走到这里，旧定时器必须先作废，否则它会在 25 秒后再拉起一次。 */
+    {
+      const stale = concurrencyRetryTimers.get(jobId);
+      if (stale) { clearTimeout(stale); concurrencyRetryTimers.delete(jobId); }
+    }
     const targetProvider = opts.provider != null && opts.provider !== '' ? String(opts.provider) : null;
     const targetModel = opts.model != null && opts.model !== '' ? String(opts.model) : null;
     /* ZB-30：降级目标可指定思考强度（面板设置）。null/'' = 沿用原任务档位（下面的 spec 展开）。
@@ -4319,6 +4359,7 @@ export function createDispatcher(options = {}) {
       delete spec.model; // F2：--resume 时传 --model 必失败
       if (job.tag) spec.tag = `${job.tag}-r${prevAttempts.length + 1}`;
       const nj = dispatchRaw(spec, { raw: true }); // 簿记必须写在存储态真实对象上（get() 返回克隆，写它会丢）
+      nj.concurrencyRetries = Number(job.concurrencyRetries ?? 0); // ZB-111：同会话续跑也继承（见交接路径注释）
       nj.parentJobId = job.id;
       nj.attempts = [
         ...prevAttempts,
@@ -4360,6 +4401,11 @@ export function createDispatcher(options = {}) {
     /* 换通道到不支持 mode 的引擎（opencode / qoder）时，原任务带的 mode 必须丢掉（ZCode 支持）。 */
     if (targetEngine === 'opencode' || targetEngine === 'qoder' || targetEngine === 'codebuddy') delete spec.mode;
     const nj = dispatchRaw(spec, { raw: true }); // 簿记必须写在存储态真实对象上（get() 返回克隆，写它会丢）
+    /* ZB-111（GLM-5.3 审查 HIGH#2，已核实）：**并发自动重试必须把计数跨 job 继承**。
+     * retry 走的是"新建 job"路径，`concurrencyRetries` 是新 job 的字段 ⇒ 默认从 0 重计，
+     * 于是上游持续报并发满时会形成「每 25 秒一个新 job + 新进程」的**无界链**，
+     * 注释里承诺的"最多 8 次"只对单代生效（真机上能一直滚下去）。 */
+    nj.concurrencyRetries = Number(job.concurrencyRetries ?? 0);
     nj.parentJobId = job.id;
     nj.hopCount = Number(job.hopCount ?? 0) + 1;
     /* 交接把显式放行降级掉了（原任务是 opencode+auto，目标引擎不是 opencode）⇒ 留痕，别静默。 */
@@ -4447,6 +4493,23 @@ export function createDispatcher(options = {}) {
       persist();
       emit('job-updated', job);
       emit('queue-changed');
+      return true;
+    }
+    /* ZB-111（GLM-5.3 审查 HIGH#1，已核实）：**paused 任务没有子进程可杀**。
+     * 旧实现只 `killRequested.add(id)` 但不改 state，而并发自动重试的定时器守卫只查
+     * `state === 'paused'` ⇒ 25 秒后**把用户已经 kill 掉的任务重新拉起来**（行为上的"失控"）。
+     * 改为：清掉该 job 的自动重试定时器 + 直接落 `killed` 终态。 */
+    if (job.state === 'paused') {
+      const timer = concurrencyRetryTimers.get(id);
+      if (timer) { clearTimeout(timer); concurrencyRetryTimers.delete(id); }
+      job.state = 'killed';
+      job.parseWarnings.push(reason);
+      job.finishedAt = new Date(nowMs()).toISOString();
+      job.killedAt = job.finishedAt;
+      persist();
+      emit('job-updated', job);
+      releaseLocks(job);
+      pump();
       return true;
     }
     killRequested.add(id);
