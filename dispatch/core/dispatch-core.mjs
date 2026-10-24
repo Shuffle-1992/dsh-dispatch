@@ -4497,7 +4497,17 @@ export function createDispatcher(options = {}) {
      * —— 等于把同一个不可重试的错误撞了 10 遍，顺序派发完全失效。
      * 判据修正：`targetModel != null && targetModel !== job.spec.model` ⇒ **不算同会话续跑**。 */
     const modelChanged = targetModel != null && targetModel !== (job.spec.model ?? null);
-    if (sameChannel && !engineChanged && !modelChanged && job.sessionId) {
+    /* ZB-120（真机实测发现，2026-10-24）：**免费额度（app-server）通道不支持 `--resume`**。
+     *
+     * 现场：一个 ZCode 任务撞 `concurrency-limited`（model concurrency limit exceeded）后，
+     * 自动重试创建新 job —— retry 的"同通道 + 有 sessionId ⇒ 续跑"判据让它走了 `--resume`，
+     * 而 app-server 后端直接报 `免费额度（app-server）通道暂不支持 --resume`，
+     * 于是自动重试**必然失败**（`pauseReason=unknown`，看起来像莫名其妙的失败）。
+     *
+     * 根因：那个 sessionId 是从**台账回读**来的（`ledgerMatched=true`），而 gift 后端的会话
+     * 根本不能跨进程续跑。判据补一条：目标通道是 `account:*-start-plan` 形态时，一律走交接重跑。 */
+    const appServerProvider = /^account:[a-z]+-start-plan$/.test(String(targetProvider ?? origProvider ?? ''));
+    if (sameChannel && !engineChanged && !modelChanged && job.sessionId && !appServerProvider) {
       const spec = { ...job.spec, resume: job.sessionId };
       /* ZB-45：`opts.auto` 显式优先 —— false 表示"这次明确不放行"，true 表示"这次放行"
        * （沿用 job.spec 是缺省行为，只有调用方显式给了 opts.auto 才覆盖）。 */
