@@ -122,6 +122,8 @@ const PUSH_THROTTLE_MS = 300;
 /** ZB-113：**会发 progress 心跳**的引擎（决定 `stalled` 是否可用「无心跳=卡住」推论）。
  *  zcode-run 用 spawnSync 同步阻塞、发不出心跳 ⇒ 不在名单内（详见 slimJob 里的注释）。 */
 const HEARTBEAT_ENGINES = new Set(['opencode', 'qoder', 'codebuddy']);
+/** ZB-118（审查 LOW）：`stalled` 判定阈值 —— 原先在 `slimJob` 与 `briefJob` 里各写一份 `150_000`。 */
+const STALLED_MS = 150_000;
 /** Remote 面服务名（官方惯例为小驼峰，如 pluginRegistryProbe / pluginManager）。 */
 export const FACE_NAME = 'dispatch';
 /** 宿主→客户端变更事件名（官方命名惯例："<区域>/<事件>"，如 plugin-manager/changed）。 */
@@ -228,11 +230,12 @@ export function slimJob(job) {
     },
     usage: { ...(usage ?? {}) },
     /* ZB-40（用户要求：「能看出派发的进程确实在工作还是可能卡住」）——
-     * `progress` 来自 runner 每 10s 的心跳行；`stalledSec` = 距上次心跳的秒数，
-     * `stalled` = running 且超过 150s 没有任何心跳/输出（面板据此显示「可能卡住」徽标）。 */
+     * `progress` 来自 runner 每 10s 的心跳行；`lastProgressAgoSec` = 距上次心跳的秒数，
+     * `stalled` = running 且超过 `STALLED_MS` 没有任何心跳（面板据此显示「可能卡住」徽标）。 */
     progress: job.progress ?? null,
+    /* ZB-118（审查 LOW）：原先这里还有 `stalledSec`，它与 `lastProgressAgoSec` **恒同值**
+     * （同一表达式算了两次），且全仓库**零消费者**（客户端只读 `lastProgressAgoSec`）⇒ 删除。 */
     lastProgressAgoSec: Number.isFinite(job.lastProgressAt) ? Math.round((Date.now() - job.lastProgressAt) / 1000) : null,
-    stalledSec: job.lastProgressAt ? Math.round((Date.now() - job.lastProgressAt) / 1000) : null,
     /* ZB-113（GLM-5.3-Flash 审查 HIGH#4，已核实）：**没有心跳的引擎不该被判 stalled**。
      *
      * 实测：`zcode-run.mjs` 全文 0 处 progress（它用 `spawnSync` 同步阻塞，阻塞期间根本没法发心跳），
@@ -245,7 +248,7 @@ export function slimJob(job) {
      * 改成异步 spawn（大改动，风险高），届时再补心跳。在那之前，ZCode 的进度只能看 tail/elapsed。 */
     stalled: job.state === 'running'
       && HEARTBEAT_ENGINES.has(String(job.spec?.engine ?? '').toLowerCase())
-      && (!job.lastProgressAt || Date.now() - job.lastProgressAt > 150_000),
+      && (!job.lastProgressAt || Date.now() - job.lastProgressAt > STALLED_MS),
     tailCount: Array.isArray(tailLines) ? tailLines.length : 0,
     parseWarnings: (parseWarnings ?? []).slice(-5),
     /* ZB-75：思考档位核对结论（不符时给出 requested/observed/suggested）——
@@ -291,7 +294,7 @@ export function briefJob(job) {
    * 否则每个 running 的 ZCode 任务都被标「可能卡住」，且 briefJob 会算出 `lastProgressAgoSec: NaN`。 */
   const stalled = job.state === 'running'
     && HEARTBEAT_ENGINES.has(String(spec.engine ?? '').toLowerCase())
-    && (!job.lastProgressAt || Date.now() - job.lastProgressAt > 150_000);
+    && (!job.lastProgressAt || Date.now() - job.lastProgressAt > STALLED_MS);
   /* 空值不占位：宿主 spill 预算按 **chars/4** 估算（dsh-token-meter CHARS_PER_TOKEN=4），
    * 而键名本身才是大头（一条记录 ~490 B 里约一半是键名）——省略 null 字段既省预算也更少噪音。
    * ⚠️ 只删 null/undefined：`exitCode: 0`、`hopCount: 0` 是有意义的值，不能当空值删掉。 */
@@ -1047,12 +1050,16 @@ export function createRemoteFace(dispatcher, config = {}, opts = {}) {
    * 现在：快照路径**只读已缓存的清单**（有就带上，没有就先给空数组），刷新一律后台进行。
    * 通道下拉的权威取数仍在 `channels()`（面板挂载时调用，那里 await 是合理的）。
    */
+  /* ZB-118（审查 LOW）：**"这次探测算失败吗"的判据** —— 原先在 `cachedChannels` 与
+   * `channelsCached` 里各写一份同样的三元表达式；改一处漏一处就会让两条路径的"多久重试"不一致。
+   * 失败 ⇒ 短 TTL（自愈快），成功 ⇒ 正常 TTL。 */
+  const channelsCacheIsFailed = (value) =>
+    (value?.channels ?? []).length === 0 || (value?.warnings ?? []).length > 0;
+  const channelsCacheTtl = (value) => (channelsCacheIsFailed(value) ? CHANNELS_ERROR_TTL_MS : CHANNELS_TTL_MS);
+
   function cachedChannels() {
     const now = Date.now();
-    const stale = !channelsCache
-      || now - channelsCache.at >= ((channelsCache.value.channels ?? []).length === 0 || (channelsCache.value.warnings ?? []).length > 0
-        ? CHANNELS_ERROR_TTL_MS
-        : CHANNELS_TTL_MS);
+    const stale = !channelsCache || now - channelsCache.at >= channelsCacheTtl(channelsCache.value);
     if (stale && channelsProbeInFlight == null) {
       /* 后台刷新：不 await、不 reject 到调用方；失败保留旧值（有旧值总比空好），
        * 下一次快照轮询会按短 TTL 再来一遍（自愈）。 */
@@ -1082,8 +1089,7 @@ export function createRemoteFace(dispatcher, config = {}, opts = {}) {
    *  双引擎：顶层 `engines` / `opencodeVersion` 一起透传；失败走**短 TTL**（1s）以便轮询自愈。 */
   async function channelsCached() {
     if (channelsCache) {
-      const failed = (channelsCache.value.channels ?? []).length === 0 || (channelsCache.value.warnings ?? []).length > 0;
-      const ttl = failed ? CHANNELS_ERROR_TTL_MS : CHANNELS_TTL_MS;
+      const ttl = channelsCacheTtl(channelsCache.value); // ZB-118：与 cachedChannels 共用同一判据
       if (Date.now() - channelsCache.at < ttl) return channelsCache.value;
     }
     /* 已有一次探测在飞 ⇒ 复用它（避免并发 spawn 多个 runner —— 那是真机实测过的坑）。 */

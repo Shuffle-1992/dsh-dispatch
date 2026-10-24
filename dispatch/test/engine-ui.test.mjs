@@ -204,10 +204,15 @@ console.log('\n⑦ 宿主侧：通道清单失败结果短 TTL 缓存');
 {
   const wireSrc = readFileSync(join(PKG, 'wire.host.mjs'), 'utf8');
   ok(/const CHANNELS_ERROR_TTL_MS = 1000;/.test(wireSrc), '失败结果短 TTL 常量存在（1s）');
-  ok(/const failed = \(channelsCache\.value\.channels \?\? \[\]\)\.length === 0 \|\| \(channelsCache\.value\.warnings \?\? \[\]\)\.length > 0;/.test(wireSrc),
+  /* ZB-118：判据已抽成共享辅助函数（原先在 cachedChannels / channelsCached 各写一份三元表达式）。
+   * 断言语义不变 —— 照样钉"空清单或有 warnings = 失败"与"失败 1s / 成功 5s"。 */
+  ok(/const channelsCacheIsFailed = \(value\) =>[\s\S]{0,120}?\.length === 0 \|\| \(value\?\.warnings \?\? \[\]\)\.length > 0;/.test(wireSrc),
     '失败判据 = 空清单 或有 warnings');
-  ok(/const ttl = failed \? CHANNELS_ERROR_TTL_MS : CHANNELS_TTL_MS;/.test(wireSrc),
+  ok(/const channelsCacheTtl = \(value\) => \(channelsCacheIsFailed\(value\) \? CHANNELS_ERROR_TTL_MS : CHANNELS_TTL_MS\);/.test(wireSrc),
     '★ 失败走 1s、成功走 5s（失败不会被缓存满 5s）');
+  /* 两条缓存路径都必须用同一判据（防一边改另一边没改） */
+  ok((wireSrc.match(/channelsCacheTtl\(channelsCache\.value\)/g) ?? []).length >= 2,
+    '★ cachedChannels 与 channelsCached 共用同一判据');
   ok(/engine: spec\?\.engine \?\? null/.test(wireSrc) && /auto: Boolean\(spec\?\.auto\)/.test(wireSrc),
     'slimJob 的 spec 也带 engine/auto（面板与工具读到同一份事实）');
 }

@@ -4769,6 +4769,7 @@ export function createDispatcher(options = {}) {
     engines: [...ENGINES],
     engineLimits: Object.fromEntries(ENGINES.map((e) => [e, engineLimit(e)])),
     opencodeRunnerPath,
+    qoderRunnerPath, // ZB-118：原先漏导出（opencode/codebuddy 有、qoder 没有），外部无法确认它的路径
     codebuddyRunnerPath,
     /* ZB-87：WorkBuddy 登录助手（面板按钮用）。
      * 返回的都是纯 JSON（无 ChildProcess/句柄），可直接过 wire 边界。 */
