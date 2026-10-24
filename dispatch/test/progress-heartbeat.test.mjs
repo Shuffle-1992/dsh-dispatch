@@ -44,8 +44,6 @@ test('ZB-40 ①：心跳行可被解析（完整形态 + 省略 lastTool/session
 });
 
 test('ZB-40 ②：slimJob 依心跳给出 stalled / lastProgressAgoSec', () => {
-  /* ZB-113：`stalled` 只在"该引擎会发心跳"时才成立 —— 基准改用 opencode（它 22 处 progress）。
-   * ZCode 的例外见本测试末尾的断言（它用 spawnSync 阻塞、运行期间零输出 ⇒ 永远没有心跳）。 */
   const base = { id: 'j-x', state: 'running', spec: { kind: 'prompt', engine: 'opencode' }, tailLines: [] };
   const fresh = slimJob({ ...base, lastProgressAt: Date.now() - 5_000, progress: { stage: 'waiting-turn' } });
   assert.equal(fresh.stalled, false, '5s 前有心跳 ⇒ 不算卡住');
@@ -53,19 +51,26 @@ test('ZB-40 ②：slimJob 依心跳给出 stalled / lastProgressAgoSec', () => {
   assert.equal(fresh.progress.stage, 'waiting-turn');
 
   const stale = slimJob({ ...base, lastProgressAt: Date.now() - 300_000 });
-  assert.equal(stale.stalled, true, '300s 无心跳且 running ⇒ 标记可能卡住');
+  assert.equal(stale.stalled, true, '有心跳但 300s 没更新且 running ⇒ 标记可能卡住');
 
+  /* ZB-120（真机测试修正语义）：**从没收到过心跳 ≠ 卡住**。
+   * 原先这里断言 `true`（"也算可疑"），但真机证明这会把整类任务全标红：
+   * 同一个 ZCode 引擎，print 模式（spawnSync 阻塞）从不发心跳、免费额度(app-server)模式却有。
+   * 按"引擎会不会发心跳"去猜是错的（白名单站不住），改看**事实**：
+   * `lastProgressAt` 无值 ⇒ 无从判断 ⇒ 不报（宁可不报，也不要全量误标）。 */
   const never = slimJob({ ...base });
-  assert.equal(never.stalled, true, 'running 但从未收到心跳 ⇒ 也算可疑（原先只能看到沉默）');
+  assert.equal(never.stalled, false, '★ running 但从未收到心跳 ⇒ 不报（无从判断，不是"可疑"）');
+  assert.equal(never.lastProgressAgoSec, null, '无心跳 ⇒ 秒数为 null（不是 NaN）');
 
   const done = slimJob({ ...base, state: 'done', lastProgressAt: null });
   assert.equal(done.stalled, false, '终态不算卡住');
 
-  /* ZB-113（GLM-5.3-Flash 审查 HIGH#4，已核实）：ZCode 执行器用 spawnSync 同步阻塞、
-   * 运行期间零输出 ⇒ 它**不可能**有 progress 心跳。旧判据对每个 running 的 ZCode 任务恒判
-   * `stalled=true`，面板给所有 ZCode 任务挂「可能卡住」徽标（真机观感就是这样，误导用户）。 */
-  const zcode = slimJob({ id: 'j-z', state: 'running', spec: { kind: 'prompt', engine: 'zcode' }, tailLines: [], lastProgressAt: null });
-  assert.equal(zcode.stalled, false, '★ 不发心跳的引擎（ZCode）不算 stalled');
+  /* ZB-120：**同一个 ZCode 引擎两种模式行为不同** —— print 模式无心跳 ⇒ 不报；
+   * gift(app-server) 模式有心跳 ⇒ 超时照样能判卡住（这才是"看事实"的价值）。 */
+  const zcodePrint = slimJob({ id: 'j-zp', state: 'running', spec: { kind: 'prompt', engine: 'zcode' }, tailLines: [], lastProgressAt: null });
+  assert.equal(zcodePrint.stalled, false, '★ ZCode print 模式（无心跳）不误标');
+  const zcodeGift = slimJob({ id: 'j-zg', state: 'running', spec: { kind: 'prompt', engine: 'zcode' }, tailLines: [], lastProgressAt: Date.now() - 300_000 });
+  assert.equal(zcodeGift.stalled, true, '★ ZCode gift 模式（有心跳但停了 300s）能正确判卡住');
 });
 
 test('ZB-40 ③：runner 侧形态（turn.failed 分支 / 心跳模板 / 模型⇄权益校验）', () => {
