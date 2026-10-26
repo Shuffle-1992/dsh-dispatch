@@ -1,0 +1,93 @@
+① ZB-61：真 core `list()` × brief 投影 / 排序 / dismissed / limit 边界
+  ✓ C 落地为 done（实际 "done"）
+  ✓ D 落地为 paused（实际 "paused"）
+  ✓ 真 core 返回的 job 可被 get 复核（实际 "j-mvp9ef0c-0-1d73"）
+  ✓ dismiss 前 total = 2（真 core list 的条数）（实际 2）
+  ✓ dismiss paused 的 job ok:true（paused 也算落地）（实际 true）
+  ✓ dismiss 后 total 减 1（真 core list × 过滤生效）（实际 1）
+  ✓ 被 dismiss 的 job 不在真 core list 的结果里
+  ✓ 未 dismiss 的 job 仍在（不是清空）
+  ✓ A/B 均已入队（maxConcurrent=1 ⇒ B 排队）（实际 true）
+  ✓ total = 3 条**真实** job（不是桩造的）（实际 3）
+  ✓ running 排在第一位（实际 "running"）
+  ✓ queued 紧随其后（并发已满，B 在排队）（实际 "queued"）
+  ✓ 落地 job 在最后（实际 "done"）
+  ✓ 活动项就是刚派发的那两条
+  ✓ brief 形状不含 spec（j-mvp9ef86-2-3a33）
+  ✓ brief 形状不含 lockPaths/usage/parseWarnings（j-mvp9ef86-2-3a33）
+  ✓ brief 保留选动作必需的字段（j-mvp9ef86-2-3a33）
+  ✓ brief 形状不含 spec（j-mvp9ef8t-3-c287）
+  ✓ brief 形状不含 lockPaths/usage/parseWarnings（j-mvp9ef8t-3-c287）
+  ✓ brief 保留选动作必需的字段（j-mvp9ef8t-3-c287）
+  ✓ brief 形状不含 spec（j-mvp9ef0c-0-1d73）
+  ✓ brief 形状不含 lockPaths/usage/parseWarnings（j-mvp9ef0c-0-1d73）
+  ✓ brief 保留选动作必需的字段（j-mvp9ef0c-0-1d73）
+  ✓ 真 job 的 tailCount 来自实际输出行数（可据此决定要不要 tail）（实际 10）
+  ✓ full=true 时每条都带 spec.body（旧形状在真 job 上仍然可用）
+  ✓ full=true 时带 progress/usage
+  ✓ shape=full（实际 "full"）
+  ✓ shape=brief（默认）（实际 "brief"）
+  ✓ limit 缺省 ⇒ 50 条（实际 50）
+  ✓ total 是全量条数（不是本页条数）（实际 60）
+  ✓ note 写明省略了多少（不静默截断）（实际 "已省略 10 条更早的 job（共 60 条，本次只回前 50 条）：取更多用 action=list limit=<n>（上限 200）；要完整字段（含派发原文）用 full=true **并配小 limit**（如 full=true limit=10）—— 不配 limit 的全量 full 可能上百 KB，会被宿主**从中间截断**；单条输出用 action=tail id=<jobId>"）
+  ✓ note 告诉调用方怎么取完整形状（实际 "已省略 10 条更早的 job（共 60 条，本次只回前 50 条）：取更多用 action=list limit=<n>（上限 200）；要完整字段（含派发原文）用 full=true **并配小 limit**（如 full=true limit=10）—— 不配 limit 的全量 full 可能上百 KB，会被宿主**从中间截断**；单条输出用 action=tail id=<jobId>"）
+  ✓ limit=0 ⇒ 回默认 50（不当成"空列表"）（实际 50）
+  ✓ limit 非数字 ⇒ 回默认 50（不抛）（实际 50）
+  ✓ limit 负数 ⇒ 回默认 50（实际 50）
+  ✓ limit 超上限 ⇒ 只受实际条数约束（实际 60）
+  ✓ limit=3 生效（实际 3）
+  ✓ 省略数按 limit 重算（实际 "已省略 57 条更早的 job（共 60 条，本次只回前 3 条）：取更多用 action=list limit=<n>（上限 200）；要完整字段（含派发原文）用 full=true **并配小 limit**（如 full=true limit=10）—— 不配 limit 的全量 full 可能上百 KB，会被宿主**从中间截断**；单条输出用 action=tail id=<jobId>。"）
+  ✓ limit=上限(200) ⇒ 全量、无 note（实际 60）
+  ✓ 无省略时不给 note（实际 undefined）
+  ✓ 60/60 全部返回时不加 note（没有省略就不吓唬调用方）（实际 undefined）
+  ✓ 50/60 时确实带省略提示（实际 "已省略 10 条更早的 job（共 60 条，本次只回前 50 条）：取更多用 action=list limit=<n>（上限 200）；要完整字段（含派发原文）用 full=true **并配小 limit**（如 full=true limit=10）—— 不配 limit 的全量 full 可能上百 KB，会被宿主**从中间截断**；单条输出用 action=tail id=<jobId>"）
+  ✓ 模型可见文本里有 total（实际 "{\n  \"ok\": true,\n  \"total\": 60,\n  \"counts\": {\n    \"done\": 60\n  },\n  \"shape\": \"brief\",\n  \"jobs\": [\n    {\n      \"id\": \"j-gap-000\",\n      \"state\": \"done\",\n      \"kind\": \"prompt\",\n      \"engine\": \"zcode\",\n"）
+  ✓ 模型可见文本里有 counts（实际 "{\n  \"ok\": true,\n  \"total\": 60,\n  \"counts\": {\n    \"done\": 60\n  },\n  \"shape\": \"brief\",\n  \"jobs\": [\n    {\n      \"id\": \"j-gap-000\",\n      \"state\": \"done\",\n      \"kind\": \"prompt\",\n      \"engine\": \"zcode\",\n"）
+  ✓ ★ 有省略时，模型可见文本里带省略提示（模型知道"还有更多"，不会以为自己看到了全部）（实际 "{\n  \"ok\": true,\n  \"total\": 60,\n  \"counts\": {\n    \"done\": 60\n  },\n  \"shape\": \"brief\",\n  \"jobs\": [\n    {\n      \"id\": \"j-gap-000\",\n      \"state\": \"done\",\n      \"kind\": \"prompt\",\n      \"engine\": \"zcode\",\n"）
+  ✓ 模型可见文本里有 shape（brief/full 可辨认）（实际 "{\n  \"ok\": true,\n  \"total\": 60,\n  \"counts\": {\n    \"done\": 60\n  },\n  \"shape\": \"brief\",\n  \"jobs\": [\n    {\n      \"id\": \"j-gap-000\",\n      \"state\": \"done\",\n      \"kind\": \"prompt\",\n      \"engine\": \"zcode\",\n"）
+  ✓ 60 条 brief 的模型可见文本 < 30 KB（实际 24.8 KB）
+  ✓ full 文本显著更大（137.2 KB vs 24.8 KB）⇒ 紧凑形状正是防宿主 spill 截断的那一步
+  ✓ 捕获到 tool 时它确实有 output.render
+  · 说明：真实 output.render 不可达（[dispatch] @deepseek-ai/dsh-tools 不可用（defineTool 未解析）：agent 工具 dispatch 未注册（非致命，UI 与派发核心不受影响））；上面用 render 契约（JSON.stringify(value,null,2)）度量同一 payload。
+
+② ZB-62：非 idle → inject 的 inserted 对账（复刻真机同步时序）
+  ✓ 忙碌会话走 inject（不开新一轮）（实际 ["inject"]）
+  ✓ delivered=1（实际 1）
+  ✓ 注入路径计数正确（实际 1）
+  ✓ 没有误记 followup（实际 0）
+  ✓ ★ 同步 inserted 对上了账（先登记 id、再投递）（实际 1）
+  ✓ 未确认归零（消息确实进了 Inbox）（实际 0）
+  ✓ 投递后归属释放（owners 不随历史 job 增长）（实际 0）
+  ✓ 通知消息 role=user（与 dsh-tool-jobs 同形）（实际 "user"）
+  ✓ source.kind=dispatch（客户端据此渲染成"通知触发"卡片）（实际 "dispatch"）
+  ✓ source.form=notice（换别的串会让客户端 contextBody 抛错）（实际 "notice"）
+  ✓ 消息带可对账的 id
+  ✓ 折叠行摘要在客户端上限内
+
+②b ZB-62：deliveredIds / pendingInsert 有上限（长跑不许无界增长）
+  ✓ 投递 1100 条全部记账（实际 1100）
+  ✓ pendingInsert 有界（1000 < 1100）
+  ✓ owners 不随投递数增长（每条投递后即释放）（实际 0）
+  ✓ ★ 最早那条已不在对账表里（被淘汰 ⇒ 不再计数）（实际 0）
+  ✓ 最新那条仍能对上账（淘汰只丢最旧，不动最新）（实际 1）
+  ✓ 确认后未确认数减 1（实际 999）
+
+③ ZB-63：client 槽位 key ↔ index.js 工具名（key 拼错 = 卡片静默不生效）
+  ✓ client.js 经 __ModuleLoader__ 注册（id=dsh-dispatch）
+  ✓ client.js 的 apply() 不抛错（实际 null）
+  ✓ client.js 真的注册了 keyed 槽位 tool.call.toolview（不是只写在注释里）
+  ✓ 槽位 key 是非空字符串（"dispatch"）
+[dispatch] $mount 成功：remote.dispatch 已本地挂载
+  ✓ 取到宿主工具名（"dispatch"，来源：index.js 里 defineTool 的 name 字面量（工具对象不可达））
+  ✓ ★ 槽位 key === 工具名（"dispatch" vs "dispatch"）—— 不一致则卡片静默不生效（实际 "dispatch"）
+  ✓ 槽位 key 没有被错写成槽位名本身
+  ✓ 同一个槽位只注册了一次（重复注册会让宿主派发歧义）（实际 1）
+
+===== 新功能非 happy path：75 PASS / 0 FAIL =====
+未覆盖（如实标注）：
+  · ZB-61 的 output.render **真实调用**未覆盖（纯 node 下 defineTool 未解析，见 box.why）；已按契约度量同一 payload。
+  · ZB-63 的宿主工具名取自 index.js 源码文本（纯 node 下 tool 对象不可达）；已尽量缩小到 defineTool 字面块。
+
+--- STDERR ---
+[dispatch] 宿主远端面未注册（客户端将走降级链）： provide 不可用
+[dispatch] 宿主远端面未注册（客户端将走降级链）： provide 不可用

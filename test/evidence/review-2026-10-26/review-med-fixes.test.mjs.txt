@@ -1,0 +1,14 @@
+✔ ZB-115 ①：APPLIED_MAPPER 取值有兜底（漏表不再热路径抛错） (3.2519ms)
+✔ ZB-115 ②：parseWarnings 有上限且在唯一出口（persist）截断 (1.2289ms)
+✔ ZB-115 ③：startCodebuddyLogin 并发去重（复用进行中的 Promise） (1.5152ms)
+✔ ZB-116 ④：四个执行器的参数构造共用 buildKindArgs / buildTailArgs (9.545ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 30.1446
+
+--- STDERR ---

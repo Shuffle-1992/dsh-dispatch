@@ -1,0 +1,16 @@
+✔ ZB-37 ①：provider/model 不得用 enum 限制（否则免费额度通道没法作为派发目标） (4.3621ms)
+✔ ZB-37 ②：工具描述必须写明「撞额度怎么办」与「不要直跑 runner」 (0.6259ms)
+✔ ZB-37 ③：recentQuotaExhausted 从台账认出 429 通道，并按 provider 归一匹配 (9.9648ms)
+✔ ZB-38 ⑤：派发到"刚撞过额度"的通道时给出 warning + suggestedProvider（不阻塞派发） (10.7994ms)
+✔ ZB-37 ④：attachGiftQuota(…, ledgerPath) 把额度提示挂到通道上（面板与工具同源） (10.0987ms)
+✔ ZB-39 ⑥：显式指定"已撞顶"通道时自动改派到用户选定的可用通道（不再硬闯 429） (16.6969ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 68.4988
+
+--- STDERR ---

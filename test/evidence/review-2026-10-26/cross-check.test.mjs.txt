@@ -1,0 +1,15 @@
+  ✓ C0 能从 client.js 取到 KNOWN_ENGINES 定义（若改名请同步本测试的锚点）
+  ✓ C1 能从 client.js 取到状态表（JOB_STATE_META → TV_PILL 段）
+  ✓ C2 能从 client.js 取到 PAUSE_LABEL_KEY 定义
+  ✓ F2 客户端 KNOWN_ENGINES 与宿主权威 ENGINES（collab-kit/run-line-protocol.mjs）逐字一致
+  ✓ F3 客户端「可关闭」状态集 === 宿主 core.SETTLED_STATES（面板显示"能关"而宿主拒绝，就是这条漂了）
+  ✓ F4 宿主的暂停原因在客户端都有中文标签（缺：无）
+  ✓ F4b 客户端没有多出宿主不产生的暂停原因（多：无）
+  ✓ F1b 找到唯一的 remote 方法描述符（找到 1 个）
+  ✓ F1c 描述符声明了 21 个方法
+  ✓ F1 每个声明的方法在真实例上都是 function（缺：无）
+  ✓ F1d 实例上没有"未声明"的公开方法（多：无）
+
+===== 客户端↔宿主 cross-check：11 PASS / 0 FAIL =====
+
+--- STDERR ---

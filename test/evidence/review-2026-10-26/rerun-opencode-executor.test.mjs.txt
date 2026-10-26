@@ -1,0 +1,37 @@
+✔ ① 真实 6 事件流聚合：文本/工具/用量/sessionID/上下文/turnCount (7.0227ms)
+✔ ①b tokens 缺字段不许抛；无 step_finish 时 requests/用量为 0 且不崩 (0.6471ms)
+✔ ①c part.tokens 只给部分字段时，缺失字段不被当成 0 混入 (0.4561ms)
+✔ ② 未知 type + JSON 坏行 + 非对象行：继续本轮，记 unknownEvents/warnings (0.8782ms)
+✔ ②b 未知事件原文数组有上限（防上游狂刷把 result.json 撑爆） (0.5555ms)
+✔ ③ 心跳行：完整形态可解析（stage/elapsed/chars/tools/lastTool/stageAgo/session），无 session 时省略 (0.7068ms)
+✔ ③b usage/context/done 行格式；窗口未知时 context 行返回 null（不编造） (0.7615ms)
+✔ ④ 未知参数 / 不支持参数 / 互斥与非法值：一律 fail-fast (7.0207ms)
+✔ ④b --task 优先于 --prompt；--provider opencode/--no-ledger/--reasoning-level 为兼容令牌（大声记说明） (0.6085ms)
+✔ ④c 模型 id 规范化 + argv 构造（含 --resume 绝不传 -m） (0.8261ms)
+✔ ④d buildPrompt：--task 内联任务包、--target 按 prompt、--memory-ban 追加禁令 (8.5335ms)
+✔ ④e 可执行文件解析与 spawn 形态（零依赖、不执行任何 opencode 命令） (10.0225ms)
+✔ ⑤ models 解析：真实 12 行 → 12 个 id；非 opencode/* 被过滤且不猜 (1.2422ms)
+✔ ⑤b models --verbose 解析：limit.context / variants 键（真实形状：id 行 + pretty JSON 块） (2.3532ms)
+✔ ⑥ 端到端成功：汇总行齐全、result.json 正确、out.log 是原始 NDJSON (499.3441ms)
+✔ ⑥b 端到端 --resume：只带 -s（无 -m），且 result.modelApplied=false (349.9521ms)
+✔ ⑥c 端到端 --auto：显式传入才透传，并打可审计告知行 (617.1865ms)
+✔ ⑥d 端到端 --memory-ban / --variant：行与注入都对得上 (436.8234ms)
+✔ ⑥e 端到端 task：任务包内联 + task 行 + argv 收到内联后的 prompt (379.2192ms)
+✔ ⑥f 端到端 --list-models：stdout 只有裸 id（方案 A）；--with-variants 才追加 variants 行 (919.794ms)
+✔ ⑥g 端到端 --version：只打一行版本号 (298.4671ms)
+✔ ⑥h 端到端上游失败：退出码透传 + 原始错误**逐字**到 stderr；result.json 记 exit (617.4204ms)
+✔ ⑥i 端到端超时：杀进程树、exit 124、done 行带 (超时)、result.timedOut=true (4102.2412ms)
+✔ ⑥j 端到端：找不到 opencode ⇒ exit 1 + 可读错误（不崩） (114.49ms)
+✔ ⑦a resolveExitCode：超时 124 最高优先；否则透传真实码；拿不到才 1 (0.4667ms)
+✔ ⑦b 端到端回归：慢但正常的调用**不得被固定 15s 兜底误杀**（GLM 首响 ~14.2s 的同类场景） (17016.7697ms)
+✔ ⑦ 源锁：不伪装身份 / 不碰用户 OpenCode 数据目录 / 探测不与 run 并发 / 兜底不脱离 --timeout-min / --auto 默认关 (1.8487ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 25419.0055
+
+--- STDERR ---

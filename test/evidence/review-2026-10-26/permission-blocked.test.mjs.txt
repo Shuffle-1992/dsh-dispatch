@@ -1,0 +1,37 @@
+
+A. 暂停分类：真机原文必须命中 permission-blocked
+  ✓ A1 存在 permission-blocked 暂停分类
+  ✓ A2 ★ 命中真机原文：「Error: Fetch https://example.com?」
+  ✓ A2 ★ 命中真机原文：「Error: Allow searching the web?」
+  ✓ A2 ★ 命中真机原文：「Allow Bash to run `npm --version`?」
+  ✓ A2 ★ 命中真机原文：「This action needs your approval」
+  ✓ A2 ★ 命中真机原文：「The tool use was denied」
+  ✓ A3 不误报普通内容：「任务完成，已创建 README.md」
+  ✓ A3 不误报普通内容：「node --version 输出 v24.14.1」
+  ✓ A3 不误报普通内容：「the web is a nice place」
+  ✓ A4 ★ permission-blocked **不**进 AUTO_FALLBACK_REASONS（换通道治不了权限）
+
+B. 执行器把"权限未放行"显式写 stderr（core 只读 stdout/stderr）
+  ✓ B1 执行器有权限提示识别正则
+  ✓ B2 ★ 执行器写出可读的"工具权限未放行"说明
+  ✓ B3 ★ 走 **stderr**（core 的 classifyPause 只看 stdout/stderr，不看 result.json）
+  ✓ B4 ★ 说明里给出可执行的修法（auto:true → bypass_permissions）
+  ✓ B5 ★ 明确否认"沙箱限制"这一误诊（真机就栽在这句话上）
+
+C. 面板可读文案（三处同步）
+  ✓ C1 PAUSE_LABEL_KEY 映射 permission-blocked → pPerm
+  ✓ C2 client STRINGS.zh 有文案
+  ✓ C3 client STRINGS.en 有文案
+  ✓ C4 locale/zh.json 同步（实际 "工具权限未放行"）
+  ✓ C5 locale/en.json 同步（实际 "Tool permission not granted"）
+
+D. 教学文档写清了能力边界（用户要求"教学不到位"要修）
+  ✓ D1 教学有「Qoder 的真实能力边界」一节
+  ✓ D2 ★ 明确说"写文件正常"（破除"只能读写工作区"的误解）
+  ✓ D3 给出修法 auto:true
+  ✓ D4 ★ 明确"不是引擎能力不足"（防再次放弃派发）
+  ✓ D5 记录了这个误诊（可被后来者检索到）
+
+===== ZB-76 权限未放行 ≠ 沙箱限制：25 PASS / 0 FAIL =====
+
+--- STDERR ---

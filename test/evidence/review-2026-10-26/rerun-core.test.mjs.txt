@@ -1,0 +1,24 @@
+✔ 并发 3 个 dispatch（maxConcurrent=1）→ 执行区间不重叠且 FIFO (1397.2105ms)
+✔ ZB-16 锁模型：不同文件集可并行、同文件集排队 FIFO、锁文件内容与释放 (1372.4394ms)
+✔ kill()：running → killed 且退出码非 0；queued → 直接 killed 不再启动 (684.6381ms)
+✔ dispatcher 看门狗：超过 timeoutMin+grace 强杀并标 timedOut (1934.4784ms)
+✔ 台账回读合并：补缺字段、坏行不崩、sessionId 不匹配时不误绑 (852.781ms)
+✔ quota.aggregate：窗口边界（5h 半开/周一起/当日零点）、坏行计数、文件缺失不崩 (125.1319ms)
+✔ restore()：上次残留 running/queued → interrupted（记录原因），队列继续可用 (537.9498ms)
+✔ JOBS_FILE_CAP 淘汰终态时回收其捕获日志；越界路径被拒绝（ZB-05） (568.4158ms)
+✔ snapshot() 纯 JSON 可序列化（无循环引用），终态后依旧 (472.3097ms)
+✔ runner 路径无效 → state=failed、exitCode 记录、有 warning 不崩 (11.2957ms)
+✔ parseRunnerLine 单元：真实 runner 各种行格式（含 - 值与三行分开的 out/err/result） (3.1335ms)
+✔ 清理临时目录 (27.2932ms)
+✔ ZB-44 parseRunnerLine(line, engine)：按引擎取前缀；省略 ⇒ 两个已知前缀都试；zcode 逐字不变 (4.1831ms)
+✔ ZB-44 parseProviderTable(text, engine)：opencode 的 variants 与 zcode 的 reasoning-levels 走同一段实现 (1.5481ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 8006.6133
+
+--- STDERR ---

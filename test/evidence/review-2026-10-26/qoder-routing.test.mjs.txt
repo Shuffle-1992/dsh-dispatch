@@ -1,0 +1,24 @@
+✔ ① 通道解析：qoder/<model> ⇒ engine=qoder、provider=qoder、model=<裸模型名> (302.6676ms)
+✔ ② 带空格/点的真机模型名也能正确解析 (1267.5594ms)
+✔ ③ 执行器调用：qoder job spawn 的是 **qoder-run.mjs**（不是 zcode/opencode 的） (31.0509ms)
+✔ ④ 显式 auto:true ⇒ 传入 --auto（放行可审计） (30.422ms)
+✔ ⑤ 通道清单里出现 qoder 通道（探测假执行器的 --list-models） (20009.0129ms)
+✔ ⑤b ★ ZCode 两条路由**实现不同**：派发时 provider 各归各（面板选中后必须照此下发） (56.3395ms)
+✔ ⑥ 分类：qoder 通道与 opencode 通道互不误判 (1.058ms)
+✔ ⑦ 裸引擎名 provider 也认（qoder / opencode 不带 /model） (532.7748ms)
+✔ ⑦b ★ 幂等性：**已规整过的 spec 再规整不得翻回 zcode**（真机面板徽标显示 ZCode 的根因） (1.0976ms)
+✔ ⑦c ★ 真机验收回归：`qoder/Qwen3.8-Flash` 走完整链路后，执行器收到**裸模型名** (37.8608ms)
+✔ ⑧ ★ 换通道时**不得注入默认通道的 model**（真机静默 bug 的回归锁） (470.8049ms)
+✔ 清理 (23.9379ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 22777.744
+
+--- STDERR ---
+(node:274676) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)

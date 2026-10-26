@@ -1,0 +1,20 @@
+✔ 暂停分类：4 类签名 → paused + 正确 pauseReason；unknown 保持 failed；无输出 classifyPause=null (1122.4445ms)
+✔ paused 不占锁、不堵队列、不自动重试 (724.8527ms)
+✔ retry 同通道带 sessionId → 命令行含 --resume 且不含 --model（F2） (744.3357ms)
+✔ dispatch 直接带 resume → 命令行含 --resume 且不含 --model（F2 的另一条入口） (488.0658ms)
+✔ retry 换通道 → 无 --resume，prompt 含交接五要素；簿记从 d.get()/d.list() 读回 (990.6191ms)
+✔ 自动降级链：链必须在 pause 之前 set；跳过不可用通道；链耗尽停 paused；attempts 完整 (473.1345ms)
+✔ listChannels：样例表格解析字段正确（personal 模型取自配置声明）；解析失败 → 空数组 + warning 不抛 (18.1491ms)
+✔ retry 边界：running 上 retry 抛错；setFallbackChain 非数组抛错 (112.995ms)
+✔ 清理临时目录 (337.2581ms)
+ℹ Error: Test "retry 边界：running 上 retry 抛错；setFallbackChain 非数组抛错" at dispatch\test\channel-retry.test.mjs:360:1 generated asynchronous activity after the test ended. This activity created the error "Error: ENOENT: no such file or directory, open 'C:\Users\ADMINI~1\AppData\Local\Temp\dsp-chan-test-ubQXVw\state\jobs.json.262620.1793018992785.tmp'" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7692.5368
+
+--- STDERR ---

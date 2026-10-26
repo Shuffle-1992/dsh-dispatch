@@ -1,0 +1,34 @@
+client.js var() 引用令牌（去重）: 30
+  OK   --dsw-alias-bg-layer-2
+  OK   --dsw-alias-bg-layer-1
+  OK   --dsw-alias-bg-layer-3
+  OK   --dsw-alias-bg-module-platform
+  OK   --dsw-alias-interactive-bg-hover
+  OK   --dsw-alias-button-primary-fill
+  OK   --dsw-alias-brand-primary
+  OK   --dsw-alias-label-primary-foreground
+  OK   --dsw-alias-border-l2
+  OK   --dsw-alias-border-l1
+  OK   --dsw-shadow-lv3
+  OK   --dsw-alias-label-primary
+  OK   --dsw-alias-label-secondary
+  OK   --dsw-alias-label-tertiary
+  OK   --dsw-alias-state-error-primary
+  OK   --ds-font-family-code
+  OK   --dsw-alias-state-business-primary
+  OK   --dsw-alias-state-success-primary
+  OK   --dsw-alias-state-warn-primary
+  OK   --dsw-alias-state-idle-primary
+  OK   --dsw-alias-state-warn-secondary
+  OK   --dsw-alias-state-warn-label
+  OK   --dsw-alias-bg-base
+  OK   --dsw-radius-sm
+  OK   --dsw-menu-backdrop-filter
+  OK   --dsw-radius-lg
+  OK   --dsw-specific-menu
+  OK   --dsw-alias-scrollbar-bg-l2
+  OK   --dsw-alias-scrollbar-hover-l2
+  OK   --dsw-elevation-prominent
+
+引用但主题包不存在: 0 个 ✓
+其中 --dsw-alias-* 引用: 23 个；主题包 alias 全集 107 个，插件未使用 84 个（存在但没用，可选项）

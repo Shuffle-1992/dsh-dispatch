@@ -1,0 +1,16 @@
+✔ kind=prompt：默认注入记忆禁令，且原有内容完整保留 (240.1147ms)
+✔ kind=target：同样注入（内容由插件传入） (208.2002ms)
+✔ ★ kind=task：经 runner `--memory-ban` 旗标注入（ZB-28 起，不再裸奔） (199.5188ms)
+✔ runner 确认位：runner 打印 `memory-ban=on` ⇒ job.memoryBanRunner=true (191.0565ms)
+✔ parseRunnerLine：`memory-ban=on` 行 → memoryBanSeen（不再落 parseWarnings） (1.6867ms)
+✔ 禁令文案是提示词层面的约束（措辞如实，不夸大为"禁止"） (465.9748ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1333.865
+
+--- STDERR ---

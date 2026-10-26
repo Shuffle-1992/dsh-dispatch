@@ -777,19 +777,6 @@ async function main(argv) {
   }
   if (opt.help) { process.stdout.write(HELP); return 0; }
 
-  /* ZB-118（GLM-5.3 审查 MED，已核实）：**派发总开关门禁**（与 zcode-run 同契约）。
-   * 原先只有 zcode-run 有这道闸，本执行器直调即可绕过派发总开关。退出码 3 = 因开关关闭而拒绝。 */
-  {
-    const sw = readDispatchSwitch();
-    if (!sw.enabled) {
-      process.stderr.write(`${PREFIX} ⛔ 派发总开关为「关闭」，拒绝派发（未启动任何进程、未消耗任何额度）。\n`);
-      process.stderr.write(`${PREFIX} 开关文件: ${SWITCH_FILE}\n`);
-      if (sw.note) process.stderr.write(`${PREFIX} 备注: ${sw.note}\n`);
-      process.stderr.write(`${PREFIX} 需要恢复派发时: node <本仓库>/collab-kit/dispatch-switch.mjs --project <宿主项目> on\n`);
-      return 3;
-    }
-  }
-
   let disc;
   try {
     disc = await discoverQoder();
@@ -800,6 +787,9 @@ async function main(argv) {
     return 1;
   }
 
+  /* 只读探测（--version / --list-models）**不过闸** —— 与 ZCode 契约一致：
+   * 冻结派发时面板仍要能列通道/看登录态，否则关闭开关会让面板显示"探测失败"。
+   * （R08：ZB-118 加门禁时误放在只读分支之前，会让三个引擎的只读探测一并失效。） */
   if (opt.version) {
     const r = probe(disc.cli, ['--version']);
     const v = `${r.stdout}\n${r.stderr}`.match(/\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/);
@@ -807,6 +797,19 @@ async function main(argv) {
     return 0;
   }
   if (opt.listModels) return listModels(disc.cli, opt);
+
+  /* ZB-118（GLM-5.3 审查 MED）：**派发总开关门禁**（与 zcode-run 同契约）——
+   * 只对**真实派发**生效（只读探测已在上方 return）。退出码 3 = 因开关关闭而拒绝。 */
+  {
+    const sw = readDispatchSwitch();
+    if (!sw.enabled) {
+      process.stderr.write(`${PREFIX} ⛔ 派发总开关为「关闭」，拒绝派发（未启动任何进程、未消耗任何额度）。\n`);
+      process.stderr.write(`${PREFIX} 开关文件: ${SWITCH_FILE}\n`);
+      if (sw.note) process.stderr.write(`${PREFIX} 备注: ${sw.note}\n`);
+      process.stderr.write(`${PREFIX} 需要恢复派发时: node <本仓库>/collab-kit/dispatch-switch.mjs --project <宿主项目> on\n`);
+      return 3;
+    }
+  }
 
   if (!opt.kind) {
     process.stderr.write(`${PREFIX} 必须给出 --task / --prompt / --target 之一\n`);

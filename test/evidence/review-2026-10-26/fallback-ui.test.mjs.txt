@@ -1,0 +1,57 @@
+  ✓ 关闭态只有「通道」分区的 3 个下拉（实际 3）
+  ✓ ① 关闭态已渲染降级开关按钮
+  ✓ ① 关闭态 aria-pressed=false
+  ✓ ① 开关带指示灯（.dsp-dot）
+  ✓ ① 关闭态指示灯用错误/危险状态色令牌（非字面色值）
+[dispatch] $mount 成功：remote.dispatch 已本地挂载
+  ✓ ② 开启态 aria-pressed=true
+  ✓ ② 开启态指示灯用成功状态色令牌
+  ✓ ② 开启后出现目标三下拉（通道/模型/思考强度 ⇒ 共 6 个，实际 6）
+  ✓ ③ 档位 option 双语标签「中文(英文)」（实际标签：["ZCode","顺序派发","GLM-5.3","GLM-5.3-Flash","GLM-5.3「免费」","GLM-5.3-Flash「免费」","Agent决定（按任务判断）(Agent decides (per task))","关闭思考(Thinking off)","低强度(Low effort)","高强度(High effort)","最高强度(Max effort)","ZCode","顺序派发","GLM-5.3","GLM-5.3-Flash","GLM-5.3「免费」","GLM-5.3-Flash「免费」","Agent决定（按任务判断）(Agent decides (per task))","关闭思考(Thinking off)","低强度(Low effort)","高强度(High effort)","最高强度(Max effort)"]）
+  ✓ ★ 档位在 UI 上不出现**裸**英文 token（原始字符串仅作为 option value 传输）
+  ✓ ★ 双语标签不出现空括号（任一侧缺失时退回单语）
+  ✓ ★ ZCode 模型下拉含 GLM-5.3（套餐）
+  ✓ ★ ZCode 模型下拉含 GLM-5.3-Flash（套餐）
+  ✓ ★ 免费额度列 GLM-5.3-Flash 并标「免费」（与套餐项不混淆）
+  ✓ ★ 免费额度也列 GLM-5.3 并标「免费」（ZB-105：1024 活动两个模型都给额度）
+  ✓ ③ option value 仍是原始档位字符串（high）—— 中文只在 label
+  ✓ ★ 模型/档位首项为「顺序派发」与双语「Agent决定」（主与降级一致；ZB-74 起档位双语）
+  ✓ ★ 降级档位下拉首项 = 双语「Agent决定」（与上面「通道」分区同一套选项逻辑）
+  ✓ ★ 降级目标下拉里不再出现「沿用原任务…」（用户明确要求去掉）
+  ✓ ★ 降级「通道」下拉与上方逐字相同（实际 ["ZCode"]）
+  ✓ ★ 上面「模型」首项 = 顺序派发（实际 "顺序派发"）
+  ✓ ★ 降级「模型」首项 = 顺序派发（实际 "顺序派发"）
+  ✓ ★ 除首项外，模型项两侧一致（上 ["GLM-5.3","GLM-5.3-Flash","GLM-5.3「免费」","GLM-5.3-Flash「免费」"] / 降 ["GLM-5.3","GLM-5.3-Flash","GLM-5.3「免费」","GLM-5.3-Flash「免费」"]）
+  ✓ ★ 档位选项两侧一致（上方 ["关闭思考(Thinking off)","低强度(Low effort)","高强度(High effort)","最高强度(Max effort)"] / 降级 ["关闭思考(Thinking off)","低强度(Low effort)","高强度(High effort)","最高强度(Max effort)"]；降级允许多一项"已失效"）
+  ✓ ④ 点击开关触发一次 fallback 写入
+  ✓ ★ 关闭时 wire 收到 chain:null（不是 ["null"] 的旧缺陷）
+  ✓ ④ 关闭后目标下拉消失（回到 3 个，实际 3）
+  ✓ ⑤ demo 数据源的 fallbackGet 用同一 fallbackShape（新形状）
+  ✓ ⑤ demo 数据源的 fallbackSet 用同一 normTargets（对象/数组/null 三形状一致）
+  ✓ ⑤ 旧的 demoChain 已彻底替换（不留死变量）
+  ✓ ⑥ 改模型触发一次写入
+  ✓ ⑥ 模型选「（通道默认模型）」⇒ 写 null（交接时不传 --model）
+  ✓ ★ 只改模型时档位按**下拉显示值**写回（实际 "high"）
+  ✓ ★ saveTarget 的 base 不读存值（否则「显示 Agent决定、实存 null」两回事）
+  ✓ ★ saveTarget 的 base 用下拉显示值，未设时落 agent
+  ✓ ⑦ 不可用通道不出现在任何下拉的 label 里
+  ✓ ⑦ 主通道 + 降级目标两个 provider 下拉都被检查（实际 2）
+  ✓ ⑦ 不可用通道不在 option value 里
+  ✓ ⑦ 可用通道仍在（折叠后为 zcode；实际 ["zcode"]）
+  ✓ ★ 白名单外的 personal 不在清单里（core 已剔除）
+  ✓ ⑦ 不可用通道不在 option value 里
+  ✓ ⑦ 可用通道仍在（折叠后为 zcode；实际 ["zcode"]）
+  ✓ ★ 白名单外的 personal 不在清单里（core 已剔除）
+  ✓ ⑦ 源码形态：当前值掉线时会单独补一条（标注不可用），不静默显示首项
+  ✓ ⑦ 源码形态：两个下拉共用同一份过滤（单一源 applyChanFilters + groupedChannelOptions）
+  ✓ ⑦ 源码形态：定义 1 处 + 主通道与降级目标共用同一函数（实际调用面 ≥2）
+
+===== ZB-30 UI 渲染：46 PASS / 0 FAIL =====
+
+--- STDERR ---
+[dispatch] 远端面未就绪 → 降级 wire。诊断= {
+  mountDiag: { attempted: true, ok: null, error: null },
+  childFiberService: false,
+  hasModCtx: true,
+  ctxRemoteDispatch: false
+}

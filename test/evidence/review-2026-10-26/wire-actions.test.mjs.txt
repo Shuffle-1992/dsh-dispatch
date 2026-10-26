@@ -1,0 +1,120 @@
+① status：真值文件三态（fail-open 语义）
+  ✓ status 缺文件仍 ok:true（实际 true）
+  ✓ 缺文件 ⇒ enabled=true（不误锁）（实际 true）
+  ✓ 缺文件 ⇒ source 标明默认值（可核查，不是静默）（实际 "default(无文件=开启)"）
+  ✓ 损坏文件仍 ok:true（readSwitch 永不抛）（实际 true）
+  ✓ 损坏 ⇒ enabled=true（与 CLI 同：不误锁）（实际 true）
+  ✓ 损坏 ⇒ source 也标明默认（与"文件值"可区分）（实际 "default(读取失败)"）
+  ✓ status 正常文件 ok:true（实际 true）
+  ✓ 正常文件 ⇒ 读出 enabled=false（实际 false）
+  ✓ source=file（区别于默认值）（实际 "file"）
+  ✓ updatedBy 透传（实际 "hand"）
+  ✓ note 透传（实际 "n1"）
+
+② switch：写入 / 读回 / 落盘 / 非法参数 / 未配置路径
+  ✓ switch 写入 ok:true（实际 true）
+  ✓ 返回值即写入后的真值（实际 false）
+  ✓ updatedBy 落盘（实际 "audit"）
+  ✓ note 落盘（实际 "task-14"）
+  ✓ updatedAt 是合法 ISO 时间
+  ✓ 真值文件确实写到 config.switchPath
+  ✓ 磁盘内容与返回值一致（跨进程契约）（实际 false）
+  ✓ 文件带契约标记行（与 CLI 共用同一份）
+  ✓ 写后读回一致（mtime 缓存已正确失效）（实际 false）
+  ✓ 缺 enabled 布尔 ⇒ ok:false（实际 false）
+  ✓ 报错可读（说明需要什么）（实际 "switch 需要布尔参数 enabled（true=开启派发 / false=关闭派发）"）
+  ✓ 非法写不改变既有状态（实际 false）
+  ✓ enabled 传字符串 ⇒ 拒绝（不做真假值猜测）（实际 false）
+  ✓ 未配置 switchPath ⇒ 拒绝写入（不写到猜出来的位置）（实际 false）
+  ✓ 报错可读（指出缺 config.switchPath）（实际 "写开关文件失败：未配置派发总开关真值文件路径（config.switchPath）：无法写入开关。请在 profile patch 里指定宿主仓库的 collab/dispatch.switch.json"）
+  ✓ 拒绝写入后开关仍是"开启"（未配置 ≠ 关闭）（实际 true）
+  ✓ 被拒时不产生任何开关文件（实际 []）
+
+③ 关闭态门禁：dispatch / retry 被拒，且不建 job
+  ✓ 关闭态 dispatch 被拒（实际 false）
+  ✓ 用统一错误文案（与 CLI 同源常量）（实际 "派发总开关已关闭（collab/dispatch.switch.json）"）
+  ✓ 被拒时不建 job（不是"建了再失败"）（实际 0）
+  ✓ 关闭态 retry 也被拒（避免建一个必失败的 job）（实际 false）
+  ✓ retry 用同一文案（实际 "派发总开关已关闭（collab/dispatch.switch.json）"）
+  ✓ 重新开启 ok:true（实际 true）
+  ✓ 开启后 dispatch 恢复（实际 true）
+
+④ tail：默认 30 / 上限 200 / 真截断 / 可读报错
+  ✓ tail ok:true（实际 true）
+  ✓ 原样回 id（实际 "j-mvp9e9yu-0-d976"）
+  ✓ lines 是非空数组（10 行）
+  ✓ 默认不超过 30 行
+  ✓ 拿到的是 runner 的真实输出行
+  ✓ n=2 真的只回 2 行（真截断）（实际 2）
+  ✓ 回的是**最后** n 行（不是最前 n 行）（实际 ["[zcode-run] err=C:\\fake dir with space\\run.err.log","[zcode-run] result=C:\\fake dir with space\\run.result.json"]）
+  ✓ 不传 n ⇒ 下传默认 30（实际 30）
+  ✓ n 超上限 ⇒ 夹到 200（实际 200）
+  ✓ 数字字符串 n 可用（工具入参常是字符串）（实际 3）
+  ✓ n=0 视为未给（不当成"0 行"）（实际 30）
+  ✓ 缺 id ⇒ ok:false（实际 false）
+  ✓ 报错可读（实际 "tail 需要参数 id"）
+  ✓ 不存在的 job ⇒ ok:false（而不是空数组，避免"没输出"与"没这个 job"混淆）（实际 false）
+  ✓ 报错可读（含 id 线索）（实际 "找不到 job：j-does-not-exist"）
+
+⑤ dismiss：只对落地 job / 落盘 / list 过滤 / 跨实例
+  ✓ dismiss 前该 job 在列表里
+  ✓ dismiss 终态 job ok:true（实际 true）
+  ✓ 回 id（实际 "j-mvp9eac9-0-f8ec"）
+  ✓ 回 job 状态（done）
+  ✓ dismissed.json 落盘到 jobs.json 同目录（C:\Users\ADMINI~1\AppData\Local\Temp\dsp-wa-JKtLkA\state）
+  ✓ 落盘内容含被 dismiss 的 id
+  ✓ list 的 total 随之减少（实际 1）
+  ✓ 被 dismiss 的 job 不再出现
+  ✓ 其它 job 不受影响（不是清空列表）
+  ✓ 另一个 handler 实例照样看不到（持久化/共享生效）
+  ✓ 长任务已派发（验证白名单用）（实际 true）
+  ✓ 它确实在 running
+  ✓ running 的 job 不允许 dismiss（占锁与并发）（实际 false）
+  ✓ 报错指向正确做法：先 kill（实际 "dismiss 只对 paused/终态 job 有效（queued/running 请先 kill）：id=j-mvp9ebcz-2-713f state=running"）
+  ✓ 被拒后它仍在跑（没有副作用）（实际 "running"）
+  ✓ 缺 id ⇒ ok:false（实际 false）
+  ✓ 不存在的 job ⇒ ok:false（实际 false）
+  ✓ 报错可读（实际 "dismiss 失败：job 不存在（id=j-nope）"）
+
+⑥ channels：形状 / warnings 恒为数组 / 撞额度提示 / 失败可读
+  ✓ channels ok:true（实际 true）
+  ✓ channels 全量透传（实际 3）
+  ✓ 顺序稳定（第一条仍是 plan）（实际 "plan"）
+  ✓ 撞过额度的通道 enabled **不被改写**（只做提示，不擅自改可用性）（实际 true）
+  ✓ 近期 429 的通道带 recentQuotaExhausted（ZB-37）
+  ✓ 并给出可读建议（含 retry-after）（实际 "最近撞过额度（2026-10-26T12:55:05.582Z，retry-after=60s）：优先改用其它通道（如 account:<family>-start-plan 免费额度）"）
+  ✓ 未命中的通道不打标
+  ✓ warnings 透传（实际 ["probe-warn"]）
+  ✓ engines 透传（实际 true）
+  ✓ ★ engineDetail 透传（ZB-51 曾只在面板路径透传，工具路径漏了）（实际 "client-bundled-cli"）
+  ✓ opencodeVersion 透传（实际 "9.9.9"）
+  ✓ 近 5h 窗口过滤生效（6h 前那条不计入）（实际 ["test-plan"]）
+  ✓ giftQuota 恒在（读不到也是对象/原因）
+  ✓ start-plan 通道要么带 quota/quotaText，要么如实标注不可用（fail-open，不编数字）
+  ✓ 最小形状（{}）不抛（实际 true）
+  ✓ channels 缺省为 []（不是 undefined）（实际 []）
+  ✓ warnings 缺省为 []（调用方可无条件遍历）（实际 []）
+  ✓ listChannels 抛错 ⇒ ok:false（不把异常漏给调用方）（实际 false）
+  ✓ 报错保留原始原因（实际 "探测失败：找不到 CLI"）
+
+⑦ quota：台账字段稳定 + 计划额度探测失败可读
+  ✓ 无 ledgerPath ⇒ available:false（不抛）（实际 false）
+  ✓ 给出原因（实际 "ledgerPath 未配置"）
+  ✓ windows 为 null（调用方需先判 available）（实际 null）
+  ✓ 空台账仍返回结构（available 布尔，不抛）
+  ✓ windows.last5h 恒在
+  ✓ windows.week 恒在
+  ✓ windows.today 恒在
+  ✓ 窗口字段集稳定（六个数字字段）
+  ✓ 有台账 ⇒ available:true（实际 true）
+  ✓ 台账数字进窗口（requests）（实际 1）
+  ✓ quota 动作 ok:true（计划额度探测失败不影响动作成功）（实际 true）
+  ✓ 动作内台账字段与直接调用一致（单一源）（实际 1）
+  ✓ CLI 不存在 ⇒ planQuota.available:false（不抛）（实际 false）
+  ✓ 失败带可读 reason
+  ✓ giftQuota 恒在（免费额度独立于计划额度）
+  ✓ 结果里没有 undefined 字段（undefined 会经 JSON 传输静默消失）（实际 null）
+
+===== wire actions（行为）：103 PASS / 0 FAIL =====
+
+--- STDERR ---

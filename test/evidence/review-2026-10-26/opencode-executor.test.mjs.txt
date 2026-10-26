@@ -1,0 +1,60 @@
+✔ ① 真实 6 事件流聚合：文本/工具/用量/sessionID/上下文/turnCount (4.022ms)
+✔ ①b tokens 缺字段不许抛；无 step_finish 时 requests/用量为 0 且不崩 (0.5633ms)
+✔ ①c part.tokens 只给部分字段时，缺失字段不被当成 0 混入 (2.8727ms)
+✔ ② 未知 type + JSON 坏行 + 非对象行：继续本轮，记 unknownEvents/warnings (1.6054ms)
+✔ ②b 未知事件原文数组有上限（防上游狂刷把 result.json 撑爆） (1.5666ms)
+✔ ③ 心跳行：完整形态可解析（stage/elapsed/chars/tools/lastTool/stageAgo/session），无 session 时省略 (1.2997ms)
+✔ ③b usage/context/done 行格式；窗口未知时 context 行返回 null（不编造） (1.0006ms)
+✔ ④ 未知参数 / 不支持参数 / 互斥与非法值：一律 fail-fast (1.6542ms)
+✔ ④b --task 优先于 --prompt；--provider opencode/--no-ledger/--reasoning-level 为兼容令牌（大声记说明） (0.5128ms)
+✔ ④c 模型 id 规范化 + argv 构造（含 --resume 绝不传 -m） (0.9441ms)
+✔ ④d buildPrompt：--task 内联任务包、--target 按 prompt、--memory-ban 追加禁令 (6.6594ms)
+✔ ④e 可执行文件解析与 spawn 形态（零依赖、不执行任何 opencode 命令） (7.6184ms)
+✔ ⑤ models 解析：真实 12 行 → 12 个 id；非 opencode/* 被过滤且不猜 (0.8954ms)
+✔ ⑤b models --verbose 解析：limit.context / variants 键（真实形状：id 行 + pretty JSON 块） (0.7981ms)
+✔ ⑥ 端到端成功：汇总行齐全、result.json 正确、out.log 是原始 NDJSON (447.7486ms)
+✔ ⑥b 端到端 --resume：只带 -s（无 -m），且 result.modelApplied=false (375.5374ms)
+✔ ⑥c 端到端 --auto：显式传入才透传，并打可审计告知行 (399.1585ms)
+✔ ⑥d 端到端 --memory-ban / --variant：行与注入都对得上 (515.0205ms)
+✔ ⑥e 端到端 task：任务包内联 + task 行 + argv 收到内联后的 prompt (433.9511ms)
+✔ ⑥f 端到端 --list-models：stdout 只有裸 id（方案 A）；--with-variants 才追加 variants 行 (1106.0125ms)
+✔ ⑥g 端到端 --version：只打一行版本号 (406.0677ms)
+✔ ⑥h 端到端上游失败：退出码透传 + 原始错误**逐字**到 stderr；result.json 记 exit (544.6695ms)
+✖ ⑥i 端到端超时：杀进程树、exit 124、done 行带 (超时)、result.timedOut=true (60027.6508ms)
+✔ ⑥j 端到端：找不到 opencode ⇒ exit 1 + 可读错误（不崩） (111.5044ms)
+✔ ⑦a resolveExitCode：超时 124 最高优先；否则透传真实码；拿不到才 1 (0.3204ms)
+✔ ⑦b 端到端回归：慢但正常的调用**不得被固定 15s 兜底误杀**（GLM 首响 ~14.2s 的同类场景） (16958.316ms)
+✔ ⑦ 源锁：不伪装身份 / 不碰用户 OpenCode 数据目录 / 探测不与 run 并发 / 兜底不脱离 --timeout-min / --auto 默认关 (2.1845ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 26
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 81377.1306
+
+✖ failing tests:
+
+test at dispatch\test\opencode-executor.test.mjs:565:1
+✖ ⑥i 端到端超时：杀进程树、exit 124、done 行带 (超时)、result.timedOut=true (60027.6508ms)
+  AssertionError [ERR_ASSERTION]: 超时退出码必须是 124
+  
+  null !== 124
+  
+      at TestContext.<anonymous> (file:///F:/My%20Code/dsh-dispatch/dispatch/test/opencode-executor.test.mjs:572:10)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 124,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+--- STDERR ---

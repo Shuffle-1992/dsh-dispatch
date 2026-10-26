@@ -1,0 +1,41 @@
+
+A. 默认关 ⇒ 绝不分流（既有行为一字不变）
+  ✓ A1 默认 enabled=false
+  ✓ A2 active=false 且 reason=disabled（实际 disabled）
+  ✓ A3 ★ 5 个全在 qoder（实际 ["qoder"]）——关闭时绝不偷改通道
+
+B. 开启后：主通道将满 ⇒ 自动分流到降级通道
+  ✓ B1 开启后 active=true（实际 true）
+  ✓ B2 主通道信息如实（qoder 名额 3，实际 {"provider":"qoder","model":"qoder/DeepSeek-Flash","engine":"qoder","limit":3,"running":0,"free":3}）
+  ✓ B3 ★ 前 3 个占满 qoder（实际 3）
+  ✓ B4 ★ 溢出 2 个被分流到 opencode（实际 2）——这就是"两条通道拿更大并发"
+  ✓ B5 ★ 被分流的 job 留痕 splitFrom=qoder（实际 ["qoder","qoder"]）
+
+C. 同通道不分流（分流必须是假动作之外的真分流）
+  ✓ C1 ★ 同通道 ⇒ active=false 且 reason=no-distinct-target（实际 no-distinct-target）
+  ✓ C2 ★ 同通道时绝不分流（实际 ["qoder"]）
+
+C2. ★ ZB-83：**同引擎不同模型也不算可分流目标**（名额按引擎计）
+  ✓ C2a ★ 同引擎 ⇒ active=false（实际 false / reason=no-distinct-target）—— 不给"并发变大了"的假象
+  ✓ C2b 同引擎的目标不进 distinctTargets
+  ✓ C2c ★ 同引擎时绝不改派（实际 ["qoder"]）
+
+D. 显式指定通道 ⇒ 不插手（尊重调用方选择）
+  ✓ D1 ★ 显式要 qoder ⇒ 留在 qoder 且**无** splitFrom（实际 provider=qoder splitFrom=undefined）
+
+E. 目标也满 ⇒ 老实排队（不硬塞）
+  ✓ E1 ★ 恰好 5 个在跑（qoder 3 + opencode 2，实际 5）
+  ✓ E2 ★ 其余 3 个老实排队（实际 3）——不把溢出硬塞给已满的通道
+
+F. 判据用"在途数"（连发时不能慢一拍）
+  ✓ F1 ★ 连发第 4 个立即分流到 opencode（实际 ["qoder","qoder","qoder","opencode"]）——只数 running 时会慢一拍
+
+G. 参数校验与持久化
+  ✓ G1 enabled 非布尔 ⇒ 报错（不静默当 false）
+  ✓ G2 minFreeSlots 越界 ⇒ 报错
+  ✓ G3 只改 minFreeSlots ⇒ enabled 保持 true（实际 {"enabled":true,"minFreeSlots":3,"main":{"provider":"qoder","model":"qoder/DeepSeek-Flash","engine":"qoder","limit":3,"running":0,"free":3},"targets":[{"provider":"opencode","model":"opencode/minimax-m3.1-flash-free","reasoningLevel":null}],"distinctTargets":[{"provider":"opencode","model":"opencode/minimax-m3.1-flash-free","reasoningLevel":null}],"active":true,"reason":null}）
+  ✓ G4 ★ minFreeSlots=2 ⇒ 更早分流（前 4 个里已有 opencode，实际 ["qoder","qoder","opencode","opencode"]）
+
+===== ZB-82 分流模式：21 PASS / 0 FAIL =====
+
+--- STDERR ---

@@ -1036,19 +1036,6 @@ async function main(argv) {
   }
   if (opt.help) { process.stdout.write(HELP); return 0; }
 
-  /* ZB-118（GLM-5.3 审查 MED，已核实）：**派发总开关门禁**（与 zcode-run 同契约）。
-   * 原先只有 zcode-run 有这道闸，本执行器直调即可绕过派发总开关。退出码 3 = 因开关关闭而拒绝。 */
-  {
-    const sw = readDispatchSwitch();
-    if (!sw.enabled) {
-      process.stderr.write(`${PREFIX} ⛔ 派发总开关为「关闭」，拒绝派发（未启动任何进程、未消耗任何额度）。\n`);
-      process.stderr.write(`${PREFIX} 开关文件: ${SWITCH_FILE}\n`);
-      if (sw.note) process.stderr.write(`${PREFIX} 备注: ${sw.note}\n`);
-      process.stderr.write(`${PREFIX} 需要恢复派发时: node <本仓库>/collab-kit/dispatch-switch.mjs --project <宿主项目> on\n`);
-      return 3;
-    }
-  }
-
   let disc;
   try {
     disc = await discoverCodebuddy();
@@ -1059,6 +1046,11 @@ async function main(argv) {
     return 1;
   }
 
+  /* ── 以下三类**不过闸**（与 ZCode 契约一致）──
+   * · `--login-serve` 登录助手：不属于"派发任务"，冻结时用户反而更需要登录/诊断；
+   * · `--version` / `--list-models` 只读探测：冻结时面板仍要能列通道、看登录态，
+   *   否则关闭开关会让面板把三个引擎都显示成"探测失败"。
+   * （R08：ZB-118 加门禁时误放在这三者之前，会让只读能力一并失效。） */
   if (opt.loginServe) return loginServe(disc.cli, opt);
 
   if (opt.version) {
@@ -1068,6 +1060,19 @@ async function main(argv) {
     return 0;
   }
   if (opt.listModels) return listModels(disc.cli, opt);
+
+  /* ZB-118（GLM-5.3 审查 MED）：**派发总开关门禁**（与 zcode-run 同契约）——
+   * 只对**真实派发**生效（只读/登录已在上方 return）。退出码 3 = 因开关关闭而拒绝。 */
+  {
+    const sw = readDispatchSwitch();
+    if (!sw.enabled) {
+      process.stderr.write(`${PREFIX} ⛔ 派发总开关为「关闭」，拒绝派发（未启动任何进程、未消耗任何额度）。\n`);
+      process.stderr.write(`${PREFIX} 开关文件: ${SWITCH_FILE}\n`);
+      if (sw.note) process.stderr.write(`${PREFIX} 备注: ${sw.note}\n`);
+      process.stderr.write(`${PREFIX} 需要恢复派发时: node <本仓库>/collab-kit/dispatch-switch.mjs --project <宿主项目> on\n`);
+      return 3;
+    }
+  }
 
   if (!opt.kind) {
     process.stderr.write(`${PREFIX} 必须给出 --task / --prompt / --target 之一\n`);

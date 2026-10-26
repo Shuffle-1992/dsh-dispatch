@@ -1,0 +1,16 @@
+✔ ★ 整仓锁挡住：blockers 指认持有者；阻塞者无 timeoutMin ⇒ estWaitSec=null 不猜 (559.7019ms)
+✔ estWaitSec：阻塞者声明 timeoutMin ⇒ 给剩余上界（timeoutMin*60+宽限−已运行） (616.7118ms)
+✔ ahead：同类前方任务计数（文件锁类与整仓库锁类分开数，与 pump 优先级同尺） (1767.6753ms)
+✔ 文件锁挡住：blockers.lock 以 file: 开头并指认持有者；无冲突者不排队 (595.7992ms)
+✔ 跨层级：整仓库锁持有期间，文件锁任务的 blockers 给出 cross 条目并指认持有者 (548.1376ms)
+✔ 非 queued 恒 null；wire 层 list 动作（slimJob）原样透传 lockWait (528.2273ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4647.386
+
+--- STDERR ---

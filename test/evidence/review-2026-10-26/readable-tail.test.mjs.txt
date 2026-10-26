@@ -1,0 +1,49 @@
+  ✓ A0 能从 client.js 取到 readableTail（改名请同步本测试锚点）
+  ✓ A0b 能取到 STAGE_LABEL_KEY（stage 人话标签表）
+  ✓ A0d 能从 client.js 取到真实 tFmt（占位符替换实现）
+
+A. 折叠同质心跳（用户截图那一屏 30 行）
+  ✓ A1 ★ 10 行同质心跳折叠成 1 行（实际 1 行）——用户截图里是一屏 30 行
+  ✓ A2 stage=run 显示成人话「运行中」（实际「[qoder-run] qoder 运行中 · 已跑 1763s→1853s · 字数 1261 · 工具 135　（相同状态 ×10 次）」）
+  ✓ A3 保留 chars/tools 数值（信息不丢）
+  ✓ A4 ★ elapsed 显示成区间（首→尾），"持续了多久"一眼可见
+  ✓ A5 ★ 明确标注重复次数（实际「[qoder-run] qoder 运行中 · 已跑 1763s→1853s · 字数 1261 · 工具 135　（相同状态 ×10 次）」）—— 一眼看出是重复而非发生了 10 件事
+  ✓ A6 ★ 输出体积显著变小（1229 → 70 字符）
+
+B. 变化必须单独成行（那才是"进展"）
+  ✓ B1 stage 变化 ⇒ 分成 2 行（实际 2）
+  ✓ B2 两个 stage 各自显示人话
+  ✓ B3 chars/tools 增长 ⇒ 新行；之后同值再折叠（实际 2 行）
+  ✓ B4 增长前后的数值都在（进展可见）
+  ✓ B5 ★ 不同 session 不合并（实际 2 行）
+
+C. 非心跳行原样保留（排障靠它们，绝不改写）
+  ✓ C1 ★ 原样保留：「[qoder-run] tag=x mode=prompt cwd=.」
+  ✓ C1 ★ 原样保留：「这是模型的真实回答：你好，世界」
+  ✓ C1 ★ 原样保留：「[qoder-run] done exit=0 elapsed=12.3s sessio」
+  ✓ C1 ★ 原样保留：「error: something failed」
+  ✓ C2 真实行一行不少（实际 5 行）
+
+D. 边界：未知 stage / 空输入 / 非数组
+  ✓ D1 未知 stage 原样显示（不猜、不隐藏）
+  ✓ D2 空数组 ⇒ 空串
+  ✓ D3 null ⇒ 空串（不炸）
+  ✓ D4 undefined ⇒ 空串
+  ✓ D5 lastTool 显示出来
+
+E. 接线：渲染处必须真的用它（否则函数再好也不生效）
+  ✓ E1 ★ 渲染处调用 readableTail（不再是 tail.lines.join）
+  ✓ E2 ★ 旧的原始 join 已移除（防回退）
+  ✓ E3 locale 中英都有 hbElapsed
+  ✓ E3 locale 中英都有 hbChars
+  ✓ E3 locale 中英都有 hbTools
+  ✓ E3 locale 中英都有 hbLastTool
+  ✓ E3 locale 中英都有 hbRepeat
+  ✓ E4 locale 中英都有 hbStageSpawn
+  ✓ E4 locale 中英都有 hbStageRun
+  ✓ E4 locale 中英都有 hbStageWaiting
+  ✓ E4 locale 中英都有 hbStageDone
+
+===== ZB-81 进行时输出可读化：35 PASS / 0 FAIL =====
+
+--- STDERR ---

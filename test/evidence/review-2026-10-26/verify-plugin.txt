@@ -1,0 +1,27 @@
+PASS  manifest: name/exports/dsh.bundle.patch  dsh-dispatch
+PASS  manifest: 可发布身份（name/version/license/repository/keywords/engines/manifestVersion）  private=undefined license=MIT keywords=9 engines=>=22.12.0 manifestVersion=1
+PASS  manifest: TYPERT.package ≡ package.json name（loader 硬校验）  TYPERT.package=dsh-dispatch name=dsh-dispatch
+PASS  manifest: dsh.client 平台/立即加载  {"platform":"web","immediately":true,"inject":["@deepseek-ai/dsh-client-ui-conversation"]}
+PASS  manifest: meta 标题/描述/图标  DSH 派发台
+PASS  manifest: files 覆盖 index.js 的相对 import  3 个相对 import 全覆盖
+PASS  patch: 插入行 id/name/config  #          runnerPath: '<本仓库>/collab-kit/zcode-run.mjs'（通用工具仓库，非宿主项目）
+ | #          ledgerPath: '<宿主仓库>\collab\logs\dispatch-runs.jsonl'
+ | 
+PASS  纪律: 不 import DSH 客户端包  no @deepseek-ai/dsh-client
+PASS  纪律: 不操作 document.body  no document.body
+PASS  纪律: client.js 无字面色值（仅主题令牌）  none
+PASS  纪律: client.js 不用 JSX/模块 import  createElement 次数=3
+PASS  纪律: 使用 --dsw-alias-* 主题令牌  令牌引用 51 处，去重 25 个
+PASS  index.js 导出 apply  apply found
+PASS  index.js 声明 Config（可配置）  Config found
+PASS  Config 是 Standard Schema（cordis 激活判据）  {"demo":false,"maxConcurrent":3,"maxConcurrentOpenCode":2,"maxConcurrentQoder":3,"maxConcurrentCodebuddy":2,"runnerPath":"","opencodeRunnerPath":"","codebuddyRunnerPath":"","ledgerPath":"","workRoot":"","runnerCwd":"","switchPath":"","notifyOnSettle":true,"maxConsecutiveWakes":0,"systemPromptHint":true}
+PASS  index.js 引用 core dispatcher  imports core
+PASS  client.js 通过 __ModuleLoader__.load 注册  id=dsh-dispatch
+PASS  factory 只 require react  react only
+PASS  factory 返回 {inject, apply}  inject=["slots","remote","typert"]
+PASS  boot 安全: inject 不自声明 remote 命名空间  inject=["slots","remote","typert"]
+PASS  apply 注入槽位并注册组件  slot=conversation.session.header.actions 注册数=3
+PASS  组件函数可执行（浅渲染不抛错）  根节点 type=function HeaderEntry() { return h(EntryImpl, { variant: 'header' }); }
+PASS  越界: 探针运行期间 $DSH_HOME 无写入  clean
+
+[DSH Z2 探针] 23 项，失败 0 项

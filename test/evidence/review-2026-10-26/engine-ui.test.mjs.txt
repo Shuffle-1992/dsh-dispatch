@@ -1,0 +1,144 @@
+① 双引擎文案键（中英各一份，键-for-键）
+  ✓ zh 有 engZcode
+  ✓ en 有 engZcode
+  ✓ zh 有 engOpencode
+  ✓ en 有 engOpencode
+  ✓ zh 有 engGroupZcode
+  ✓ en 有 engGroupZcode
+  ✓ zh 有 engGroupOpencode
+  ✓ en 有 engGroupOpencode
+  ✓ zh 有 engBadge
+  ✓ en 有 engBadge
+  ✓ zh 有 engLimitedFree
+  ✓ en 有 engLimitedFree
+  ✓ zh 有 engModelOnly
+  ✓ en 有 engModelOnly
+  ✓ zh 有 chanEngineHintZcode
+  ✓ en 有 chanEngineHintZcode
+  ✓ zh 有 chanEngineHintOpencode
+  ✓ en 有 chanEngineHintOpencode
+  ✓ zh 有 autoApproved
+  ✓ en 有 autoApproved
+  ✓ zh 有 autoApprovedHint
+  ✓ en 有 autoApprovedHint
+  ✓ 中英键数相等（281）
+  ✓ engZcode 两语言都是 ZCode（产品名不翻译）
+  ✓ engOpencode 两语言都是 OpenCode
+  ✓ OpenCode 引擎提示提到 --variant（思考强度映射）
+  ✓ OpenCode 引擎提示提到 auto（默认不放行）
+
+② 通道下拉按引擎分组（单一源 + optgroup）
+  ✓ 存在单一源 groupedChannelOptions
+  ✓ 主通道与降级目标共用它（调用面 2）
+  ✓ 每个引擎组渲染为 optgroup（label 取自 locale）
+  ✓ 分组表按 zcode → opencode → qoder 顺序声明（与 core 的 listChannels 顺序一致）
+  ✓ ★ 客户端有引擎白名单 KNOWN_ENGINES（与协议层 ENGINES 同集合；实际 ["zcode","opencode","qoder","codebuddy"] / 期望 ["zcode","opencode","qoder","codebuddy"]）
+  ✓ ★ 有归一函数 engineOf（唯一权威，不再各处二元判断）
+  ✓ ★ 组内归属判据走 engineOf（未知值归 zcode，向后兼容既有行为）
+  ✓ 「其它」组判据同样走归一（结构上不再可能出现"落不进任何组"的通道）
+  ✓ ★ 先折叠再过滤（折叠后的引擎条目才是用户能选的东西；ZB-33b 语义不回归）
+  ✓ 当前值掉线时仍单独补一条（ZB-33b 语义不回归）
+  ✓ ★ 掉线标「不可用：原因」、仅被过滤标「当前选择」—— 两种情形分开表达，不谎报
+  ✓ 被过滤掉的当前值走同一标注函数（单一源），且先经折叠清单解析旧存值
+
+③ 引擎专属信息与徽标
+  ✓ 选中通道的引擎判据走 engineOf（与 core/协议同一判据）
+  ✓ 引擎专属提示按选中通道动态渲染（不做双 tab 的落点）
+  ✓ chanEngineNote 已挂进通道分区渲染
+  ✓ ★ 有 job 引擎归一的唯一权威 jobEngineOf()
+  ✓ 引擎徽标走 jobEngineOf（不再二元判断）
+  ✓ jobEngineOf 认 job.engine / spec.engine
+  ✓ 退化判据认 opencode 形态与裸名
+  ✓ ★ 退化判据也认 qoder 形态与裸名（第三个引擎不能漏）
+  ✓ 徽标文案走 engLabel（中英一致）
+  ✓ ★ autoApproved（或 spec.auto）的 job 显示「已放行权限」徽标 —— 放行不可静默
+  ✓ 放行徽标带解释性 title
+
+④ demo 通道面（离线可视化路径）与 core 同形
+  ✓ demoChannels 每条都带 engine（与 core listChannels 同形）
+  ✓ demo 里有 opencode/* 通道示例
+  ✓ demo 里 OpenCode 示例是少数（3 条）—— 免费模型清单以探测为准，不写死 12 个
+  ✓ 协议文件在位（引擎前缀的单一权威：客户端不重复定义前缀）
+
+⑤ 通道过滤开关（用户要求：面板新增 2 个开关用于过滤）
+  ✓ zh 有 filter
+  ✓ en 有 filter
+  ✓ zh 有 filtAvailable
+  ✓ en 有 filtAvailable
+  ✓ zh 有 filtAvailableHint
+  ✓ en 有 filtAvailableHint
+  ✓ zh 有 filtFree
+  ✓ en 有 filtFree
+  ✓ zh 有 filtFreeHint
+  ✓ en 有 filtFreeHint
+  ✓ zh 有 filtHint
+  ✓ en 有 filtHint
+  ✓ zh 有 filtCurrent
+  ✓ en 有 filtCurrent
+  ✓ zh 有 filtHiddenA
+  ✓ en 有 filtHiddenA
+  ✓ zh 有 filtHiddenB
+  ✓ en 有 filtHiddenB
+  ✓ zh 有 filtHiddenC
+  ✓ en 有 filtHiddenC
+  ✓ 中文标签就是「仅看可用 / 仅看免费」
+  ✓ 英文对应 Available only / Free only
+  ✓ 存在单一源 applyChanFilters
+  ✓ 「仅看可用」判据 = enabled
+  ✓ 「仅看免费」判据 = isFreeChannel
+  ✓ ★ 通道下拉走 applyChanFilters（过滤真的接进渲染路径，不是死代码）
+  ✓ 「仅看可用」默认开（localStorage 缺省=true）
+  ✓ 「仅看免费」默认关（localStorage 缺省=false）
+  ✓ "免费"判据 = opencode 引擎 或 account:*-start-plan
+  ✓ Start Plan 免费额度通道的正则（与 giftSel 同一形态）
+  ✓ ★ 被过滤掉的当前值仍会补进下拉（标注「当前选择」），不谎报成不可用
+  ✓ 当前值在保留集里时不重复补条目
+  ✓ 「仅看可用」开关接线（aria-pressed）
+  ✓ 「仅看免费」开关接线（aria-pressed）
+  ✓ 开关状态持久化到 localStorage（重开面板保留选择；键名集中在 filtStorageKey 单源）
+  ✓ 过滤生效时明说隐藏了几个（不让用户误以为清单坏了）
+  ✓ ★ 过滤纯展示层：不发任何 remote 调用（离线可用、不改调度）
+
+⑥ 通道清单加载失败：失败可见 + 自动自愈（真机事故）
+  ✓ zh 有 chanLoading
+  ✓ en 有 chanLoading
+  ✓ zh 有 chanLoadRetry
+  ✓ en 有 chanLoadRetry
+  ✓ ① ok:false 时记下 wire 的 error（不再静默）
+  ✓ ① 抛异常时也记下（两道都盖住）
+  ✓ ① 面板渲染该 error 并说明"会自动重试"
+  ✓ ② 兜底读 snapshot.channels（快照载荷里本来就有通道清单）
+  ✓ ★ ② 仅在"清单为空"时采纳（不用旧快照覆盖用户刚切后的权威值）
+  ✓ ★ ② 依赖 snapshot ⇒ 每秒轮询带来新快照即可自愈
+  ✓ ③ 空清单且无错误 ⇒ 显示"加载中"（不误导成"没有可用通道"）
+
+⑦ 宿主侧：通道清单失败结果短 TTL 缓存
+  ✓ 失败结果短 TTL 常量存在（1s）
+  ✓ 失败判据 = 空清单 或有 warnings
+  ✓ ★ 失败走 1s、成功走 5s（失败不会被缓存满 5s）
+  ✓ ★ cachedChannels 与 channelsCached 共用同一判据
+  ✓ slimJob 的 spec 也带 engine/auto（面板与工具读到同一份事实）
+
+⑧ 进程列表/连接状态不再被慢探测拖死（真机事故）
+  ✓ 宿主有**只读缓存**的 cachedChannels()
+  ✓ 过期时**后台**刷新（不阻塞调用方）
+  ✓ 探测去重（同一时刻只跑一次，不并发 spawn）
+  ✓ 能定位 snapshot() 实现
+  ✓ ★ 快照路径只读缓存（同步）
+  ✓ ★ 快照路径**绝不** await 通道探测（这正是卡死的成因）
+  ✓ ★ 引擎明细也随快照下发（面板状态条每轮都能刷新）
+  ✓ 能定位 action=channels 分支
+  ✓ ★ 工具路径 action=channels 也透传 engineDetail
+  ✓ 能定位 createActionHandler
+  ✓ 能定位 createActionHandler 函数体
+  ✓ ★ action 处理器内不得引用 channelsCache（那是另一个函数的局部变量）
+  ✓ channelsCache 仍声明在 createRemoteFace 一侧
+  ✓ 通道下拉的权威取数仍在 channelsCached()（会 await，合理）
+  ✓ 并发调用复用同一次在途探测
+  ✓ 客户端单次 RPC 有兜底超时（8s）
+  ✓ ★ tick 的 snapshot 调用带超时（最坏发一包快照，轮询继续）
+  ✓ ★ 远端抖动时沿用**上一包好快照**（进程列表不会被清空成"暂无进程记录"）
+
+===== 双引擎 UI 契约：125 PASS / 0 FAIL =====
+
+--- STDERR ---

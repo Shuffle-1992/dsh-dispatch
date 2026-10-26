@@ -1,0 +1,30 @@
+A. engineLabelOf：两个来源 + 诚实兜底
+  ✓ A1 job.engine=zcode ⇒ zcode
+  ✓ A2 job.engine=opencode ⇒ opencode
+  ✓ A3 job.engine=qoder ⇒ qoder
+  ✓ A4 无 job.engine 时回落到 spec.engine
+  ✓ A5 spec.engine 同样认 qoder
+  ✓ A6 两个来源都没有 ⇒ 空值（中性，不猜）
+  ✓ A7 未知引擎值 ⇒ 空值（不把内部值直接展示）
+  ✓ A8 传 null 也不抛（通知器在落地竞态里可能拿到空 job）
+
+B. buildSettleNotice：正文与折叠摘要都不得写错引擎
+  ✓ B1[zcode] 正文带 engine=zcode（实际含：true）
+  ✓ B2[zcode] 折叠摘要以「zcode job」开头（实际：zcode job j-test-1 done）
+  ✓ B3[zcode] 摘要里**不出现**错误的 zcode 标签（实际：zcode job j-test-1 done）
+  ✓ B1[opencode] 正文带 engine=opencode（实际含：true）
+  ✓ B2[opencode] 折叠摘要以「opencode job」开头（实际：opencode job j-test-1 done）
+  ✓ B3[opencode] 摘要里**不出现**错误的 zcode 标签（实际：opencode job j-test-1 done）
+  ✓ B1[qoder] 正文带 engine=qoder（实际含：true）
+  ✓ B2[qoder] 折叠摘要以「qoder job」开头（实际：qoder job j-test-1 done）
+  ✓ B3[qoder] 摘要里**不出现**错误的 zcode 标签（实际：qoder job j-test-1 done）
+  ✓ B4 摘要形状稳定（实际：opencode job j-test-1 paused）
+  ✓ B5 正文仍带 status（paused 也算落地）
+  ✓ B6 引擎未知时正文不编造 engine=（实际：[dispatch] 派发任务 j-test-1 已落地。
+（kind=prompt, exit=0）[status: done]
+用 dispatch action=tail（id=j-test-1, n=30）读最近输出，或 action=list 看全部 job。）
+  ✓ B7 引擎未知时摘要不写 zcode（实际：job j-test-1 done）
+
+===== 落地通知引擎标签：21 PASS / 0 FAIL =====
+
+--- STDERR ---

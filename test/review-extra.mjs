@@ -1,0 +1,17 @@
+import fs from 'node:fs';
+import { resolve,join } from 'node:path';
+import { createDispatcher } from '../dispatch/core/dispatch-core.mjs';
+import { createActionHandler } from '../dispatch/wire.host.mjs';
+const root=resolve(import.meta.dirname,'..'),base=join(root,'test/.review-runtime/extra');fs.mkdirSync(base,{recursive:true});
+const result={};let captured;
+const handle=createActionHandler({retry:(id,opts)=>{captured=opts;return {id:'fixture',state:'done',spec:{},usage:{}};}},{switchPath:join(base,'missing-switch.json')});
+const r=await handle('retry',{id:'source-job',reasoningLevel:'max',thinking:'max',model:'new-model'});
+result.retryThinking={input:{reasoningLevel:'max',thinking:'max'},ok:r.ok,forwarded:captured,reasoningForwarded:captured?.reasoningLevel??null};
+const work=join(base,'work'),outside=join(base,'outside');fs.mkdirSync(join(work,'logs'),{recursive:true});fs.mkdirSync(join(work,'state'),{recursive:true});fs.mkdirSync(outside,{recursive:true});
+const sentinel=join(outside,'sentinel.txt');fs.writeFileSync(sentinel,'AUDIT_SYNTHETIC_OUTSIDE_LOG_ROOT');
+const link=join(work,'logs','jump');fs.symlinkSync(outside,link,'junction');
+fs.writeFileSync(join(work,'state','jobs.json'),JSON.stringify({jobs:[{id:'path-fixture',state:'done',spec:{kind:'prompt',engine:'zcode'},outLog:join(link,'sentinel.txt'),parseWarnings:[]}]}));
+const d=createDispatcher({runnerPath:join(root,'dispatch/test/fixtures/fake-runner.mjs'),workRoot:work,runnerCwd:work,allowedLogRoots:[join(work,'logs')],channelsImpl:async()=>({channels:[]})});
+result.logJunction={allowedLogRoot:join(work,'logs'),physicalTarget:sentinel,returned:d.tail('path-fixture',30),warnings:d.get('path-fixture').parseWarnings};d.dispose();
+fs.unlinkSync(link);
+fs.writeFileSync(join(root,'test/evidence/review-2026-10-26/extra-repro.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));

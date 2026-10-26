@@ -1,0 +1,622 @@
+[
+  {
+    "path": "collab-kit/appserver-gift-job.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "collab-kit/appserver-gift.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "collab-kit/codebuddy-run.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "collab-kit/dispatch-switch.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "collab-kit/engine-discover.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "collab-kit/headless-wake.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "collab-kit/inject-inbox.js",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "collab-kit/kill-tree.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "collab-kit/opencode-run.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "collab-kit/qoder-run.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "collab-kit/relay-once.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "collab-kit/run-gates.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "collab-kit/run-line-protocol.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "collab-kit/trae-session-inject.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "collab-kit/trae-stop-check.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "collab-kit/wait-inbox.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "collab-kit/zcode-run.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/bin/dispatch.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/client.js",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/core/appserver-rpc.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/core/dispatch-core.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/core/gift-quota.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/core/quota.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/index.js",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/notify.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/channel-health.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/channel-retry.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/client-tdz.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/codebuddy-engine.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/concurrency-limited.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/core.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/cross-check.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/ctx-format.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/cwd-shortname.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/elapsed-format.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/engine-discover.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/engine-routing.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/engine-ui.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/fallback-target.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/fallback-ui.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/file-lock.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/fixtures/fake-opencode-runner.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/fixtures/fake-runner.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/frozen-probe.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/gift-quota.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/hardening.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/header-entry.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/host-config.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/host-decouple.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/job-row-layout.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/line-protocol.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/list-compact.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/lock-badge.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/lock-model.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/lock-none-free.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/lock-priority.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/lock-queue-visibility.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/lock-ui.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/memory-ban.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/notify-engine-label.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/notify-inbox-observe.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/notify.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/opencode-executor.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/panel-style.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/pause-timeout.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/permission-blocked.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/persist-throttle.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/proactive-usage.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/progress-heartbeat.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/qoder-concurrency.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/qoder-executor.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/qoder-routing.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/quota-rpc.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/readable-tail.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/remote-args-passthrough.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/retry-model-switch.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/review-low-fixes.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/review-med-fixes.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/review-unfinished.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/section-order.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/sequential-dispatch.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/sequential-hijack.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/shared-wire-liveness.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/single-source.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/split-mode.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/tail-scroll.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/thinking-level.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/thinking-levels-coverage.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/thinking-verify.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/toolview-card.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/wait-action.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/wake-integration.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/wire-actions.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/wire-e2e-gaps.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/wire-engine.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/z2-verify.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/z4-token-check.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/zcode-discovery.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/test/zcode-route-pick.test.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/wire.client.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "dispatch/wire.host.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tasks/diag-panel-render.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tasks/e2e-opencode-dispatch.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tasks/filter-check.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tasks/snapshot-latency-check.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tasks/zb45-auto-gate.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/accept-021.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/asar-cat.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/asar-extract.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/asar-grep.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/bridge.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/codebuddy-login-link.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/codebuddy-login-status.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/dsh-scan.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/oc-concurrency-probe.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/probe-start-plan.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/test-zcode-concurrency.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/verify-codebuddy-channels.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/verify-codebuddy-login.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/verify-engine-detail.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/verify-opencode.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/verify-plugin.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/verify-switch.mjs",
+    "code": 0,
+    "error": ""
+  },
+  {
+    "path": "tools/verify-zb95-state.mjs",
+    "code": 0,
+    "error": ""
+  }
+]

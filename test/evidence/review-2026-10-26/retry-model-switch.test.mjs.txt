@@ -1,0 +1,27 @@
+
+A. 换模型 ⇒ 必须交接重跑（不许走 resume 分支）
+  ✓ A0 任务已落地（实际 paused）
+  ✓ A0b sessionId 已解析（实际 "ses_fake_1"）
+  ✓ A1 retry 返回了新 job
+  ✓ A2 ★ 新 job 的 model = 目标模型（实际 "opencode/glm-5.3-flash-free"）
+  ✓ A3 换模型时**不带** resume（--resume + --model 必失败）
+  ✓ A4 新 job 记了 parentJobId（交接血缘）
+  ✓ A5 hopCount 递增（实际 1）
+
+B. 不换模型 ⇒ 仍走 resume 续跑（别把正常续跑改坏）
+  ✓ B1 retry 返回了新 job
+  ✓ B2 不换模型 ⇒ 同会话续跑（resume="ses_fake_1" = job 自己的 sessionId）
+  ✓ B3 resume 分支不带 model（F2 纪律保持）
+
+C. 顺序派发起跑 + 暂停原因分类（ZB-71 第二处修复）
+  ✓ C1 顺序派发起跑用列表第 1 项（实际 "opencode/deepseek-v4.1-flash-free"）
+  ✓ C2 ★ 403 FreeTierError ⇒ provider-blocked（实际 "provider-blocked"）
+  ✓ C3 事件 JSON 原文也能认（实际 "provider-blocked"）
+  ✓ C4 provider-blocked 进自动降级链（换通道是唯一有效动作）
+  ✓ C5 ★ provider-blocked **不在同引擎内延续**（同 IP 下换模型必然同样失败）
+  ✓ C6 config-error 仍不延续（既有语义保持）
+  ✓ C7 quota-exhausted 仍可同引擎换模型（不误伤既有行为）
+
+===== ZB-71 retry 换模型 + provider-blocked：17 PASS / 0 FAIL =====
+
+--- STDERR ---

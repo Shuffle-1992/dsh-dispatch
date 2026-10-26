@@ -1,0 +1,13 @@
+✔ ZB-40 ①：心跳行可被解析（完整形态 + 省略 lastTool/session） (6.8373ms)
+✔ ZB-40 ②：slimJob 依心跳给出 stalled / lastProgressAgoSec (1.0407ms)
+✔ ZB-40 ③：runner 侧形态（turn.failed 分支 / 心跳模板 / 模型⇄权益校验） (0.5328ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21.7229
+
+--- STDERR ---

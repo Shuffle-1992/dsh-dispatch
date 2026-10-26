@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "chain": [
+    "qoder/model-a"
+  ],
+  "targets": [
+    {
+      "provider": "qoder/model-a",
+      "model": null,
+      "reasoningLevel": null
+    }
+  ],
+  "updatedAt": "2026-10-26T13:47:32.332Z"
+}

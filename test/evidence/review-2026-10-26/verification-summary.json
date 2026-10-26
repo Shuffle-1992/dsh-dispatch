@@ -1,0 +1,106 @@
+{
+  "reviewDate": "2026-10-26",
+  "head": "ced6af5d23464fbb1a07ba8e781c1550562db8d7",
+  "node": "v24.14.1",
+  "platform": "win32",
+  "scope": "report and evidence only",
+  "findings": {
+    "total": 13,
+    "P1": 5,
+    "P2": 8
+  },
+  "existingTests": {
+    "firstRunFiles": 70,
+    "firstRunExitZero": 66,
+    "rerunOutsideSandbox": [
+      {
+        "file": "channel-retry.test.mjs",
+        "code": 0,
+        "error": null,
+        "ms": 5205
+      },
+      {
+        "file": "core.test.mjs",
+        "code": 0,
+        "error": null,
+        "ms": 8266
+      },
+      {
+        "file": "engine-discover.test.mjs",
+        "code": 0,
+        "error": null,
+        "ms": 9037
+      },
+      {
+        "file": "opencode-executor.test.mjs",
+        "code": 0,
+        "error": null,
+        "ms": 25648
+      }
+    ],
+    "filesWithSuccessfulRun": 70,
+    "note": "Not a single homogeneous 70/70 run; both original failures and reruns preserved"
+  },
+  "syntax": {
+    "files": 124,
+    "passed": 124
+  },
+  "probes": {
+    "verifyPlugin": {
+      "exit": 0,
+      "passed": 23
+    },
+    "verifySwitch": {
+      "exit": 0,
+      "passed": 8
+    },
+    "z2Verify": {
+      "exit": 0,
+      "passed": 85,
+      "skips": [
+        "Z2_HOST_REPO absent: host repository fingerprint check"
+      ]
+    },
+    "z4TokenCheck": {
+      "exit": 0
+    }
+  },
+  "limitations": [
+    "No live model task requests or quota spending",
+    "No real DSH browser interaction or independent DSH Git installation",
+    "No Linux/macOS or alternate Node/DSH version runs",
+    "No full dependency SBOM/CVE or git-history secret scan"
+  ],
+  "temporaryScripts": [
+    {
+      "path": "test/review-suite.mjs",
+      "sha256": "f7c81a9db133cd3ce5b52559d89f8abe0422b3a4c8e1f302ef6c5b36c5171f0f",
+      "cleanupRequired": true
+    },
+    {
+      "path": "test/review-repro.mjs",
+      "sha256": "23bab10ace137e8995b401986a41ae358d933596fa529c3597a3b9d3848bc530",
+      "cleanupRequired": true
+    },
+    {
+      "path": "test/review-rerun.mjs",
+      "sha256": "4a41ed7f3f2a16637393b9850a34ab30042b8a9de1bbc775562b5e326d7c9ebc",
+      "cleanupRequired": true
+    },
+    {
+      "path": "test/review-boundaries.mjs",
+      "sha256": "5b3853aa08c1459b4fd2fceb9b6a3a9260503c78f050aa66d2f5614dd7c0e3de",
+      "cleanupRequired": true
+    },
+    {
+      "path": "test/review-metrics.mjs",
+      "sha256": "313f8514caa9cdd84a65c92092f318e7d43e7ba0b45ae62b6070e5d364731b59",
+      "cleanupRequired": true
+    },
+    {
+      "path": "test/review-extra.mjs",
+      "sha256": "968fbe0e14bb2f735c66d87f97d932f240ea3f9715bc9de3e3d0e0b668a2097a",
+      "cleanupRequired": true
+    }
+  ]
+}

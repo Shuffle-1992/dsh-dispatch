@@ -1,0 +1,23 @@
+
+A. normalizeCwdPath()：纯函数语义
+  ✓ A0 已导出 normalizeCwdPath（可单测）
+  ✓ A1 长路径原样返回（changed=false，实际 false）
+  ✓ A2 空串原样返回（不抛）
+  ✓ A3 不存在的短名路径：保持原样 + 不抛（尽力而为）
+  ✓ A3b 不成功时仍留说明（实际 "cwd 含 Windows 8.3 短名（C:\\definitely\\not\\e"）
+  · A4 跳过：本机 %TEMP% 无 8.3 短名形式可用（不算失败）
+  ✓ A5 经典短名 C:\PROGRA~1 ⇒ C:\Program Files（changed=true）
+
+B. dispatch() 落库的 cwd 是展开后的长路径
+  ✓ B1 cwd 已落库（实际 "C:\\Users\\Administrator\\AppData\\Local\\Temp\\dsp-cwd-eeEe5f"）
+  ✓ B1b ★ 落库的 cwd 不含 8.3 短名段（实际 "C:\\Users\\Administrator\\AppData\\Local\\Temp\\dsp-cwd-eeEe5f"）
+  ✓ B2 纯长路径零改动（实际 changed=false，path=C:\Users\Administrator\AppData\Local\Temp\dsp-cwd-pure-long-dir）
+  ✓ B2b 纯长路径零留痕（无噪音）
+  ✓ B2c 非 8.3 形态不被误改（C:\my~backup\x）
+  ✓ B2c 非 8.3 形态不被误改（C:\a\file~1.txt）
+  ✓ B2c 非 8.3 形态不被误改（C:\long-name-here\x）
+  · B3/B4 跳过：本机无 8.3 短名可用（断言 A 段已覆盖纯函数语义）
+
+===== ZB-72 cwd 8.3 短名展开：13 PASS / 0 FAIL =====
+
+--- STDERR ---

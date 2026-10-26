@@ -1,0 +1,98 @@
+① 纯函数：版本解析与形态判定
+  ✓ parseVersion 解析裸版本号
+  ✓ parseVersion 从多行输出里取版本
+  ✓ ★ 取不到就返回 null（不伪造）
+  ✓ .cjs 形态 → cjs（调用方需前置 node）
+  ✓ .cmd → cmd
+  ✓ .exe → exe
+  ✓ null → null
+
+② 五级优先级：env 命中即返回，不继续往下找
+  ✓ env 覆盖命中 ⇒ found
+  ✓ ★ 用的是 env 指定的那个（实际 c:\env\my-zcode.cjs）
+  ✓ entryKind 如实报 cjs
+  ✓ candidatesTried 记录了 env 级命中
+  ✓ ★ env 命中后**不再**尝试其它级别
+
+③ 客户端自带 CLI：跨盘符扫描（原硬编码在 F: 盘，这是关键修复）
+  ✓ ★ 装在 D:\（非默认位置）也能找到 —— 不再依赖硬编码盘符
+  ✓ 命中 D:\ 的自带 CLI（实际 D:\Program Files\ZCode\resources\glm\zcode.cjs）
+  ✓ 形态标为 client-bundled-cli
+
+④ PATH 多命中：只取**第一个可执行**的（官方 dispatcher 的教训 + 真机 EINVAL 坑）
+  ✓ PATH 命中 ⇒ found
+  ✓ ★ 取 .cmd 而不是无扩展名的 shell 脚本（实际 c:\npm\opencode.cmd）
+  ✓ entryKind 如实报 cmd
+  ✓ ★ PATH 级只记 1 条汇总记录（实际 1）
+
+⑤ Qoder：CN 版优先 + **用 --list-models 判登录态**（不能用 .auth 目录）
+  ✓ Qoder CN CLI 命中
+  ✓ variant 标为 cn
+  ✓ 版本解析正确（1.1.73）
+  ✓ ★ --list-models 成功 ⇒ 已登录
+  ✓ 登录依据写明是 --list-models（--list-models 成功）
+
+⑥ Qoder 已装但**未登录**：必须给出可操作提示（真机实测：IDE 登录 ≠ CLI 登录）
+  ✓ CLI 存在 ⇒ found 仍为 true（不能因为未登录就当作没找到）
+  ✓ ★ loggedIn=false
+  ✓ ★ warning 给出登录方式（Qoder CLI 存在但**未登录**：运行 `qoderclicn login`（浏览器设备码）或设 QODER_PERSONAL_ACCESS_TOKEN）
+  ✓ ★ 有 .auth/ 目录但 CLI 报未登录 ⇒ 仍判未登录（不误报已登录）
+
+⑦ 凭据只判"存在性/大小"，**绝不解析内容**
+  ✓ CLI 可发现（ZCODE_HOME 指向安装根）
+  ✓ ZCode 凭据存在 ⇒ 已登录
+  ✓ 有登录依据说明
+  ✓ ★ 依据里没有任何凭据字段名 ⇒ 没解析内容
+  ✓ 依据只说"存在"（凭据文件存在（C:\Users\Administrator\.zcode\v2\credentials.json））
+  ✓ 凭据不存在 ⇒ loggedIn=false
+  ✓ 依据里给出查过的凭据路径（未发现凭据文件（C:\Users\Administrator\.zcode\v2\credentials.json））
+
+⑧ 全失败：返回可解释原因（列出查过多少处 + 怎么修），且**不抛**
+  ✓ found=false
+  ✓ entry/form 为 null
+  ✓ reason 说明未找到
+  ✓ ★ reason 报出查过的处数（便于自查）
+  ✓ ★ reason 给出修复方式
+  ✓ candidatesTried 记录了尝试位置
+  ✓ 每条候选都有 level/value（结构稳定）
+
+⑨ 探测超时/异常：不得抛到调用方
+  ✓ ★ 探测抛异常不影响 found（文件确实在）
+  ✓ version 为 null 或字符串（不崩）
+  ✓ 把探测异常写进 warnings 而不是抛出去
+
+⑩ 未知引擎名 ⇒ TypeError（明确的编程错误，不静默）
+  ✓ 抛 TypeError
+
+⑪ 真机冒烟：discoverAll 对三个引擎都返回结构完整的结论
+  ✓ 三个引擎都有结果对象
+  ✓ 每个都有非空 reason
+  ✓ 每个都有 warnings 数组
+       zcode: client-bundled-cli · v0.17.0 · 已登录 · F:\Program Files\ZCode\resources\glm\zcode.cjs
+       opencode: cli · v1.19.2 · 登录态未知 · C:\Users\Administrator\AppData\Roaming\npm\opencode.cmd
+       qoder: cli · cn · v1.1.73 · 已登录 · C:\Users\Administrator\.qoder-cn\bin\qoderclicn\qoderclicn.exe
+       codebuddy: client-bundled-cli · v2.161.0 · 已登录 · C:\Users\Administrator\AppData\Local\Programs\WorkBuddy\resources\app.asar.unpacked\cli\bin\codebuddy
+  ✓ zcode：found ⇒ version 非空（0.17.0）
+  ✓ opencode：found ⇒ version 非空（1.19.2）
+  ✓ qoder：found ⇒ version 非空（1.1.73）
+  ✓ codebuddy：found ⇒ version 非空（2.161.0）
+  ✓ zcode 结论自洽
+
+⑫ core 集成（T2）：listChannels() 带上 engineDetail 与可读 warning
+  ✓ ★ listChannels() 返回 engineDetail（T2 的核心交付）
+  ✓ zcode 明细：找到 + 版本
+  ✓ ★ 上报**形态**（面板据此显示 IDE/CLI 徽标）
+  ✓ qoder 明细：找到但未登录
+  ✓ qoder 明细：variant=cn（CN 版）
+  ✓ 每个引擎都有可读 summary（一行说明）
+  ✓ ★ 未登录 ⇒ 可读 warning（实际 ["[info] ZCode 通道按白名单只保留 plan / account:bigmodel-start-plan；已剔除 2 条：personal, builtin:bigmodel-coding-plan","[info] qoder 已找到但未登录（CLI 报 Not logged in（需先登录））：Qoder CLI 存在但**未登录**：运行 `qoderclicn login`（浏览器设备码）"]）
+  ✓ engines 与协议层 ENGINES 一致
+  ✓ ★ 没找到引擎 ⇒ warning 含原因与查过的处数（实际 ["[info] ZCode 通道按白名单只保留 plan / account:bigmodel-start-plan；已剔除 2 条：personal, builtin:bigmodel-coding-plan","未检测到 opencode 引擎：未找到（已查 12 处）"]）
+  ✓ ★ 有"凭据 mtime 兜底"分支（缓存不可用时仍能判已登录）
+  ✓ ★ 兜底用 env.LOCALAPPDATA —— 写成 localAppData 会 ReferenceError 被吞掉（本文件已踩一次）
+  ✓ 兜底读的是真实凭据目录
+  ✓ 凭据新鲜度上限 24 小时（太旧不猜）
+
+===== 引擎自动发现：67 PASS / 0 FAIL =====
+
+--- STDERR ---

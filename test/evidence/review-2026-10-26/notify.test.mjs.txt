@@ -1,0 +1,31 @@
+✔ 空闲会话：job 落地 → followup 唤醒，消息形态符合客户端契约 (2.7979ms)
+✔ 忙碌会话：job 落地 → inject（插进下一步，不打断本轮） (0.3478ms)
+✔ 五个落地态都唤醒（paused 也算落地 —— 要人来决定续跑/换通道） (0.6862ms)
+✔ 未落地的中间态不唤醒；只有落地那一刻唤醒一次（幂等） (0.4255ms)
+✔ 不是本会话派发的 job 不唤醒（面板/别的会话派的都不叫醒我） (0.1901ms)
+✔ 登记晚于落地：track 时立刻补一次判定（不丢通知） (1.7231ms)
+✔ 模型自己 kill 的 job 不唤醒（否则等于自己叫醒自己） (0.2496ms)
+✔ ★ kill 抑制的顺序：先登记后 kill（真实顺序）不唤醒 (0.1444ms)
+✔ ★ kill 抑制的顺序：登记晚于落地（错误顺序）会唤醒 —— 这就是 ZB-25 要防的回归 (0.239ms)
+✔ kill 未成功时撤销预登记（unmarkSuppressed），真实落地仍能唤醒 (0.2643ms)
+✔ 投递后释放归属，集合不随历史 job 无界增长（审计 A#4） (0.2867ms)
+✔ 模型自己 wait 到落地的 job 不唤醒（结果已由工具调用返回） (0.1175ms)
+✔ 会话已不在：只记一条 warn，不抛、不重复刷日志 (0.266ms)
+✔ 无会话 id（非 agent 调用）：不登记、不唤醒 (0.1186ms)
+✔ maxConsecutiveWakes：超上限后改为 inject（不再开新一轮） (0.9946ms)
+✔ 用户说话后连续唤醒预算清零（agent/inbox/claimed 的 user 消息） (0.3695ms)
+✔ dispose 后不再唤醒（插件卸载/热重载不留悬挂订阅） (0.1522ms)
+✔ notice 文本与摘要：只带必要信息，摘要不超客户端上限 (0.34ms)
+✔ createNoticeMessage：正文/摘要缺省不炸（旧 job 快照字段不全） (0.4986ms)
+✔ createSettleNotifier 缺 dispatcher 直接抛（配置错误早暴露） (1.372ms)
+✔ noteOwnerAction：dispatch/retry 登记归属，kill/wait 抑制，其余不动 (36.9389ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 59.7963
+
+--- STDERR ---

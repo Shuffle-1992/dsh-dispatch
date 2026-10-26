@@ -1,0 +1,106 @@
+[
+  {
+    "id": "dsh-dispatch@0.2.0",
+    "name": "dsh-dispatch",
+    "version": "0.2.0",
+    "size": 416337,
+    "unpackedSize": 1188925,
+    "shasum": "f5353283c435700b70f90fb33486fb6ce1bc5e60",
+    "integrity": "sha512-tp+S3qog/glTUKQuY/dOXAQkTGj+09JU4eZwpYg1tIzt9y4pSTvTEbUKn3D2rWEMM9XIYLftL+NzkHn9PN0AeQ==",
+    "filename": "dsh-dispatch-0.2.0.tgz",
+    "files": [
+      {
+        "path": "LICENSE",
+        "size": 1068,
+        "mode": 420
+      },
+      {
+        "path": "README.md",
+        "size": 26601,
+        "mode": 420
+      },
+      {
+        "path": "dispatch/bin/dispatch.mjs",
+        "size": 20340,
+        "mode": 420
+      },
+      {
+        "path": "dispatch/client.js",
+        "size": 443440,
+        "mode": 420
+      },
+      {
+        "path": "dispatch/cordis.patch.yml",
+        "size": 1059,
+        "mode": 420
+      },
+      {
+        "path": "dispatch/core/appserver-rpc.mjs",
+        "size": 11238,
+        "mode": 420
+      },
+      {
+        "path": "dispatch/core/dispatch-core.mjs",
+        "size": 291300,
+        "mode": 420
+      },
+      {
+        "path": "dispatch/core/gift-quota.mjs",
+        "size": 15274,
+        "mode": 420
+      },
+      {
+        "path": "dispatch/core/quota.mjs",
+        "size": 13215,
+        "mode": 420
+      },
+      {
+        "path": "dispatch/icon.svg",
+        "size": 450,
+        "mode": 420
+      },
+      {
+        "path": "dispatch/index.js",
+        "size": 79902,
+        "mode": 420
+      },
+      {
+        "path": "dispatch/locale/en.json",
+        "size": 18143,
+        "mode": 420
+      },
+      {
+        "path": "dispatch/locale/zh.json",
+        "size": 17567,
+        "mode": 420
+      },
+      {
+        "path": "dispatch/notify.mjs",
+        "size": 25462,
+        "mode": 420
+      },
+      {
+        "path": "dispatch/README.md",
+        "size": 81572,
+        "mode": 420
+      },
+      {
+        "path": "dispatch/wire.client.mjs",
+        "size": 40388,
+        "mode": 420
+      },
+      {
+        "path": "dispatch/wire.host.mjs",
+        "size": 99917,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 1989,
+        "mode": 420
+      }
+    ],
+    "entryCount": 18,
+    "bundled": []
+  }
+]

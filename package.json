@@ -64,6 +64,7 @@
     "dispatch/bin",
     "dispatch/core",
     "dispatch/locale",
+    "collab-kit",
     "README.md",
     "LICENSE"
   ]

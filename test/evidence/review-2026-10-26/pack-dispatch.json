@@ -1,0 +1,96 @@
+[
+  {
+    "id": "dsh-dispatch@0.2.0",
+    "name": "dsh-dispatch",
+    "version": "0.2.0",
+    "size": 405022,
+    "unpackedSize": 1160975,
+    "shasum": "51953a8f70e886a06a6ae1be7126c832eace554d",
+    "integrity": "sha512-FXiseKuPBy3wJbhxE7IVI2Kd2FVmPuizxHCR4UD16HpmaLYUpIeUVWINe3Rati5pjUtZ6o8CGrLQIS6b7qGSZg==",
+    "filename": "dsh-dispatch-0.2.0.tgz",
+    "files": [
+      {
+        "path": "README.md",
+        "size": 81572,
+        "mode": 420
+      },
+      {
+        "path": "bin/dispatch.mjs",
+        "size": 20340,
+        "mode": 420
+      },
+      {
+        "path": "client.js",
+        "size": 443440,
+        "mode": 420
+      },
+      {
+        "path": "cordis.patch.yml",
+        "size": 1059,
+        "mode": 420
+      },
+      {
+        "path": "core/appserver-rpc.mjs",
+        "size": 11238,
+        "mode": 420
+      },
+      {
+        "path": "core/dispatch-core.mjs",
+        "size": 291300,
+        "mode": 420
+      },
+      {
+        "path": "core/gift-quota.mjs",
+        "size": 15274,
+        "mode": 420
+      },
+      {
+        "path": "core/quota.mjs",
+        "size": 13215,
+        "mode": 420
+      },
+      {
+        "path": "icon.svg",
+        "size": 450,
+        "mode": 420
+      },
+      {
+        "path": "index.js",
+        "size": 79902,
+        "mode": 420
+      },
+      {
+        "path": "locale/en.json",
+        "size": 18143,
+        "mode": 420
+      },
+      {
+        "path": "locale/zh.json",
+        "size": 17567,
+        "mode": 420
+      },
+      {
+        "path": "notify.mjs",
+        "size": 25462,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 1708,
+        "mode": 420
+      },
+      {
+        "path": "wire.client.mjs",
+        "size": 40388,
+        "mode": 420
+      },
+      {
+        "path": "wire.host.mjs",
+        "size": 99917,
+        "mode": 420
+      }
+    ],
+    "entryCount": 16,
+    "bundled": []
+  }
+]

@@ -41,7 +41,9 @@ export const SWITCH_FILE =
 export function readDispatchSwitch(file = SWITCH_FILE) {
   try {
     if (!existsSync(file)) return { enabled: true, source: 'default(无文件=开启)', path: file };
-    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    /* R03（2026-10-26 审查 P1）：**去 BOM** —— 带 UTF-8 BOM 的正常 JSON 会让 JSON.parse 抛错，
+     * 落进 catch 的"读取失败⇒开启"分支 ⇒ **关闭开关静默失效**。 */
+    const raw = JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
     return {
       enabled: raw.enabled !== false,
       path: file,

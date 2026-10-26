@@ -1,0 +1,30 @@
+{
+  "tag": null,
+  "kind": "prompt",
+  "model": null,
+  "exit": 0,
+  "elapsedSec": 0.2,
+  "sessionId": null,
+  "response": "AUDIT_FIXTURE_OK",
+  "responseChars": 16,
+  "usage": {
+    "totalCredits": null,
+    "contextRatio": null,
+    "durationMs": null,
+    "numTurns": null
+  },
+  "permissionMode": {
+    "requested": "accept_edits",
+    "reported": null,
+    "fellBack": false
+  },
+  "toolCount": 0,
+  "toolCalls": [],
+  "toolCallCount": 0,
+  "eventCounts": {
+    "result": 1
+  },
+  "unknownEventCount": 0,
+  "parseErrorCount": 0,
+  "warnings": []
+}

@@ -1,0 +1,23 @@
+① 环境变量指向坏路径 ⇒ **不能因此整体失败**（继续自动发现，本机仍可用）
+  ✓ ★ 坏 env 不致命，仍回退发现成功（exit=0）
+  ✓ 仍能列出 provider
+  ✓ stderr 不出现 null（对用户可读）
+
+② 显式 ZCODE_HOME 指向安装根 ⇒ 自动推出 CLI 与 builtin 配置
+  ✓ 用 ZCODE_HOME 推导成功（exit=0）
+  ✓ ★ 列出了 provider（CLI + builtin 都找到了）
+
+③ 无任何覆盖 ⇒ 本机自动发现（**证明不靠硬编码也能跑通**）
+  ✓ ★ 本机（ZCode 在 F: 盘）无 env 覆盖也能发现（exit=0）
+  ✓ ★ 列出了 provider ⇒ 「换盘符也能找到」这一目标达成
+
+④ 源码里不得再出现**开发机的字面安装路径**（只能出现在注释里说明历史）
+  ✓ ★ 可执行代码里没有字面安装路径（违规 0 处）
+  ✓ 存在 resolveZcodePaths() 发现函数
+  ✓ 支持 ZCODE_HOME / ZCODE_INSTALL_DIR 覆盖
+  ✓ ★ 跨盘符枚举（原硬编码在 F: 盘，这是关键修复）
+  ✓ CLI 与 builtin 配置都由"安装根 + 相对子路径"推导（不再是两处独立硬编码）
+
+===== ZCode 安装发现：12 PASS / 0 FAIL =====
+
+--- STDERR ---

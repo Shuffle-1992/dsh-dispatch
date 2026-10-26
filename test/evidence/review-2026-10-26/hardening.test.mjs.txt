@@ -1,0 +1,15 @@
+✔ B1 同一文件的不同写法只对应一把锁（含 junction 与 8.3 短名） (308.094ms)
+✔ B2 restore() 不改写「ownerPid 仍活着」的 running job；旧快照（无 ownerPid）仍按残留终结 (10.3255ms)
+✔ B3 落后副本不覆盖盘上更新的终态（多进程丢失更新） (793.0163ms)
+✔ B4 tail() 不读取越界路径（手改 jobs.json 的 captureOut 不能读任意文件） (12.117ms)
+✔ A2 非法 config 一律 warn + 安全默认（不再让插件整体不激活） (47.5607ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1191.0895
+
+--- STDERR ---

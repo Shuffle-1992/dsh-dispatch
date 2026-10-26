@@ -1,0 +1,53 @@
+整仓库锁（未声明 write）
+  ✓ A1 kind=repo
+  ✓ A2 徽标文字 = 「整仓库锁」
+  ✓ A3 tooltip 说明了互斥语义
+
+文件锁（单文件 / 多文件）
+  ✓ B1 kind=file
+  ✓ B2 单文件徽标 = 「文件锁」
+  ✓ B3 文件列表来自 spec.write
+  ✓ B4 kind=file
+  ✓ B5 多文件徽标带数量（实际 "文件锁 2"）
+  ✓ B6 文件列表完整
+  ✓ B7 tooltip 列出全部文件
+
+不取锁 / 未持锁
+  ✓ C1 lock='none' ⇒ kind=none
+  ✓ C2 lock=null ⇒ kind=none（未持锁）
+  ✓ C3 无 lock 字段 ⇒ kind=none
+  ✓ C4 徽标文字 = 「不取锁」
+
+旧版本记录（含 memory）—— 如实标注，不假装新模型
+  ✓ D1 lock='repo+memory' ⇒ kind=legacy
+  ✓ D2 徽标显示原始值（不伪装成「整仓库锁」）
+  ✓ D3 tooltip 说明是旧版本记录
+  ✓ D4 未知形态也归为 legacy（不崩）
+
+容错（脏数据不崩）
+  ✓ E1 job=null ⇒ none
+  ✓ E2 job=undefined ⇒ none
+  ✓ E3 spec.write 非数组 ⇒ 回退解析 lock 字符串
+  ✓ E4 spec.write 为空 ⇒ 回退解析 lock 字符串
+
+接线与样式（源码断言）
+  ✓ F1 进程行调用 lockKindOf
+  ✓ F2 徽标带锁类型 class + 右对齐修饰类 dsp-job-lock
+  ✓ F3 无锁时不渲染徽标
+  ✓ F4 有整仓库锁样式
+  ✓ F5 有文件锁样式
+  ✓ F6 有旧版记录样式（危险色提示）
+  ✓ F7 无死代码（hasLockBadge 已移除）
+  ✓ F8 不再直接渲染原始 job.lock
+
+slimJob 默认值修正（ZB-16 漏改）
+  ✓ G1 slimJob 的 lock 默认值已由 'both' 改为 'repo'
+  ✓ G2 旧的 'both' 默认值已清除
+
+★ 全仓防复发扫描（ZB-18 实测：删 memory 时我连漏 4 处默认值）
+  ✓ H1 扫描到 10 个生效源码文件
+  ✓ H2 生效代码里无 'both'/'memory' 锁残留（命中 0 处）
+
+===== ZB-18：34 PASS / 0 FAIL =====
+
+--- STDERR ---

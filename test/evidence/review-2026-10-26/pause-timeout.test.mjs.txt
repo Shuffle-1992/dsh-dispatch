@@ -1,0 +1,16 @@
+✔ parseRunnerLine：done 行的 `(超时)` 标记 → timedOut:true（exit=124） (5.5511ms)
+✔ ★ 看门狗超时：killed + timedOut=true + timedOutBy=watchdog + watchdogSec 落字段 (6151.5884ms)
+✔ runner 自身超时：`(超时)` 标记 → failed（非 killed）+ timedOutBy=runner (377.1595ms)
+✔ paused 触发：命中签名 → paused + pausedAt；未命中 → failed + pauseReason=unknown (488.407ms)
+✔ timeoutMin 校验：>0 合法（ZB-118 起有实际上的限），非正数/超限报错 (503.9589ms)
+✔ ZB-112：超时 + 输出里含 429 ⇒ 仍 failed（绝不判额度耗尽） (257.3166ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7805.8169
+
+--- STDERR ---

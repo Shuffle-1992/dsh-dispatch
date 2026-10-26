@@ -1,0 +1,16 @@
+✔ A. ★ 开关关闭时，只读探测 --list-providers 仍成功且能列出通道 (181.4354ms)
+✔ B. ★ 开关关闭时，真实派发仍被拒绝（exit 3，且不启动任何进程） (259.6761ms)
+✔ C. 开关开启时探测成功（对照：确认 A 不是"闸门整个失效"） (175.2306ms)
+✔ D. ★ BOM 加固：带 UTF-8 BOM 的 enabled:false 仍必须拦住派发（原先 fail-open） (161.313ms)
+✔ E. ★ runner 源码锁：GATE 必须在 --list-providers 分支之后 (2.8981ms)
+✔ F. ★ 面板：冻结时在「通道」分区渲染 switchOffBlocked（既有键，不新增文案） (5.3292ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 795.0703
+
+--- STDERR ---

@@ -1,0 +1,66 @@
+[行协议契约锁] 协议=F:\My Code\dsh-dispatch\collab-kit\run-line-protocol.mjs
+[行协议契约锁] core=F:\My Code\dsh-dispatch\dispatch\core\dispatch-core.mjs
+[行协议契约锁] core 探测：opencode 前缀已识别
+[行协议契约锁] 模式=宽松（能力缺失记 SKIP）
+
+=== ① run-line-protocol.mjs 自身（硬断言） ===
+[PASS] ①-1 ENGINES 恰好是 [zcode, opencode, qoder, codebuddy] 且顺序固定
+[PASS] ①-2 DEFAULT_ENGINE 是 zcode
+[PASS] ①-3 RUN_PREFIX 每个引擎都有前缀
+[PASS] ①-4 prefixFor("nonsense") 回退默认前缀 [zcode-run]
+[PASS] ①-5 isOpenCodeId 判据（opencode/x=true；plan=false；opencode/=false）
+[PASS] ①-6 RUNNER_BASENAME / 行语法说明齐备
+[PASS] ①-7 default export 与具名导出一致（两处不得漂移）
+
+=== ② normalizeEngineSpec（硬断言） ===
+[PASS] ②-1 {provider:"opencode/m"} ⇒ {engine:opencode, provider:opencode, model:"opencode/m"}
+[PASS] ②-2 显式 model 优先（provider=opencode/m + model=other ⇒ 保留 other）
+[PASS] ②-3 {provider:"plan"} ⇒ engine:zcode 且 provider 不变
+[PASS] ②-4 幂等：对结果再跑一次，逐字相等
+[PASS] ②-5 不修改入参（原对象快照不变）
+
+=== ③ inferEngine（硬断言） ===
+[PASS] ③-1 显式合法 engine 优先
+[PASS] ③-2 opencode/… provider 判 opencode
+[PASS] ③-3 其余（含非法 engine / 空）判 zcode
+
+=== ④ 同一组行 × 两种前缀 ⇒ 逐字段相等（宽松：依赖 core） ===
+[PASS] ④ done：两种前缀解析结果逐字段相等
+[PASS] ④ usage：两种前缀解析结果逐字段相等
+[PASS] ④ context：两种前缀解析结果逐字段相等
+[PASS] ④ progress：两种前缀解析结果逐字段相等
+[PASS] ④ out：两种前缀解析结果逐字段相等
+[PASS] ④ err：两种前缀解析结果逐字段相等
+[PASS] ④ result：两种前缀解析结果逐字段相等
+[PASS] ④ memory-ban：两种前缀解析结果逐字段相等
+[PASS] ④ endpoint：两种前缀解析结果逐字段相等
+[PASS] ④ start：两种前缀解析结果逐字段相等
+[PASS] ④ resume：两种前缀解析结果逐字段相等
+[PASS] ④ provider：两种前缀解析结果逐字段相等
+
+=== ⑤ 引擎差异字段（宽松：依赖 core） ===
+[PASS] ⑤-1 variants ⇔ reasoning-levels 落到同一个字段
+[PASS] ⑤-2 variant=… model=… ⇒ reasoningLevelApplied + reasoningTarget 含 model
+
+=== ⑥ 兼容语义（zcode 语义硬断言；opencode 语义依赖 core） ===
+[PASS] ⑥-1 parseRunnerLine('[zcode-run] 乱七八糟') === null（已知前缀 + 识别失败）
+[PASS] ⑥-2 parseRunnerLine('[opencode-run] 乱七八糟') === null
+[PASS] ⑥-3 parseRunnerLine('普通输出') 为 {}（无已知前缀视作普通行）
+[PASS] ⑥-4 opencode 行 + engine='zcode' ⇒ 按普通行处理（{}，不是 null）
+[PASS] ⑥-5 未知 engine 值不抛错（回退"两个前缀都试"）
+
+=== ⑦ 协议文件与 core 的镜像一致性（防漂移） ===
+[PASS] ⑦-1 core 覆盖 RUN_PREFIX 的每一个前缀
+[PASS] ⑦-2 不得"硬编码只认 zcode"（opencode 字面量缺失 ⇔ 必须从协议模块取前缀）
+
+=== ⑧ core 引擎管道（宽松：依赖 core） ===
+[PASS] ⑧-1 新增 createDispatcher 选项 opencodeRunnerPath / maxConcurrentOpenCode
+[PASS] ⑧-2 listChannels() 返回每个 channel 带 engine、顶层带 engines
+
+=== ⑨ dispatch({provider:"opencode/<model>"}) spec 规整（宽松：依赖 core + 假执行器） ===
+[PASS] ⑨-1 spec 规整为 {engine:opencode, provider:opencode, model:"opencode/<model>"} 且跑完
+
+================ 汇总 ================
+[行协议契约锁] 39 项：PASS 39 / FAIL 0 / SKIP 0
+
+--- STDERR ---

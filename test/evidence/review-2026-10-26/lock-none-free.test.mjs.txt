@@ -1,0 +1,13 @@
+
+A. lock:none ⇒ 真的不取锁（不被任何人的锁挡住）
+  ✓ A0 前置：持文件锁的任务已在 running
+  ✓ A1 ★ lock:none 的任务立即 running（实际 running）——修复前会 queued 等别人的锁
+  ✓ A2 ★ 不再报出 blocker（实际 []）
+  ✓ A3 ★ lock:repo 的任务仍正确排队（实际 queued）——互斥语义保持
+  ✓ A4 lock:repo 的 lockWait 如实报出 blocker（观测与事实一致）
+  ✓ A5 争同一文件的文件锁任务仍排队（细粒度互斥保持）
+  ✓ A6 ★ 多个 lock:none 任务都能并发跑（互不阻塞）
+
+===== ZB-80 lock:none 真的不取锁：7 PASS / 0 FAIL =====
+
+--- STDERR ---

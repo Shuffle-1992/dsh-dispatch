@@ -1,0 +1,296 @@
+{
+  "testFiles": 70,
+  "textAssertionHeuristicFiles": [
+    "dispatch/test/channel-health.test.mjs",
+    "dispatch/test/client-tdz.test.mjs",
+    "dispatch/test/codebuddy-engine.test.mjs",
+    "dispatch/test/concurrency-limited.test.mjs",
+    "dispatch/test/core.test.mjs",
+    "dispatch/test/cross-check.test.mjs",
+    "dispatch/test/ctx-format.test.mjs",
+    "dispatch/test/elapsed-format.test.mjs",
+    "dispatch/test/engine-discover.test.mjs",
+    "dispatch/test/engine-routing.test.mjs",
+    "dispatch/test/engine-ui.test.mjs",
+    "dispatch/test/fallback-target.test.mjs",
+    "dispatch/test/fallback-ui.test.mjs",
+    "dispatch/test/file-lock.test.mjs",
+    "dispatch/test/frozen-probe.test.mjs",
+    "dispatch/test/hardening.test.mjs",
+    "dispatch/test/header-entry.test.mjs",
+    "dispatch/test/host-config.test.mjs",
+    "dispatch/test/host-decouple.test.mjs",
+    "dispatch/test/line-protocol.test.mjs",
+    "dispatch/test/lock-badge.test.mjs",
+    "dispatch/test/lock-ui.test.mjs",
+    "dispatch/test/memory-ban.test.mjs",
+    "dispatch/test/notify-inbox-observe.test.mjs",
+    "dispatch/test/opencode-executor.test.mjs",
+    "dispatch/test/panel-style.test.mjs",
+    "dispatch/test/permission-blocked.test.mjs",
+    "dispatch/test/persist-throttle.test.mjs",
+    "dispatch/test/proactive-usage.test.mjs",
+    "dispatch/test/progress-heartbeat.test.mjs",
+    "dispatch/test/qoder-concurrency.test.mjs",
+    "dispatch/test/qoder-executor.test.mjs",
+    "dispatch/test/qoder-routing.test.mjs",
+    "dispatch/test/readable-tail.test.mjs",
+    "dispatch/test/review-low-fixes.test.mjs",
+    "dispatch/test/review-med-fixes.test.mjs",
+    "dispatch/test/review-unfinished.test.mjs",
+    "dispatch/test/section-order.test.mjs",
+    "dispatch/test/sequential-dispatch.test.mjs",
+    "dispatch/test/shared-wire-liveness.test.mjs",
+    "dispatch/test/single-source.test.mjs",
+    "dispatch/test/tail-scroll.test.mjs",
+    "dispatch/test/thinking-level.test.mjs",
+    "dispatch/test/thinking-levels-coverage.test.mjs",
+    "dispatch/test/thinking-verify.test.mjs",
+    "dispatch/test/toolview-card.test.mjs",
+    "dispatch/test/wake-integration.test.mjs",
+    "dispatch/test/wire-actions.test.mjs",
+    "dispatch/test/wire-e2e-gaps.test.mjs",
+    "dispatch/test/wire-engine.test.mjs",
+    "dispatch/test/zcode-discovery.test.mjs",
+    "dispatch/test/zcode-route-pick.test.mjs"
+  ],
+  "absoluteSourceReaders": [
+    {
+      "path": "dispatch/test/ctx-format.test.mjs",
+      "line": 8,
+      "text": "const SRC = 'F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\client.js';"
+    },
+    {
+      "path": "dispatch/test/elapsed-format.test.mjs",
+      "line": 9,
+      "text": "const SRC = 'F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\client.js';"
+    },
+    {
+      "path": "dispatch/test/elapsed-format.test.mjs",
+      "line": 55,
+      "text": "const core = readFileSync('F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\core\\\\dispatch-core.mjs', 'utf8');"
+    },
+    {
+      "path": "dispatch/test/fallback-ui.test.mjs",
+      "line": 18,
+      "text": "const SRC = 'F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\client.js';"
+    },
+    {
+      "path": "dispatch/test/fallback-ui.test.mjs",
+      "line": 79,
+      "text": "await import('file:///F:/My Code/dsh-dispatch/dispatch/client.js');"
+    },
+    {
+      "path": "dispatch/test/header-entry.test.mjs",
+      "line": 15,
+      "text": "const SRC = 'F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\client.js';"
+    },
+    {
+      "path": "dispatch/test/header-entry.test.mjs",
+      "line": 206,
+      "text": "await import('file:///F:/My Code/dsh-dispatch/dispatch/client.js');"
+    },
+    {
+      "path": "dispatch/test/job-row-layout.test.mjs",
+      "line": 66,
+      "text": "await import('file:///F:/My Code/dsh-dispatch/dispatch/client.js');"
+    },
+    {
+      "path": "dispatch/test/list-compact.test.mjs",
+      "line": 57,
+      "text": "cwd: 'F:\\\\My Code\\\\dsh-dispatch',"
+    },
+    {
+      "path": "dispatch/test/lock-badge.test.mjs",
+      "line": 11,
+      "text": "const SRC = 'F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\client.js';"
+    },
+    {
+      "path": "dispatch/test/lock-badge.test.mjs",
+      "line": 90,
+      "text": "const wire = readFileSync('F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\wire.host.mjs', 'utf8');"
+    },
+    {
+      "path": "dispatch/test/lock-badge.test.mjs",
+      "line": 100,
+      "text": "const dir = 'F:\\\\My Code\\\\dsh-dispatch\\\\dispatch';"
+    },
+    {
+      "path": "dispatch/test/lock-ui.test.mjs",
+      "line": 16,
+      "text": "const SRC = 'F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\client.js';"
+    },
+    {
+      "path": "dispatch/test/lock-ui.test.mjs",
+      "line": 46,
+      "text": "const coreSrc = readFileSync('F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\core\\\\dispatch-core.mjs', 'utf8');"
+    },
+    {
+      "path": "dispatch/test/lock-ui.test.mjs",
+      "line": 53,
+      "text": "const zh = JSON.parse(readFileSync('F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\locale\\\\zh.json', 'utf8'));"
+    },
+    {
+      "path": "dispatch/test/lock-ui.test.mjs",
+      "line": 54,
+      "text": "const en = JSON.parse(readFileSync('F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\locale\\\\en.json', 'utf8'));"
+    },
+    {
+      "path": "dispatch/test/panel-style.test.mjs",
+      "line": 10,
+      "text": "const SRC = 'F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\client.js';"
+    },
+    {
+      "path": "dispatch/test/panel-style.test.mjs",
+      "line": 70,
+      "text": "await import('file:///F:/My Code/dsh-dispatch/dispatch/client.js');"
+    },
+    {
+      "path": "dispatch/test/section-order.test.mjs",
+      "line": 12,
+      "text": "const SRC = 'F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\client.js';"
+    },
+    {
+      "path": "dispatch/test/shared-wire-liveness.test.mjs",
+      "line": 22,
+      "text": "const SRC = 'F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\client.js';"
+    },
+    {
+      "path": "dispatch/test/tail-scroll.test.mjs",
+      "line": 11,
+      "text": "const SRC = 'F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\client.js';"
+    },
+    {
+      "path": "dispatch/test/toolview-card.test.mjs",
+      "line": 17,
+      "text": "const SRC = 'F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\client.js';"
+    },
+    {
+      "path": "dispatch/test/toolview-card.test.mjs",
+      "line": 109,
+      "text": "const zh = JSON.parse(readFileSync('F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\locale\\\\zh.json', 'utf8')).ui;"
+    },
+    {
+      "path": "dispatch/test/toolview-card.test.mjs",
+      "line": 110,
+      "text": "const en = JSON.parse(readFileSync('F:\\\\My Code\\\\dsh-dispatch\\\\dispatch\\\\locale\\\\en.json', 'utf8')).ui;"
+    },
+    {
+      "path": "dispatch/test/toolview-card.test.mjs",
+      "line": 427,
+      "text": "await import('file:///F:/My Code/dsh-dispatch/dispatch/client.js');"
+    }
+  ],
+  "hasRootScripts": false,
+  "ciFiles": [],
+  "productionSources": [
+    {
+      "path": "collab-kit/appserver-gift-job.mjs",
+      "lines": 235
+    },
+    {
+      "path": "collab-kit/appserver-gift.mjs",
+      "lines": 705
+    },
+    {
+      "path": "collab-kit/codebuddy-run.mjs",
+      "lines": 1096
+    },
+    {
+      "path": "collab-kit/dispatch-switch.mjs",
+      "lines": 123
+    },
+    {
+      "path": "collab-kit/engine-discover.mjs",
+      "lines": 582
+    },
+    {
+      "path": "collab-kit/headless-wake.mjs",
+      "lines": 122
+    },
+    {
+      "path": "collab-kit/inject-inbox.js",
+      "lines": 57
+    },
+    {
+      "path": "collab-kit/kill-tree.mjs",
+      "lines": 44
+    },
+    {
+      "path": "collab-kit/opencode-run.mjs",
+      "lines": 1226
+    },
+    {
+      "path": "collab-kit/qoder-run.mjs",
+      "lines": 838
+    },
+    {
+      "path": "collab-kit/relay-once.mjs",
+      "lines": 86
+    },
+    {
+      "path": "collab-kit/run-gates.mjs",
+      "lines": 85
+    },
+    {
+      "path": "collab-kit/run-line-protocol.mjs",
+      "lines": 262
+    },
+    {
+      "path": "collab-kit/trae-session-inject.mjs",
+      "lines": 73
+    },
+    {
+      "path": "collab-kit/trae-stop-check.mjs",
+      "lines": 76
+    },
+    {
+      "path": "collab-kit/wait-inbox.mjs",
+      "lines": 47
+    },
+    {
+      "path": "collab-kit/zcode-run.mjs",
+      "lines": 1335
+    },
+    {
+      "path": "dispatch/bin/dispatch.mjs",
+      "lines": 465
+    },
+    {
+      "path": "dispatch/client.js",
+      "lines": 6070
+    },
+    {
+      "path": "dispatch/core/appserver-rpc.mjs",
+      "lines": 259
+    },
+    {
+      "path": "dispatch/core/dispatch-core.mjs",
+      "lines": 4811
+    },
+    {
+      "path": "dispatch/core/gift-quota.mjs",
+      "lines": 305
+    },
+    {
+      "path": "dispatch/core/quota.mjs",
+      "lines": 308
+    },
+    {
+      "path": "dispatch/index.js",
+      "lines": 810
+    },
+    {
+      "path": "dispatch/notify.mjs",
+      "lines": 489
+    },
+    {
+      "path": "dispatch/wire.client.mjs",
+      "lines": 837
+    },
+    {
+      "path": "dispatch/wire.host.mjs",
+      "lines": 1643
+    }
+  ]
+}

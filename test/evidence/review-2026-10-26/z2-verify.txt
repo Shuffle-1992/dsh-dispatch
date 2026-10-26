@@ -1,0 +1,111 @@
+
+===== 1. node --check 全部 JS =====
+PASS  node --check index.js
+PASS  node --check notify.mjs
+PASS  node --check client.js
+PASS  node --check wire.host.mjs
+PASS  node --check wire.client.mjs
+PASS  node --check core/dispatch-core.mjs
+PASS  node --check core/quota.mjs
+PASS  node --check bin/dispatch.mjs
+
+===== 2. package.json / locale JSON 解析与关键字段 =====
+PASS  package.json name
+PASS  package.json dsh.bundle.patch
+PASS  package.json dsh.client(platform/immediately)
+PASS  package.json dsh.client.inject（清单契约字段）
+PASS  package.json exports
+PASS  package.json meta.title
+PASS  package.json icon 存在
+PASS  package.json files 含 wire 文件（对任务包的唯一偏离，已记录）
+PASS  locale/zh.json meta.title 与 manifest 一致
+PASS  locale ui 段关键文案存在（zh/en）
+PASS  locale zh/en ui 键集合一致
+
+===== 3. cordis.patch.yml 结构与路径 =====
+PASS  patch.yml 顶层 - insert:
+PASS  patch.yml 行 id=dispatch
+PASS  patch.yml 行 name='dsh-dispatch'
+PASS  patch.yml config: 块
+PASS  patch.yml config.demo=false
+PASS  patch.yml config.maxConcurrent=3
+PASS  patch.yml 不含机器专有路径 runnerPath（由 profile patch 覆盖，刻意不入库）
+PASS  patch.yml 不含机器专有路径 ledgerPath（由 profile patch 覆盖，刻意不入库）
+PASS  patch.yml 不含机器专有路径 workRoot（由 profile patch 覆盖，刻意不入库）
+PASS  patch.yml 注释里写明了"怎么覆盖路径 + workRoot 留空时的兜底"（教学优先）
+PASS  core 显式要求 workRoot（缺了抛 TypeError，不静默用某个目录）
+PASS  index.js 的 workRoot 留空兜底 = <插件目录>/.data
+PASS  未向 $DSH_HOME 写入本包内容
+
+===== 4. 静态纪律（JS 零字面色值 / 无宿主包引用 / 协议键常量豁免 / TODO 清偿） =====
+PASS  JS 不操作 document.body
+PASS  JS 无字面 # 色值
+PASS  index.js 只 import 两个宿主随包件（schemastery 配置校验 + dsh-tools 官方 defineTool）
+PASS  notify.mjs 不 import 任何宿主包
+PASS  client.js 不 import 任何宿主包
+PASS  wire.host.mjs 不 import 任何宿主包
+PASS  wire.client.mjs 不 import 任何宿主包
+PASS  core/dispatch-core.mjs 不 import 任何宿主包
+PASS  core/quota.mjs 不 import 任何宿主包
+PASS  bin/dispatch.mjs 不 import 任何宿主包
+PASS  import/require 说明符仅 node:*、相对路径或浏览器模块表约定的 react
+PASS  client.js 只 require('react')
+PASS  TODO 注释块已清偿（Z8 接线落地，不再遗留）
+
+===== 5. wire.client.mjs 降级路径 =====
+PASS  createClientWire 可导入
+PASS  subscribe 立即回包且 conn=demo
+PASS  demo 快照含 3 个进程
+PASS  demo 用量含三窗口
+PASS  demo dispatch 返回 ok+job
+PASS  demo tail 返回行
+PASS  demo kill（queued→killed）
+PASS  demo kill 不存在 id → ok:false
+PASS  demo dispatch 缺内容 → ok:false
+PASS  config.demo=true 强制内置 demo 引擎
+PASS  注入 __dispatchDemo 后走 ext 轮询
+PASS  ext 数据源动作透传
+
+===== 6. index.js Host 半边端到端（Z1 假 runner） =====
+PASS  导出 apply
+PASS  Config 为 Standard Schema（~standard.validate 可用）
+PASS  validate({}) 补全 5 字段
+PASS  validate({}) 默认值逐项正确
+PASS  validate 保留显式配置值
+[dispatch] 宿主远端面未注册（客户端将走降级链）： provide 不可用
+PASS  apply 返回 {dispatcher, wire, handleAction}
+PASS  ctx.effect 注册了卸载清理
+PASS  日志：dispatcher 就绪
+PASS  handleAction dispatch → ok（queued/running）
+PASS  slimJob：带 tailCount、不带 capture 路径
+PASS  wire.subscribe 推送到 running
+PASS  kill → 终态（killed）
+PASS  handleAction tail 返回捕获行
+PASS  handleAction quota（quota 三窗口 + planQuota 真实适配器形状）
+PASS  handleAction list
+PASS  dispatch 缺 prompt → ok:false（core 校验透传）
+PASS  未知 action → ok:false
+PASS  wire.getSnapshot 可用
+PASS  卸载清理函数执行无异常
+
+===== 7. client.js：ModuleLoader 桩 + 假 ctx + 渲染冒烟 =====
+PASS  window.__ModuleLoader__.load 被调用且 id 正确
+PASS  factory 返回 {inject:[slots], apply}
+PASS  slots.inject 含会话标题行槽位（实际 ["conversation.session.header.actions","plugins.bundle.config","tool.call.toolview"]）
+PASS  slots.register 选项 {name, id, order}（ZB-27o 起 id=dispatch / order=-25）
+PASS  会话头 register 的是组件函数
+PASS  插件详情页配置卡已注册（keyed 槽位 key=包名；实际 {"name":"plugins.bundle.config","key":"dsh-dispatch","priority":30}）
+[dispatch] 远端面未就绪 → 降级 wire。诊断= {
+  mountDiag: { attempted: false, ok: null, error: null },
+  childFiberService: false,
+  hasModCtx: true,
+  ctxRemoteDispatch: false
+}
+PASS  首帧渲染节点数=9（标题行入口，收起态；≥6 视为渲染完整）
+PASS  快照更新后二次渲染节点数=9
+PASS  组件卸载后无残留定时器（监听器/interval 清理）
+
+===== 8. 越界检查（宿主仓库 porcelain 指纹，只读） =====
+  SKIP：未设置 Z2_HOST_REPO，跳过越界指纹检查（不是通过）
+
+===== 结果：85 PASS / 0 FAIL =====

@@ -1,0 +1,72 @@
+① FIELDS 新增字段（配置字段唯一事实源）
+  ✓ maxConcurrentOpenCode 在 FIELDS 里**只声明一处**（实际 1 处）
+  ✓ …type='number'
+  ✓ …默认值 def=2（免费层按 IP 限流 ⇒ 独立且更低的并发）
+  ✓ …带 min=1 / max=8 边界（与 maxConcurrent 同风格）
+  ✓ …desc 说明「OpenCode 独立并发」且 `maxConcurrent` 仍是全局上限
+  ✓ opencodeRunnerPath 在 FIELDS 里**只声明一处**（实际 1 处）
+  ✓ …type='string'
+  ✓ …默认值 def=''（默认推断，不写死机器专有路径）
+  ✓ ★ 默认值里**没有盘符路径**（机器专有路径属部署配置，由 profile patch 覆盖）
+  ✓ …desc 指明执行器 `<本仓库>/collab-kit/opencode-run.mjs`
+  ✓ …desc 写明留空时的默认推断（env DSP_OPENCODE_RUNNER → 仓库内脚本）
+  ✓ DEFAULTS 仍由 FIELDS 派生（没有第二份默认值表）
+  ✓ schemastery schema 仍由 FIELDS 派生
+  ✓ normalizeConfig 仍遍历 FIELDS（归一则单源）
+  ✓ ★ FIELDS 之外没有第二处硬写 `maxConcurrentOpenCode = 2`
+
+②③ Config 契约（非法值 warn + 安全默认；~standard.validate 可跑）
+  ✓ Config 是 Standard Schema v1（~standard.validate 可调用）
+  ✓ 空配置不返回 issues
+  ✓ 空配置 ⇒ maxConcurrentOpenCode 取默认 2
+  ✓ 空配置 ⇒ opencodeRunnerPath 取默认 ''
+  ✓ 既有字段默认值不受影响（maxConcurrent=3）
+  ✓ ★ 非法值**不抛**（抛了就是 cordis 激活事故；实际 未抛）
+  ✓ ★ 非法值**不返回 issues**（issues ⇒ cordis resolveConfig throw ⇒ 插件 INACTIVE）
+  ✓ maxConcurrentOpenCode=0 → 夹到下限 min=1（不是回落 def）
+  ✓ opencodeRunnerPath=123（非字符串）→ 安全默认空串
+  ✓ maxConcurrentOpenCode='x'（非数字）→ 安全默认 2
+  ✓ maxConcurrentOpenCode=99 → 夹到上限 max=8
+  ✓ 合法字符串原样保留
+  ✓ 既有字段归一半径不变（maxConcurrent 0→1 / maxConsecutiveWakes 2.5→2 / demo 字符串→false）
+
+④ 工具 schema（engine 非 enum；provider desc 含 opencode/）
+  ✓ 能从 index.js 取出 TOOL_PARAMETERS 字面量块
+  ✓ 工具 schema 已有 `engine` 参数
+  ✓ engine 是 optional string（无 required）
+  ✓ ★ `engine` **不用 enum**（ZB-37 纪律：enum 会挡住清单里枚举外的真实取值）
+  ✓ engine desc 说明取值为 zcode | opencode
+  ✓ engine desc 说明通常不用传（传 provider: opencode/<model> 即自动识别）
+  ✓ 仍能取到 provider 参数
+  ✓ ★ provider desc 含 `opencode/` 免费模型通道形态
+  ✓ provider desc 仍指向 action=channels 作为权威清单
+  ✓ action=dispatch 长描述提到 `opencode/<model>`
+  ✓ 说明 OpenCode 不支持 `--auto`（子代理不会自动放行所有权限）
+  ✓ 说明 `mode` / `memoryBench` 对 OpenCode 不适用
+  ✓ action=channels 描述提到 channels[].engine
+  ✓ ★ 免费模型清单标注为「探测式」，不写死枚举（防 ZB-31 式漂移）
+  ✓ 思考强度专条补了 OpenCode 的 variant / --variant
+  ✓ 降级链专条补了跨引擎混排（换引擎＝新会话，不 resume）
+  ✓ 既有 ZCode 档位说明**未被改动**（low|high|max / disabled|low|high|max 原样保留）
+
+⑤ bin/dispatch.mjs（--engine 参数 + 通道行引擎标记）
+  ✓ 用法注释里有 `--engine zcode|opencode`
+  ✓ 用法注释里有 OpenCode 通道形态示例
+  ✓ 用法注释里有 OpenCode 执行器路径覆盖（--opencode-runner / DSP_OPENCODE_RUNNER）
+  ✓ `--engine` 透传进 spec
+  ✓ `--provider opencode/<model>` 原样透传（core 自动识别）
+  ✓ ★ CLI 侧没有任何 provider/engine 枚举（不写死通道取值）
+  ✓ channels 子命令输出带 `[opencode]` 引擎标记
+  ✓ makeDispatcher 支持 --opencode-runner / DSP_OPENCODE_RUNNER
+  ✓ ★ opencodeRunnerPath 为空时**整项不传**（传空串会被 core 当成"配了但没有"）
+
+⑥ README 双引擎段落
+  ✓ README 配置表有 `maxConcurrentOpenCode` 行
+  ✓ README 配置表有 `opencodeRunnerPath` 行
+  ✓ README 双引擎说明提到执行器与通道 engine
+  ✓ README 明示默认不开 `--auto`
+  ✓ README 明示不读写用户自己的 OpenCode 配置与数据
+
+===== host-config（双引擎 Host 侧契约）：59 PASS / 0 FAIL =====
+
+--- STDERR ---

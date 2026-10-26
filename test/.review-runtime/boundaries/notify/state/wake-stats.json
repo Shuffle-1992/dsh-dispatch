@@ -1,0 +1,22 @@
+{
+  "at": "2026-10-26T13:47:32.766Z",
+  "registered": 1,
+  "notified": 1,
+  "delivered": 1,
+  "followup": 1,
+  "inject": 0,
+  "suppressed": 0,
+  "missingAgent": 0,
+  "capped": 0,
+  "insertAcked": 0,
+  "lostWakes": 0,
+  "tracked": 1,
+  "wakeBudget": 0,
+  "unconfirmed": 1,
+  "owners": [
+    {
+      "id": "j-mvpb9uw0-0-da5a",
+      "agentId": "fixture-agent"
+    }
+  ]
+}

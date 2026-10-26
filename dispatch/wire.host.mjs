@@ -81,7 +81,10 @@ export function readSwitch(path = DEFAULT_SWITCH_PATH) {
     const mtimeMs = statSync(path).mtimeMs;
     const hit = switchCache.get(path);
     if (hit && hit.mtimeMs === mtimeMs) return hit.value;
-    const raw = JSON.parse(readFileSync(path, 'utf8'));
+    /* R03（2026-10-26 审查 P1）：**去 BOM 再解析** —— Windows 上带 UTF-8 BOM 的
+     * `{"enabled":false}` 会让 `JSON.parse` 抛错、落进 catch 的"读取失败⇒开启"分支，
+     * 于是**关闭开关静默失效**（最危险的失败方向）。zcode-run 早已这么做，这里补齐。 */
+    const raw = JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, ''));
     const value = {
       enabled: raw.enabled !== false,
       updatedAt: raw.updatedAt ?? null,
@@ -1061,30 +1064,36 @@ export function createRemoteFace(dispatcher, config = {}, opts = {}) {
     (value?.channels ?? []).length === 0 || (value?.warnings ?? []).length > 0;
   const channelsCacheTtl = (value) => (channelsCacheIsFailed(value) ? CHANNELS_ERROR_TTL_MS : CHANNELS_TTL_MS);
 
+  /** **唯一探测点**（R13）：真正 spawn runner、组装缓存值。调用方负责登记 `channelsProbeInFlight`。
+   *  抽出来是为了让**前台（channelsCached）与后台（cachedChannels）共用同一个在途 Promise** ——
+   *  原先前台的冷启动/过期路径直接 await `dispatcher.listChannels()`、不登记 in-flight，
+   *  多个客户端同时冷启动会各自 spawn 一次昂贵探测（Qoder 的 `--with-efforts` 约 2 分钟）。 */
+  async function doRefreshChannels() {
+    const r = await dispatcher.listChannels();
+    channelsCache = {
+      at: Date.now(),
+      value: {
+        channels: r?.channels ?? [],
+        warnings: r?.warnings ?? [],
+        ...(r && r.engines ? { engines: r.engines } : {}),
+        /* ZB-51（T5）：`engineDetail`（每引擎的形态/版本/登录态）必须一起透传 ——
+         * 面板的「引擎状态条」靠它渲染。**漏掉就是静默丢字段**（客户端只会画不出那条 UI）。 */
+        ...(r && r.engineDetail ? { engineDetail: r.engineDetail } : {}),
+        ...(r && r.opencodeVersion != null ? { opencodeVersion: r.opencodeVersion } : {}),
+      },
+    };
+    return channelsCache.value;
+  }
+
   function cachedChannels() {
     const now = Date.now();
     const stale = !channelsCache || now - channelsCache.at >= channelsCacheTtl(channelsCache.value);
     if (stale && channelsProbeInFlight == null) {
       /* 后台刷新：不 await、不 reject 到调用方；失败保留旧值（有旧值总比空好），
        * 下一次快照轮询会按短 TTL 再来一遍（自愈）。 */
-      channelsProbeInFlight = (async () => {
-        try {
-          const r = await dispatcher.listChannels();
-          channelsCache = {
-            at: Date.now(),
-            value: {
-              channels: r?.channels ?? [],
-              warnings: r?.warnings ?? [],
-              ...(r && r.engines ? { engines: r.engines } : {}),
-              /* ZB-51（T5）：`engineDetail`（每引擎的形态/版本/登录态）必须一起透传 ——
-               * 面板的「引擎状态条」靠它渲染。**漏掉就是静默丢字段**（客户端只会画不出那条 UI）。 */
-              ...(r && r.engineDetail ? { engineDetail: r.engineDetail } : {}),
-              ...(r && r.opencodeVersion != null ? { opencodeVersion: r.opencodeVersion } : {}),
-            },
-          };
-        } catch { /* 保留旧缓存；下次轮询再试 */ }
-        finally { channelsProbeInFlight = null; }
-      })();
+      channelsProbeInFlight = doRefreshChannels()
+        .catch(() => { /* 保留旧缓存；下次轮询再试 */ })
+        .finally(() => { channelsProbeInFlight = null; });
     }
     return channelsCache ? channelsCache.value : { channels: [], warnings: ['通道清单首次探测中（后台进行，不影响其它分区）'] };
   }
@@ -1101,20 +1110,17 @@ export function createRemoteFace(dispatcher, config = {}, opts = {}) {
       await channelsProbeInFlight;
       if (channelsCache) return channelsCache.value;
     }
-    const r = await dispatcher.listChannels();
-    /* 双引擎：**顶层 `engines` / `opencodeVersion` 必须一起透传** —— core 的 listChannels 提供它们
-     * （每个通道另有 `c.engine`），若在这里丢掉，客户端/工具就看不到"这台机器上有哪些引擎、
-     * OpenCode CLI 是哪个版本"（面板目前靠 `c.engine` 分组，所以丢的是诊断信息，不是功能）。 */
-    const value = {
-      channels: r?.channels ?? [],
-      warnings: r?.warnings ?? [],
-      ...(r && r.engines ? { engines: r.engines } : {}),
-      // ZB-51（T5）：引擎明细（形态/版本/登录态）—— 面板「引擎状态条」的数据来源
-      ...(r && r.engineDetail ? { engineDetail: r.engineDetail } : {}),
-      ...(r && r.opencodeVersion != null ? { opencodeVersion: r.opencodeVersion } : {}),
-    };
-    channelsCache = { at: Date.now(), value };
-    return value;
+    /* R13（2026-10-26 审查 P2）：**前台冷启动/过期也要登记在途 Promise** ——
+     * 原先这里直接 `await dispatcher.listChannels()`，多个客户端同时到达会各自探测一次
+     * （实测 3 并发 ⇒ probes=3）。现在与后台共用同一个 `channelsProbeInFlight`：
+     *  · 登记的是"吞错版"（后台语义：失败静默、保旧值）；
+     *  · 前台仍 await **原始 Promise**（保留"探测失败要报错"的语义）。 */
+    const fresh = doRefreshChannels();
+    channelsProbeInFlight = fresh
+      .catch(() => { /* 后台语义：失败静默 */ })
+      .finally(() => { channelsProbeInFlight = null; });
+    await fresh; // 前台要感知错误（与改造前一致）
+    return channelsCache.value;
   }
   /** 动作方法：透传 createActionHandler 信封（它已把一切异常折成 {ok:false,error}）。 */
   const viaAction = (action, params) => handleAction(action, params);

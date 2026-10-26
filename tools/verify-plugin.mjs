@@ -1,7 +1,7 @@
 // DSH 独立验收探针（Z2）：静态纪律 + 客户端模块加载 + 槽位注册（不复用实现方脚本）
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, relative, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const PKG = 'F:\\My Code\\dsh-dispatch\\dispatch';
@@ -47,6 +47,29 @@ check('manifest: meta 标题/描述/图标', !!pkg.meta?.title && !!pkg.meta?.de
   const covered = (f) => listed.has(f) || [...listed].some((d) => !d.includes('.') && f.startsWith(`${d}/`));
   const missing = rel.filter((f) => !covered(f));
   check('manifest: files 覆盖 index.js 的相对 import', missing.length === 0, missing.length ? `缺: ${missing.join(',')}` : `${rel.length} 个相对 import 全覆盖`);
+}
+
+/* R01（2026-10-26 审查 P1）：**跨目录 import 也要核对** —— 且必须按**根包**清单核。
+ *  `dispatch/core/*.mjs` 与 `wire.host.mjs` 里有 `../../collab-kit/xxx.mjs` 这类
+ *  **包边界外**的静态导入；而 DSH 安装的是**根包**（含 `dispatch/` + `collab-kit/`），
+ *  上面那项只检查了 index.js 的 `./` 导入、且用的是 dispatch 子包清单 ⇒ 打包缺 collab-kit
+ *  也照样通过（报告里实测：按 pack 清单重建隔离目录后 import 直接 ERR_MODULE_NOT_FOUND）。 */
+{
+  const ROOT = resolve(PKG, '..');
+  const rootPkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+  const listed = new Set(rootPkg.files ?? []);
+  const covered = (f) => listed.has(f) || [...listed].some((d) => !d.includes('.') && f.startsWith(`${d}/`));
+  const cross = new Set();
+  const coreFiles = readdirSync(join(PKG, 'core')).filter((f) => f.endsWith('.mjs')).map((f) => join('core', f));
+  for (const rel of ['index.js', 'wire.host.mjs', ...coreFiles]) {
+    const src = readFileSync(join(PKG, rel), 'utf8');
+    for (const m of src.matchAll(/from\s+'(\.\.[^']+)'/g)) {
+      cross.add(relative(ROOT, resolve(dirname(join(PKG, rel)), m[1])).replace(/\\/g, '/'));
+    }
+  }
+  const miss = [...cross].filter((f) => !covered(f));
+  check('manifest: 根包 files 覆盖跨目录 import（../../collab-kit 等）', miss.length === 0,
+    miss.length ? `缺: ${miss.join(', ')}` : `${cross.size} 个跨目录 import 全覆盖`);
 }
 const patch = readFileSync(join(PKG, 'cordis.patch.yml'), 'utf8');
 check('patch: 插入行 id/name/config', /id:\s*dispatch/.test(patch) && /name:\s*'dsh-dispatch'/.test(patch) && /runnerPath:/.test(patch) && /ledgerPath:/.test(patch), patch.split('\n').filter((l) => /runnerPath|ledgerPath|demo|maxConcurrent/.test(l)).join(' | ').slice(0, 140));

@@ -1,0 +1,20 @@
+✔ ④ dispatch：provider="opencode/<model>" ⇒ spec 规整为三元组；显式 model 优先；其余仍 zcode (160.7164ms)
+✔ ⑤ 引擎路由：zcode job spawn zcode runner、opencode job spawn OpenCode 执行器（argv 各归各） (64.8624ms)
+✔ ⑥ [opencode-run] 前缀行（done/usage/progress/variants/variant）全部被解析；落 job 字段无 warning (170.6365ms)
+✔ ⑦ 每引擎并发：3 个 opencode + maxConcurrentOpenCode=2 ⇒ 同时 ≤2；穿插 zcode 不被满员阻塞 (92.7163ms)
+✔ ⑧ validateSpec：opencode + mode ⇒ 抛；非法 engine 值 ⇒ 抛（列合法值）；zcode 既有校验不变 (6.3953ms)
+✔ ⑨ 通道清单：OpenCode 探测失败 ⇒ zcode 照常 + warnings 可读；探测成功 ⇒ opencode 通道 + engines + 快照落盘 (689.3719ms)
+✔ ⑩ ZB-45 auto：默认 argv 不带 --auto；auto:true ⇒ 带 --auto 且 job.autoApproved 可审计；auto+zcode ⇒ 可读报错 (93.0499ms)
+✔ ⑪ ZB-45 auto=on 告知行：被执行器打出时置 job.autoApproved，且不落"无人识别"warning (212.5746ms)
+✔ ⑫ ZB-45 retry：auto 跨 retry 沿用（可被 opts.auto 覆盖）；opts.engine 生效且换引擎绝不 resume；resume 保持同一 cwd (468.4173ms)
+✔ 清理临时目录 (55.3072ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2026.6655
+
+--- STDERR ---

@@ -1,0 +1,17 @@
+✔ parseProviderTable：reasoning-levels 行解析为 modelLevels（不混入 provider 行） (10.0071ms)
+✔ parseRunnerLine：注入确认行 → {reasoningLevelApplied, reasoningTarget} (3.1434ms)
+✔ listChannels：通道带 thinkingLevels（plan 别名继承选中 provider 的档位集） (40.5295ms)
+✔ ★ core：具体档位 → runner 参数 --reasoning-level；agent/未指定 → 不透传 (693.7052ms)
+✔ wire：dispatch 的 thinking 参数 → spec.reasoningLevel（工具层映射 + 通道默认回退） (881.8599ms)
+✔ retry 交接重跑：沿用原任务的思考强度档位 (418.091ms)
+✔ ★ runner：--reasoning-level 写入临时 provider 配置的 defaultModelSelection（hermetic 干跑） (1855.6134ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3928.3184
+
+--- STDERR ---

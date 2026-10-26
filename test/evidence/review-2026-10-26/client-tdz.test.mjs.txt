@@ -1,0 +1,17 @@
+=== client.js 模块级 const 的"声明前使用"检查（TDZ）
+  ✓ 收集到 106 个模块级 const（检查确实在跑，不是空转）
+  ✓ ★ 没有"模块级 helper 在定义前被使用"（违规 0 处）
+
+=== 引擎归一 helper 必须处于**模块级**（组件内会 TDZ）
+  ✓ ★ KNOWN_ENGINES 在模块级声明（第 925 行）
+  ✓ ★ engineOf 在模块级声明（第 926 行）
+  ✓ ★ engLabel 在模块级声明（第 931 行）
+  ✓ ★ jobEngineOf 在模块级声明（第 960 行）
+  ✓ ★ 组件内没有重复声明（违规 0 处）
+
+=== 交叉验证：真 DOM 渲染测试存在（覆盖组件内 TDZ）
+  ✓ ★ fallback-ui.test.mjs 会真的渲染 ChannelSection（组件内 TDZ 的兜底）
+
+===== client TDZ 契约：8 PASS / 0 FAIL =====
+
+--- STDERR ---

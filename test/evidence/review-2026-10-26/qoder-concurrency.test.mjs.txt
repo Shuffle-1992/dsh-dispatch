@@ -1,0 +1,21 @@
+
+A. Qoder 并发默认值已提到 3（不再是 1）
+  ✓ A1 ★ core 默认 maxConcurrentQoder = 3（实测依据：3/5 并发全部成功）
+  ✓ A2 ★ 旧的"默认 1"已彻底移除（不留双份定义）
+
+B. 配置字段存在且真的透传（否则用户改配置不生效）
+  ✓ B1 FIELDS 里有 maxConcurrentQoder（旧版**根本没有**这个字段 ⇒ 用户改不了）
+  ✓ B2 ★ 真的透传到 createDispatcher（只声明字段不透传 = 摆设）
+  ✓ B3 启动日志如实打印该值（排障时能一眼看到实际并发上限）
+
+C. 真机行为：Qoder 并发上限真的生效（两个 job 能同时 running）
+  ✓ C1 ★ 3 个 Qoder job 同时 running（实际 3）——旧默认 1 时这里只会是 1
+  ✓ C2 3 个都落地（实际 3）
+  ✓ C3 并发下互不干扰，全部 done
+
+D. 上限语义不变：min(全局, 本引擎)
+  ✓ D1 ★ 全局 maxConcurrent=2 仍封顶（实际 running=2，引擎上限 8 不越全局）
+
+===== ZB-79 Qoder 并发（实测纠正）：9 PASS / 0 FAIL =====
+
+--- STDERR ---

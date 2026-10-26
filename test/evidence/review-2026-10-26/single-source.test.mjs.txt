@@ -1,0 +1,44 @@
+① 动作清单（单一源：wire.host.mjs 的 ACTIONS）
+  ✓ ACTIONS 已导出（15 个）
+  ✓ index.js 的动作清单取自 wire.host（不再本地字面量复制）
+  ✓ index.js 里已无第二份动作字面量数组
+  ✓ ACTIONS 里每个动作都有 switch 分支（缺：无）
+  ✓ switch 里没有 ACTIONS 之外的分支（多：无）
+  ✓ 「未知 action」报错串由 ACTIONS.join 生成（不再手抄）
+  ✓ wait 在动作清单里（ZB-08 加它时的漂移点）
+  ✓ 工具 schema 的 action.enum === ACTIONS
+
+② 落地/终态集合（单一源：core/dispatch-core.mjs）
+  ✓ core 导出 TERMINAL_STATES（4 个终态）
+  ✓ core 导出 SETTLED_STATES（终态 + paused）
+  ✓ paused 只在 SETTLED_STATES（语义：paused 算落地、不算终态）
+  ✓ SETTLED 含终态 done
+  ✓ SETTLED 含终态 failed
+  ✓ SETTLED 含终态 killed
+  ✓ SETTLED 含终态 interrupted
+  ✓ ★ wire.DISMISSABLE 与 core.SETTLED_STATES 是**同一个对象**（引用级）
+  ✓ ★ notify.SETTLE_STATES 与 core.SETTLED_STATES 是**同一个对象**（引用级）
+  ✓ wire.host.mjs 里不再有就地新建的落地集合字面量
+  ✓ notify.mjs 里不再有就地新建的终态集合字面量
+
+③ remote 方法表（host 面 / client.js 内联表 / wire.client.mjs 描述符表）
+  ✓ host REMOTE_METHODS 非空且无重复（21 个）
+  ✓ wire.client.mjs 描述符表与 host 方法集相等（21 vs 21）
+  ✓ client.js 内联方法表与 host 方法集相等（21 vs 21）
+  ✓ 三份表都含 dismiss（审计三路同报的漂移点已修）
+  ✓ client.js 调用的 remote 方法都在 host 面内（越界：无）
+
+④ host↔client 协议常量（两个 runtime 不能互相 import ⇒ 只能逐字比）
+  ✓ FACE_NAME 在 wire.host 与 wire.client 逐字相等（'dispatch'）
+  ✓ EVENT_NAME 在 wire.host 与 wire.client 逐字相等（'dispatch/changed'）
+  ✓ JSON_ANY 在 wire.host 与 wire.client 逐字相等（Object.freeze({ parse: (value) => value })）
+  ✓ REMOTE_POLL_MS 在内联 wire 与 wire.client 逐字相等（1000）
+
+⑤ 界面文案（client.js 内嵌 STRINGS ↔ locale/*.json）
+  ✓ 能从 client.js 里取出 STRINGS 字面量
+  ✓ zh 键数一致（STRINGS 281 / locale 281）
+  ✓ 两语言逐键逐值一致（差异 0 处）
+
+===== ZB-25 单源哨兵：31 PASS / 0 FAIL =====
+
+--- STDERR ---

@@ -1,0 +1,13 @@
+✔ ZB-114 ①：handleLine 热路径改用 persistThrottled（不是 persist） (2.4497ms)
+✔ ZB-114 ②：persist() 立即落盘时取消挂起的节流批 (0.5588ms)
+✔ ZB-114 ③：job 落地后立刻读 jobs.json，终态已在盘上 (295.7175ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 310.6713
+
+--- STDERR ---

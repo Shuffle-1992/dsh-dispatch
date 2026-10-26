@@ -1,0 +1,19 @@
+✔ 暂停分类：4 类签名 → paused + 正确 pauseReason；unknown 保持 failed；无输出 classifyPause=null (801.3168ms)
+✔ paused 不占锁、不堵队列、不自动重试 (680.852ms)
+✔ retry 同通道带 sessionId → 命令行含 --resume 且不含 --model（F2） (587.3136ms)
+✔ dispatch 直接带 resume → 命令行含 --resume 且不含 --model（F2 的另一条入口） (467.5056ms)
+✔ retry 换通道 → 无 --resume，prompt 含交接五要素；簿记从 d.get()/d.list() 读回 (604.0514ms)
+✔ 自动降级链：链必须在 pause 之前 set；跳过不可用通道；链耗尽停 paused；attempts 完整 (494.2153ms)
+✔ listChannels：样例表格解析字段正确（personal 模型取自配置声明）；解析失败 → 空数组 + warning 不抛 (35.9322ms)
+✔ retry 边界：running 上 retry 抛错；setFallbackChain 非数组抛错 (976.1663ms)
+✔ 清理临时目录 (324.6422ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4982.524
+
+--- STDERR ---

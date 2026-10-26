@@ -1,0 +1,16 @@
+✔ ZB-117 ①：额度暂停正则不再用裸 429 / balance 宽词 (3.4388ms)
+✔ ZB-117 ②：wait 落地后清掉等待定时器（不再遗留待期定时器） (0.5884ms)
+✔ ZB-117 ③：feed 同时监听 close（destroy 时也能 flush，防 fd 泄漏） (0.4884ms)
+✔ ZB-117 ④：spawnSync 输出超 maxBuffer 时显式报错（不是静默解析失败） (0.2811ms)
+✔ ZB-117 ⑤：matchQuotaExhausted 不再用任意子串匹配（保留 plan 别名与段前缀/后缀语义） (0.5186ms)
+✔ ZB-117 ⑥：qoderLevelsCache 在 createDispatcher 闭包内（不在模块级） (0.5909ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19.4246
+
+--- STDERR ---

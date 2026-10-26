@@ -1,0 +1,18 @@
+✔ ① 订阅了三个 inbox 事件（inserted / discarded / claimed） (5.5129ms)
+✔ ② 投递后用 inserted 对账：unconfirmed 归零、insertAcked 计数；外来消息不计数 (9.8751ms)
+✔ ③ 被宿主丢弃 ⇒ lostWakes + 一条可读 warn（旧代码完全看不见） (5.8129ms)
+✔ ④ 诊断落盘 wake-stats.json（原子替换、与 stats() 同源） (9.6225ms)
+✔ ⑤ 既有语义不回退：claimed 只按 source.kind==="user" 复位连续唤醒预算 (9.9635ms)
+✔ ⑥ dispose 退订 inserted/discarded（不留悬挂监听） (2.5939ms)
+✔ ⑦ 没有 jobsFile / 没有 ctx.on 时也不抛（纯降级） (3.1352ms)
+✔ ⑧ 真机时序回归：followup/inject 内部**同步**发 inserted 也必须对上账（ZB-62 事故） (5.5539ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 67.176
+
+--- STDERR ---

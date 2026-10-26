@@ -1,0 +1,56 @@
+① briefJob：纯投影，剪掉大字段、留住选动作必需的字段
+  ✓ A1 保留 id
+  ✓ A2 保留 state
+  ✓ A3 保留 model
+  ✓ A4 保留 tag
+  ✓ A5 保留 kind
+  ✓ A6 不含 spec（派发原文不进列表）
+  ✓ A7 不含 lockPaths（本机绝对路径）
+  ✓ A8 不含 usage
+  ✓ A9 不含 parseWarnings
+  ✓ A10 tailCount 仍然可见（知道有没有输出可取）
+  ✓ A11 progress 只投影 stage
+  ✓ A12 lastTool 保留
+  ✓ A13 briefJob(null) → null（不抛）
+  ✓ A14 空 job 也返回记录（不抛）
+
+② list 默认：紧凑 + 有界 + 省略写进 note
+  ✓ B1 ok:true
+  ✓ B2 shape=brief（默认紧凑）
+  ✓ B3 total = 全量条数
+  ✓ B4 默认只回 50 条
+  ✓ B5 counts.running
+  ✓ B6 counts.queued
+  ✓ B7 counts.paused
+  ✓ B8 counts.done
+  ✓ B9 note 写明省略条数（不静默）
+  ✓ B10 note 给出取更多/取完整的方法
+  ✓ B11 每一条都不带 spec
+
+③ lockWait 必须透传（ZB-28 / lock-queue-visibility 的既有契约）
+  ✓ C1 紧凑形状保留 lockWait
+  ✓ C2 blockers 内容完整
+
+④ limit / full / 上限
+  ✓ D1 limit=5 生效
+  ✓ D2 省略数按 limit 重算
+  ✓ D3 超上限时只受实际条数约束
+  ✓ D4 全量返回时不给 note
+  ✓ D5 limit=0 视为未给（回默认，不清空列表）
+  ✓ D6 full=true → shape=full
+  ✓ D7 full 形状带 spec.body（旧行为保留）
+  ✓ D8 full 形状带 progress/usage
+  ✓ D9 full 同样受 limit 约束（避免又造出数百 KB）
+  ✓ D10 上限常量存在且 ≥200
+
+⑤ 体积守卫：紧凑形状必须显著小于旧形状（否则本改动毫无意义）
+  ✓ E1 紧凑 < 旧形状的 1/4（实际 21731 B vs 174121 B）
+  ✓ E2 60 条紧凑载荷 < 30 KB（实际 21.2 KB）
+
+⑥ dismissed.json 仍在 list 里被过滤（既有行为不回退）
+  ✓ F1 已关闭的 job 不出现在列表
+  ✓ F2 total 也不含已关闭的 job
+
+list-compact: 41 项断言全部通过
+
+--- STDERR ---

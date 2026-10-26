@@ -1,0 +1,138 @@
+① 协议层：Qoder 的 id 形态与模型名判据（真机模型名含空格与点）
+  ✓ qoder 行前缀
+  ✓ qoder/GLM-5.3 是合法通道 id
+  ✓ ★ qoder/Qwen3.8-Max（含点与连字符）合法
+  ✓ ★ qoder/DeepSeek-V4-Pro 合法
+  ✓ ★ qoder/MiniMax-M2.7 合法
+  ✓ opencode 通道不误判为 qoder
+  ✓ 空的模型名不合法
+  ✓ 模型名 Auto 合法
+  ✓ 模型名 Fast 合法
+  ✓ 模型名 Qwen3.8-Max 合法
+  ✓ 模型名 DeepSeek-V4-Pro 合法
+  ✓ 模型名 GLM-5.3 合法
+  ✓ 模型名 Kimi-K2.8-Preview 合法
+  ✓ 模型名 MiniMax-M2.7 合法
+  ✓ 非法模型名被拒：""
+  ✓ 非法模型名被拒："   "
+  ✓ 非法模型名被拒："a/b"
+  ✓ 非法模型名被拒："C:\\x\\y"
+  ✓ 非法模型名被拒："x\ty"
+  ✓ 非法模型名被拒："xxxxxxxxxxxx"
+  ✓ 非法模型名被拒："  "
+
+② 参数拼接（纯函数）：只拼 Qoder 认识的东西
+  ✓ -p = 非交互模式
+  ✓ -o = 输出格式
+  ✓ stream-json = NDJSON 事件流
+  ✓ ★ 默认权限模式 = accept_edits（无头下能让写操作真的生效；default 会静默拒绝）
+  ✓ 正文是**位置参数**（放最后，与 OpenCode 的 `run <msg>` 不同）
+  ✓ 绝不拼 --mode（Qoder 无此概念）
+  ✓ 绝不拼 --memory-bench
+  ✓ 绝不拼 --provider
+  ✓ ★ auto:true ⇒ bypass_permissions
+  ✓ ★ 默认 ⇒ accept_edits（开箱即用）
+  ✓ 显式 --permission-mode 优先于默认
+  ✓ 续跑用 --session-id
+  ✓ 模型名原样透传（含点/空格）
+  ✓ ★ 思考强度 = --reasoning-effort（不是 --variant）
+  ✓ add-dir 声明受信任目录
+  ✓ --max-turns 透传
+
+③ 权限回落检测（**真机驼峰陷阱**：accept_edits 回传的是 acceptEdits）
+  ✓ ★ CLI 值 accept_edits ⇄ 回传 acceptEdits
+  ✓ bypass_permissions ⇄ bypassPermissions
+  ✓ dont_ask ⇄ dontAsk
+  ✓ ★ 驼峰比对正确 ⇒ **不误报**回落（这正是修复的那个坑）
+  ✓ 正常时不产出 warning
+  ✓ ★ 回传 default ⇒ 判定为回落
+  ✓ 回落 warning 说明原因是目录不受信任
+  ✓ ★ 回落 warning 点明"写操作会被静默拒绝"这个真实后果
+  ✓ 读不到 permissionMode 时**不判定**回落（不猜）
+  ✓ 但要明确说明"无法确认"（不谎报已生效）
+
+④ 聚合器：真机抓包结构（7 行事件谱）
+  ✓ 每行都带 session_id ⇒ 能取到
+  ✓ 模型从 init 取到
+  ✓ ★ 权限模式取自 init.permissionMode（驼峰原值）
+  ✓ CLI 版本从 init 取到
+  ✓ 协议版本从 init 取到
+  ✓ ★ 正文只取 assistant 的 text（thinking 不计入）
+  ✓ responseChars 正确
+  ✓ is_error=false
+  ✓ num_turns 取到
+  ✓ duration_ms 取到
+  ✓ ★ total_credits 取到（真机 token 字段全 0，这才是真计量）
+  ✓ ★ context_usage_ratio 取到
+  ✓ permission_denials 取到（空数组）
+  ✓ 无解析错误
+  ✓ ★ hook_started/artifacts_update/hook_response 是**已知生命周期事件**，不记未知
+  ✓ ★ 全流程零 warning（真机这些类型都会出现）
+  ✓ 事件计数按 type/subtype 归类
+  ✓ assistant 计 2 次
+
+④b ZB-101：result 的 total_credits 恒 0 ⇒ 用 assistant 逐条累加（同 message.id 去重）
+  ✓ ★ 去重累加 = 0.4 + 0.094866（若没去重会变 1.2；若信 result 会变 0）
+  ✓ 只有 result 报 0 ⇒ 如实 0（不伪造成 null）
+  ✓ ★ result 非零时以 result 为准（权威总账优先于自算）
+
+⑤ 聚合器：坏行与真正未知类型**绝不止损**（硬约束）
+  ✓ 坏行记 1 次解析错误
+  ✓ 未登记事件计 2 次（坏行 1 + 未知类型 1）
+  ✓ 坏行落可读 warning
+  ✓ ★ 坏行之后仍能正常收到 result（不中止整轮）
+  ✓ 未知事件原文留档（供事后分析）
+
+⑤b `user`（工具结果回灌）是**正常生命周期事件**，不算"未登记"
+  ✓ ★ user/tool_result 不计入"未登记事件"
+  ✓ ★ 也不落 warning
+  ✓ 正常收尾不受影响
+  ✓ 仍按类型计数（便于观测，不丢失信息）
+
+⑥ 参数解析：明确不支持的参数 fail-fast（绝不静默忽略）
+  ✓ --prompt ⇒ kind=prompt
+  ✓ --task ⇒ kind=task
+  ✓ --target ⇒ kind=target
+  ✓ ★ --mode ⇒ fail-fast 报错
+  ✓ ★ --memory-bench ⇒ fail-fast 报错
+  ✓ 未知参数 ⇒ 报错
+  ✓ --provider qoder 记说明后忽略
+  ✓ ★ --provider plan ⇒ 可读报错（不静默丢参）
+
+⑦ 端到端：假 CLI 走完整 runOnce（含权限回落报警与 result 文件）
+  ✓ 端到端退出码 0（stderr: [qoder-run] 权限模式被回落：请求 accept_edits（回传应为 acceptEdits），实际 init.permissionMode=default。**这通常意味着工作目录不在受信任列表里** —— 非默认模式只在受信任目录生效；回落成 default 后写操作会被静默拒绝（任务可能报成功但文件没变）。处理：在 Qoder 设置里信任该目录，或用 --permission-m）
+  ✓ ★ 打了 done 行（core 据此收尾）
+  ✓ done 行带 sessionId
+  ✓ done 行带 responseChars
+  ✓ ★ 权限回落被**明确标注**（FELLBACK）—— 这是真机最危险的静默陷阱
+  ✓ ★ stderr 给出可操作的回落说明
+  ✓ 说明里含"受信任目录"这个修复方向
+  ✓ ★ credits 单独上报（token 字段不可信的替代）
+  ✓ result 目录已创建
+  ✓ result.json 里的 response
+  ✓ result.json 记录请求的权限模式
+  ✓ result.json 记录实际回传值
+  ✓ ★ result.json 记录回落判定（可审计）
+  ✓ result.json 记录 credits
+  ✓ result.json 记录 responseChars
+
+⑧ 端到端：默认权限模式（不回落的正常路径）
+  ✓ 正常路径退出码 0
+  ✓ ★ 回传 acceptEdits ⇒ 正确识别为**未回落**（不再误报）
+  ✓ ★ 正常路径不打 FELLBACK
+  ✓ 正常路径不产回落 warning
+
+⑨ 端到端：--auto 的可审计告知行（core 据此置 autoApproved）
+  ✓ ★ 打了 core 认识的 `auto=on` 告知行（可审计）
+  ✓ 请求的是 bypass_permissions
+  ✓ ★ 驼峰回传正确匹配 ⇒ 不误报回落
+  ✓ ★ auto 路径也不误报
+
+⑩ 发现失败：QODER_CLI 指向不存在文件 ⇒ 可读报错 + 给出修复方式
+  ✓ 失败退出（实际 1）
+  ✓ 报出 QODER_CLI 指向的文件不存在
+  ✓ 错误里不出现 null（对用户可读）
+
+===== Qoder 执行器：111 PASS / 0 FAIL =====
+
+--- STDERR ---

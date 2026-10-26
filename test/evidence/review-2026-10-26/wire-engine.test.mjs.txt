@@ -1,0 +1,16 @@
+✔ wire.host 的 dispatch spec 白名单包含 engine（防静默丢参） (5.1141ms)
+✔ ★ engine 经 createActionHandler 透传进 job.spec（工具入参不再被静默丢弃） (66.2822ms)
+✔ ★ provider="opencode/<model>" 自动识别引擎并规整 spec（无需显式 engine） (32.1114ms)
+✔ ★ provider="opencode/<model>" 真的走 OpenCode 执行器（spawn 到 opencodeRunnerPath，参数形态为 OpenCode 专用） (318.0949ms)
+✔ 不传 engine / provider=plan ⇒ 引擎仍是 zcode（既有行为零改动） (1128.2441ms)
+✔ validateSpec：opencode 引擎 + mode ⇒ 可读 TypeError（不是静默忽略） (5.5113ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5232.6107
+
+--- STDERR ---

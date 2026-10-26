@@ -1,0 +1,25 @@
+A. createSharedWireRegistry 功能回放
+  ✓ A0 client.js 内找到 createSharedWireRegistry
+  ✓ A0b 工厂函数源码边界扫描成功（花括号配平）
+
+B. 源码不变量（一次消费一放 / 配对释放 / 补投 / kind 标签）
+  ✓ B1 共享 wire 走 createSharedWireRegistry 工厂
+  ✓ ★ B2 处决守卫：refs===0 且 current===wire（只动自己那条）
+  ✓ B3 registry 暴露 peek（回调守卫用）
+  ✓ ★ B4 无参 releaseSharedWire() 调用绝迹（旧无参形态正是事故源）
+  ✓ ★ B5 useWire render 期**只 acquire**（一次消费一放；旧 render 期 release 正是计数泄漏点）
+  ✓ ★ B5b render 期**不再 release**（旧 wire 由 effect 清理单点释放）
+  ✓ ★ B6 useWire effect 清理：release **自己这条 wire**（唯一释放点，配对）
+  ✓ ★ B7 回调守卫：当前已是 remote wire 时**不**作废（补投不得处决别人的 live wire）
+  ✓ B8 REMOTE_READY 旗标声明
+  ✓ ★ B9 onRemoteReady **补投**：旗标已立时立即触发（兜 waiter 注册晚于就绪的竞态）
+  ✓ B10 markRemoteReady 置位旗标
+  ✓ B11 wire 带 kind 标签：'remote'
+  ✓ B11 wire 带 kind 标签：'ext'
+  ✓ B11 wire 带 kind 标签：'offline'
+  ✓ B11 wire 带 kind 标签：'demo'
+  ✓ B11 wire 带 kind 标签：'dead'
+
+===== ZB-28b 共享 wire 存活哨兵：18 PASS / 0 FAIL =====
+
+--- STDERR ---

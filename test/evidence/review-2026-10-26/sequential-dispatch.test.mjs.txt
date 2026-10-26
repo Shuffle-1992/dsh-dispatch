@@ -1,0 +1,234 @@
+
+# A1 初始状态：各引擎键恒在 + 没有 enabled 开关 + sequentialCount=0
+ok 1 - 初始 order = 各引擎的空数组（客户端据此渲染）
+ok 2 - 初始 levels = 各引擎的平行空数组
+ok 3 - *所有已知引擎键永远都在*（ZB-84 起为四个）
+ok 4 - 初始 sequentialCount=0
+ok 5 - *★ 不再有 enabled 字段*（第三轮用户要求去掉全局开关：模型为空即顺序派发）
+ok 6 - API 对外形状 = {order, levels, sequentialCount}
+
+# A2 只传 order 可用；空 patch 不改状态
+ok 7 - 只传 order ⇒ 顺序生效
+ok 8 - 只传 order ⇒ 该模型档位 null（用引擎默认）
+ok 9 - 空 patch 不改变状态（仍返回当前状态）
+
+# A3 ★ order 按引擎合并（回归：不得静默清空其它引擎）
+ok 10 - *★ 再设 opencode 时 zcode 的顺序必须还在*（原实现整体替换会静默清空）
+ok 11 - 本次 patch 的 opencode 生效
+ok 12 - 未涉及的引擎保持空
+ok 13 - 第三次 patch 后 zcode 仍在
+ok 14 - 第三次 patch 后 opencode 仍在
+ok 15 - 第三次 patch 的 qoder 生效
+ok 16 - sequentialCount 累计三个引擎
+
+# A4 显式清空（[] / null）只清目标引擎，别人的不动
+ok 17 - 传空数组 ⇒ 该引擎被清空
+ok 18 - 清 zcode 不得动 opencode
+ok 19 - 传 null 同样是显式清空
+ok 20 - 清 zcode（null）不得动 opencode
+
+# A5 ★ 未知引擎键被丢弃（绝不能回退写进 zcode）
+ok 21 - *★ 未知引擎键必须丢弃*：normalizeEngine("bogus") 会回退 zcode，但顺序配置不能因此写进 zcode
+ok 22 - 未知引擎不产生任何条目
+ok 23 - order 仍只有已知引擎键（ZB-84 起为四个）
+ok 24 - 同一 patch 里的合法引擎照常生效
+ok 25 - 合法引擎生效时 zcode 仍为空（bogus2 没被写进去）
+
+# A6 去重且保持顺序（+ trim / 去空项）
+ok 26 - 去重、去空、trim，且**保持首次出现顺序**（顺序=派发次序）
+ok 27 - 纯字符串项 ⇒ 档位都是 null（引擎默认）
+
+# A7 逐模型档位：levels 与 order 同序；同一 route 原位覆盖档位
+ok 28 - order 保持给定次序
+ok 29 - *逐模型档位与 order 同序*：reasoningLevel / thinking 别名接受；非法档位归 null（不猜）
+ok 30 - 同 route 去重
+ok 31 - 同 route 的档位以后者为准（原位覆盖，不改变顺序）
+
+# A8 落盘形状：<workRoot>/state/sequential.json = {version:2, order:[{route,reasoningLevel}], updatedAt}
+ok 32 - 落盘文件 <workRoot>/state/sequential.json 存在
+ok 33 - version=2（v2 去掉全局 mode）
+ok 34 - *落盘不再有 mode 字段*（没有全局开关）
+ok 35 - 落盘 order 项 = {route, reasoningLevel}（档位逐模型）
+ok 36 - updatedAt 是合法时间戳
+ok 37 - 对外 order 仍是字符串数组（客户端渲染契约不变）
+ok 38 - 对外 levels 与 order 同序
+
+# A9 重启后读回：同一 workRoot 新建 dispatcher 与落盘一致（含 levels）
+ok 39 - 新 dispatcher 的 getSequential() 与重启前完全一致
+ok 40 - 重启后顺序列表逐字保留（不重排/不改写）
+ok 41 - 重启后逐模型档位也保留
+
+# A10 v1 旧文件仍能读（mode 被忽略，字符串项档位=null）
+ok 42 - v1 文件的 order 直接可用（向后兼容）
+ok 43 - v1 字符串项 ⇒ 档位 null（引擎默认，不猜）
+ok 44 - v1 的 mode 不会复活成 enabled 字段
+
+# A11 fail-open：文件损坏 / 形状不对 ⇒ 默认空、不抛
+ok 45 - 损坏的 sequential.json 不得让 createDispatcher 抛错
+ok 46 - 损坏 ⇒ fail-open 默认空 + 三引擎空顺序/空档位
+ok 47 - 形状不对（order 非数组）⇒ 归一成默认，不猜
+
+# A12 ★ setSequential({enabled}) 明确抛 TypeError（开关已废弃，不静默忽略）
+ok 48 - *★ setSequential({enabled:true}) 抛 TypeError*（明确报错，不静默忽略）
+ok 49 - 错误信息点名 enabled
+ok 50 - 错误信息说明「已废弃」及替代方式（模型为空即顺序派发）
+ok 51 - enabled:false 同样抛（字段整体废弃，不是只拒 true）
+ok 52 - enabled + order 同一 patch 抛错
+ok 53 - 被拒的 patch 不得应用 order（先杀开关，状态零改动）
+
+# A13 入参校验：非对象 ⇒ TypeError
+ok 54 - setSequential(null) 抛 TypeError（不静默当"清空"）
+ok 55 - setSequential(undefined) 抛 TypeError
+
+# B0a ★ 接管判据：模型为空 + 该引擎有列表 ⇒ 首次派发就用列表第一项
+ok 56 - 不传 provider ⇒ 用默认通道（opencode）
+ok 57 - *★ 首次派发由 core 定位到顺序列表第一项*（不是引擎默认模型）
+ok 58 - 引擎落库 = opencode
+ok 59 - 首跳命令行 --model = 列表第一项
+
+# B0b ★ 接管判据：显式指定 model ⇒ 不被顺序列表劫持
+ok 60 - 显式 model 原样保留
+ok 61 - *★ 显式模型不触发顺序链*：只 spawn 1 次
+ok 62 - 命令行 --model = 显式指定的那个
+ok 63 - 没有交接出的第二个 job
+ok 64 - 没有任何「顺序派发」warning
+
+# B0c 接管判据：模型为空但该引擎没有列表 ⇒ 不接管（不注入任何模型）
+ok 65 - 没有顺序列表 ⇒ 不注入模型（spec.model 保持空；不是引擎默认模型）
+ok 66 - 不接管 ⇒ 只有 1 次 spawn
+ok 67 - 命令行不带 --model
+ok 68 - 没有顺序推进产生的新 job
+
+# B1 失败推进：失败 ⇒ 按顺序 a→b→c 交接，3 项列表真的 spawn 3 次后停止
+ok 69 - 首轮 job 的 spec.model = 顺序列表第 1 个（新语义：dispatch 自动定位）
+ok 70 - b.spec.provider = 裸引擎名 opencode
+ok 71 - b.spec.model = 顺序列表第 2 个
+ok 72 - b.engine 落库 = opencode
+ok 73 - b.parentJobId 指向 a
+ok 74 - b.hopCount = 1
+ok 75 - b.attempts 两条（原 job + 本次交接）
+ok 76 - b.attempts[1].reason = handoff-retry
+ok 77 - 顺序交接的 hopReason = seq-model（与降级链 auto-fallback 区分：独立跳数预算）
+ok 78 - a 归为 failed（无暂停签名 ⇒ 不是 paused）
+ok 79 - a.exitCode = 1
+ok 80 - 静默失败不伪造 pauseReason
+ok 81 - a.handedOffTo 指向 b
+ok 82 - a 的 parseWarnings 记录「顺序派发: 第 2/3 个模型 opencode/opencode/b」（warning 写在失败的前一个 job 上）
+ok 83 - a 的顺序派发 warning 带失败原因「退出码 1」
+ok 84 - c.spec.model = 顺序列表第 3 个
+ok 85 - c.parentJobId 指向 b
+ok 86 - c.hopCount = 2（a→b→c）
+ok 87 - c.attempts 4 条（继承 b 的 2 条 + 本次 2 条）
+ok 88 - c.attempts[3].reason = handoff-retry
+ok 89 - c 的交接 hopReason 同样是 seq-model
+ok 90 - b 的 parseWarnings 记录「顺序派发: 第 3/3 个模型 opencode/opencode/c」
+ok 91 - c 之后没有下一跳（handedOffTo=null）
+ok 92 - c 的 parseWarnings 记录「列表用尽」（交回降级链 / 停在此处）
+ok 93 - 实际 spawn 的 --model 顺序与顺序列表一致
+ok 94 - 假执行器内部看到的调用顺序同样一致（排除"命令行对但没真跑"）
+ok 95 - *★ 回归钉：3 项列表必须真的 spawn 3 次*（修前会在第 2 跳提前停）
+ok 96 - 总 job 数 = 3（a/b/c）
+ok 97 - 列表用尽后不再 spawn（不无限重试）
+ok 98 - 总 job 数仍 = 3（不再产生新 job）
+ok 99 - 没有仍在 running/queued 的 job
+
+# B2 config-error 不延续：整列表配置了也停在 paused、不换模型
+ok 100 - 首跳 = 顺序列表第一项
+ok 101 - config-error 命中暂停签名 ⇒ 状态 paused
+ok 102 - pauseReason = config-error
+ok 103 - 不产生交接 job
+ok 104 - config-error 不触发顺序派发（没有任何「顺序派发」warning）
+ok 105 - 只 spawn 一次：参数错误换模型也没用 ⇒ 不许换下一个模型
+ok 106 - 宽限后仍只有 1 次 spawn
+ok 107 - 只有原 job，没有交接出的新 job
+
+# B3 paused 不限暂停原因都延续（quota / entitlement / signing）
+ok 108 - quota-exhausted: 首跳 = 顺序列表第一项（模型为空即顺序派发）
+ok 109 - quota-exhausted: 暂停原因分类正确
+ok 110 - quota-exhausted: 交接目标是顺序列表第 2 个模型
+ok 111 - quota-exhausted: a 的 parseWarnings 记录第 2/2 个模型
+ok 112 - quota-exhausted: spawn 恰 2 次（a + b，没有第三跳）
+ok 113 - quota-exhausted: b 同样暂停（同一个假执行器文案）
+ok 114 - quota-exhausted: b 用尽列表的 warning 存在
+ok 115 - quota-exhausted: 用尽后无下一跳
+ok 116 - plan-not-entitled: 首跳 = 顺序列表第一项（模型为空即顺序派发）
+ok 117 - plan-not-entitled: 暂停原因分类正确
+ok 118 - plan-not-entitled: 交接目标是顺序列表第 2 个模型
+ok 119 - plan-not-entitled: a 的 parseWarnings 记录第 2/2 个模型
+ok 120 - plan-not-entitled: spawn 恰 2 次（a + b，没有第三跳）
+ok 121 - plan-not-entitled: b 同样暂停（同一个假执行器文案）
+ok 122 - plan-not-entitled: b 用尽列表的 warning 存在
+ok 123 - plan-not-entitled: 用尽后无下一跳
+ok 124 - provider-signing: 首跳 = 顺序列表第一项（模型为空即顺序派发）
+ok 125 - provider-signing: 暂停原因分类正确
+ok 126 - provider-signing: 交接目标是顺序列表第 2 个模型
+ok 127 - provider-signing: a 的 parseWarnings 记录第 2/2 个模型
+ok 128 - provider-signing: spawn 恰 2 次（a + b，没有第三跳）
+ok 129 - provider-signing: b 同样暂停（同一个假执行器文案）
+ok 130 - provider-signing: b 用尽列表的 warning 存在
+ok 131 - provider-signing: 用尽后无下一跳
+
+# B4 顺序列表用尽 ⇒ 交回既有跨通道降级链（单目标也要生效）
+ok 132 - 首跳 = 顺序列表第一项
+ok 133 - b 的 parseWarnings 记录顺序列表已用尽
+ok 134 - 降级链目标 provider = plan（来自 setFallbackChain 目标列表）
+ok 135 - 降级链 job 的 parentJobId 指向顺序链最后一跳 b
+ok 136 - 降级链目标按通道推断引擎 = zcode（跨引擎交接）
+ok 137 - b 上留「fallback-chain: 自动跳到 plan」warning（先顺序、后降级，不静默）
+ok 138 - 降级链目标同样 quota 暂停 ⇒ 停在 paused（不再无限跳）
+ok 139 - 降级 job 上确有 auto-fallback 交接记录（实际 1 条）⇒ 降级真的发生过
+ok 140 - ★ 降级预算是「真实用尽」而非「被顺序跳数挤掉」（1 个目标 + 已用 1 条降级记录）
+ok 141 - 降级用尽后不再产生新 job
+ok 142 - 至少 a/b + 降级链 job 三个 job（实际恰好 3 个：a、b、plan）
+
+# B5 ★ 降级目标也顺序派发：降到 qoder 时从列表第一项起跑，列表跑完才继续外层降级链
+ok 143 - 主通道首跳 = opencode 列表第一项
+ok 144 - qoder 目标引擎 = qoder
+ok 145 - qoder 目标 provider = 裸引擎名 qoder
+ok 146 - qoder 顺序第一项经前缀规整后 = 裸模型名 Fast（CLI 契约）
+ok 147 - qoder 首项由主通道用尽后降级而来
+ok 148 - 主通道用尽时留 warning：该降级目标为顺序派发（共 2 个模型）
+ok 149 - qoder 首项实际以 --model Fast 传给执行器
+ok 150 - qoder 列表第 2 项 = Auto
+ok 151 - 仍在 qoder 引擎/通道内
+ok 152 - qoder 列表内部推进有「第 2/2 个模型」warning
+ok 153 - 外层降级目标 plan 的引擎 = zcode
+ok 154 - plan 是在 qoder 列表**最后一项**之后才出现的（列表跑完才继续外层链）
+ok 155 - qoder 列表用尽 warning 在最后一跳上
+ok 156 - qoder 列表用尽后才留 fallback-chain 交接 warning（继续外层链）
+ok 157 - *★ 实际执行序列：opencode 列表 → qoder 列表（Fast/Auto 裸模型名）→ 外层降级目标（无模型）*
+ok 158 - 外层目标里的不可用通道（ch-c）被跳过，没有产生 job
+ok 159 - 外层链目标也暂停 ⇒ 停住（不无限跳）
+ok 160 - 外层链停住后不再产生新 job
+ok 161 - 外层链停住后不再 spawn
+
+# C 思考强度探测：Qoder reasoning-efforts 并入 / OpenCode variants 逐模型 / 没报档位不造档位
+ok 162 - 首次 listChannels 即拿到全部 OpenCode 通道（不因档位预热而缺失）
+ok 163 - 首次「后台预热」未完成 ⇒ 档位可缺省（设计如此；不是通道缺失/不是 bug）
+ok 164 - 首次 listChannels 即拿到 Qoder 通道
+ok 165 - 首次 Qoder 档位同样可缺省（后台预热）
+ok 166 - 对照组：ZCode plan 别名仍在（本 fixture 没有 reasoning-levels 行）
+ok 167 - 对照组：没有探测行时 plan 不写 thinkingLevels（不猜）
+ok 168 - ★ OpenCode 逐模型档位：opencode/model-a = low,high（按 variants 行原样）
+ok 169 - ★ OpenCode 逐模型档位：opencode/model-b = minimal,max
+ok 170 - *★ 没报 variants 的 opencode/model-c 不得被造出档位*（真机有 4 个模型没有 variants）
+ok 171 - opencode/model-c.thinkingLevels = undefined（字段缺席，不是空数组）
+ok 172 - opencode/model-c 本身仍在通道清单里（不因缺档位而消失）
+ok 173 - ★ Qoder 通道 thinkingLevels = reasoning-efforts 各模型档位并集（引擎级，真机 --with-efforts 拿不到逐模型子集）
+ok 174 - Qoder 每个通道都带上同一份并集
+ok 175 - 任何通道都不得出现空档位数组（没有档位就不带字段）
+ok 176 - ★ Qoder --list-models --with-efforts 探测确实被后台请求（marker 有记录）
+ok 177 - ★ Qoder 探测请求里带 --with-efforts（不是普通 --list-models）
+ok 178 - ★ OpenCode --list-models --with-variants 探测确实被后台请求（marker 有记录）
+ok 179 - ★ OpenCode 探测请求里带 --with-variants（不是普通 --list-models）
+ok 180 - TTL 过期当次仍立刻返回**旧缓存**档位（不因重探阻塞通道清单）
+ok 181 - TTL 过期后两路探测都被后台重新请求（缓存过期 ⇒ 重探，不是一直吃旧值）
+ok 182 - 源码级：Qoder --with-efforts 探测以 240000ms 超时发起（原先写死 30s ⇒ 会被误杀）
+ok 183 - 源码级：OpenCode --with-variants 探测以 180000ms 超时发起（原先写死 15s ⇒ 会被误杀）
+ok 184 - 源码级：runQoderProbe(args, timeoutMs) 超时可配（默认 30s）
+ok 185 - 源码级：runOpenCodeProbe(args, timeoutMs) 超时可配（默认 15s）
+
+============================================
+PASS 185 / FAIL 0（共 185 条断言）
+
+--- STDERR ---

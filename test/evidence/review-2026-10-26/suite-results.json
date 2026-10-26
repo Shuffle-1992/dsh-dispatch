@@ -1,0 +1,562 @@
+[
+  {
+    "file": "channel-health.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 337,
+    "tap": {}
+  },
+  {
+    "file": "channel-retry.test.mjs",
+    "code": 1,
+    "signal": null,
+    "timedOut": false,
+    "ms": 7920,
+    "tap": {}
+  },
+  {
+    "file": "client-tdz.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 477,
+    "tap": {}
+  },
+  {
+    "file": "codebuddy-engine.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 31269,
+    "tap": {}
+  },
+  {
+    "file": "concurrency-limited.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 258,
+    "tap": {}
+  },
+  {
+    "file": "core.test.mjs",
+    "code": 1,
+    "signal": null,
+    "timedOut": false,
+    "ms": 63368,
+    "tap": {}
+  },
+  {
+    "file": "cross-check.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 205,
+    "tap": {}
+  },
+  {
+    "file": "ctx-format.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 101,
+    "tap": {}
+  },
+  {
+    "file": "cwd-shortname.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 196,
+    "tap": {}
+  },
+  {
+    "file": "elapsed-format.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 140,
+    "tap": {}
+  },
+  {
+    "file": "engine-discover.test.mjs",
+    "code": 1,
+    "signal": null,
+    "timedOut": false,
+    "ms": 19022,
+    "tap": {}
+  },
+  {
+    "file": "engine-routing.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 2276,
+    "tap": {}
+  },
+  {
+    "file": "engine-ui.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 306,
+    "tap": {}
+  },
+  {
+    "file": "fallback-target.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 1553,
+    "tap": {}
+  },
+  {
+    "file": "fallback-ui.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 360,
+    "tap": {}
+  },
+  {
+    "file": "file-lock.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 7374,
+    "tap": {}
+  },
+  {
+    "file": "frozen-probe.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 931,
+    "tap": {}
+  },
+  {
+    "file": "gift-quota.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 468,
+    "tap": {}
+  },
+  {
+    "file": "hardening.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 1516,
+    "tap": {}
+  },
+  {
+    "file": "header-entry.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 1114,
+    "tap": {}
+  },
+  {
+    "file": "host-config.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 284,
+    "tap": {}
+  },
+  {
+    "file": "host-decouple.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 365,
+    "tap": {}
+  },
+  {
+    "file": "job-row-layout.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 974,
+    "tap": {}
+  },
+  {
+    "file": "line-protocol.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 901,
+    "tap": {}
+  },
+  {
+    "file": "list-compact.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 275,
+    "tap": {}
+  },
+  {
+    "file": "lock-badge.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 182,
+    "tap": {}
+  },
+  {
+    "file": "lock-model.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 5063,
+    "tap": {}
+  },
+  {
+    "file": "lock-none-free.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 2125,
+    "tap": {}
+  },
+  {
+    "file": "lock-priority.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 10271,
+    "tap": {}
+  },
+  {
+    "file": "lock-queue-visibility.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 4914,
+    "tap": {}
+  },
+  {
+    "file": "lock-ui.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 226,
+    "tap": {}
+  },
+  {
+    "file": "memory-ban.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 1592,
+    "tap": {}
+  },
+  {
+    "file": "notify-engine-label.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 282,
+    "tap": {}
+  },
+  {
+    "file": "notify-inbox-observe.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 270,
+    "tap": {}
+  },
+  {
+    "file": "notify.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 274,
+    "tap": {}
+  },
+  {
+    "file": "opencode-executor.test.mjs",
+    "code": 1,
+    "signal": null,
+    "timedOut": false,
+    "ms": 81561,
+    "tap": {}
+  },
+  {
+    "file": "panel-style.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 223,
+    "tap": {}
+  },
+  {
+    "file": "pause-timeout.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 8048,
+    "tap": {}
+  },
+  {
+    "file": "permission-blocked.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 380,
+    "tap": {}
+  },
+  {
+    "file": "persist-throttle.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 679,
+    "tap": {}
+  },
+  {
+    "file": "proactive-usage.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 201,
+    "tap": {}
+  },
+  {
+    "file": "progress-heartbeat.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 476,
+    "tap": {}
+  },
+  {
+    "file": "qoder-concurrency.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 2268,
+    "tap": {}
+  },
+  {
+    "file": "qoder-executor.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 1654,
+    "tap": {}
+  },
+  {
+    "file": "qoder-routing.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 23196,
+    "tap": {}
+  },
+  {
+    "file": "quota-rpc.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 1212,
+    "tap": {}
+  },
+  {
+    "file": "readable-tail.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 150,
+    "tap": {}
+  },
+  {
+    "file": "remote-args-passthrough.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 348,
+    "tap": {}
+  },
+  {
+    "file": "retry-model-switch.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 1271,
+    "tap": {}
+  },
+  {
+    "file": "review-low-fixes.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 228,
+    "tap": {}
+  },
+  {
+    "file": "review-med-fixes.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 220,
+    "tap": {}
+  },
+  {
+    "file": "review-unfinished.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 325,
+    "tap": {}
+  },
+  {
+    "file": "section-order.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 179,
+    "tap": {}
+  },
+  {
+    "file": "sequential-dispatch.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 7537,
+    "tap": {}
+  },
+  {
+    "file": "sequential-hijack.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 1071,
+    "tap": {}
+  },
+  {
+    "file": "shared-wire-liveness.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 205,
+    "tap": {}
+  },
+  {
+    "file": "single-source.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 253,
+    "tap": {}
+  },
+  {
+    "file": "split-mode.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 1940,
+    "tap": {}
+  },
+  {
+    "file": "tail-scroll.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 244,
+    "tap": {}
+  },
+  {
+    "file": "thinking-level.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 4203,
+    "tap": {}
+  },
+  {
+    "file": "thinking-levels-coverage.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 761,
+    "tap": {}
+  },
+  {
+    "file": "thinking-verify.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 910,
+    "tap": {}
+  },
+  {
+    "file": "toolview-card.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 250,
+    "tap": {}
+  },
+  {
+    "file": "wait-action.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 5562,
+    "tap": {}
+  },
+  {
+    "file": "wake-integration.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 1256,
+    "tap": {}
+  },
+  {
+    "file": "wire-actions.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 7166,
+    "tap": {}
+  },
+  {
+    "file": "wire-e2e-gaps.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 7104,
+    "tap": {}
+  },
+  {
+    "file": "wire-engine.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 5690,
+    "tap": {}
+  },
+  {
+    "file": "zcode-discovery.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 928,
+    "tap": {}
+  },
+  {
+    "file": "zcode-route-pick.test.mjs",
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "ms": 173,
+    "tap": {}
+  }
+]

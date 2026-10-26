@@ -1,0 +1,21 @@
+{
+  "retryThinking": {
+    "input": {
+      "reasoningLevel": "max",
+      "thinking": "max"
+    },
+    "ok": true,
+    "forwarded": {
+      "model": "new-model"
+    },
+    "reasoningForwarded": null
+  },
+  "logJunction": {
+    "allowedLogRoot": "F:\\My Code\\dsh-dispatch\\test\\.review-runtime\\extra\\work\\logs",
+    "physicalTarget": "F:\\My Code\\dsh-dispatch\\test\\.review-runtime\\extra\\outside\\sentinel.txt",
+    "returned": [
+      "AUDIT_SYNTHETIC_OUTSIDE_LOG_ROOT"
+    ],
+    "warnings": []
+  }
+}

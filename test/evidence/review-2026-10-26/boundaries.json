@@ -1,0 +1,94 @@
+{
+  "bomSwitch": {
+    "host": {
+      "enabled": true,
+      "updatedAt": null,
+      "updatedBy": null,
+      "note": null,
+      "source": "default(读取失败)"
+    },
+    "runner": {
+      "enabled": true,
+      "source": "default(读取失败: Unexpected token '﻿', \"﻿{\"enabled\":false}\" is not valid JSON)",
+      "path": "F:\\My Code\\dsh-dispatch\\test\\.review-runtime\\boundaries\\bom-switch.json"
+    }
+  },
+  "frozenProbes": [
+    {
+      "engine": "qoder",
+      "code": 3,
+      "stdout": "",
+      "stderr": "[qoder-run] ⛔ 派发总开关为「关闭」，拒绝派发（未启动任何进程、未消耗任何额度）。\n[qoder-run] 开关文件: F:\\My Code\\dsh-dispatch\\test\\.review-runtime\\boundaries\\closed-switch.json\n[qoder-run] 需要恢复派发时: node <本仓库>/collab-kit/dispatch-switch.mjs --project <宿主项目> on\n"
+    },
+    {
+      "engine": "codebuddy",
+      "code": 3,
+      "stdout": "",
+      "stderr": "[codebuddy-run] ⛔ 派发总开关为「关闭」，拒绝派发（未启动任何进程、未消耗任何额度）。\n[codebuddy-run] 开关文件: F:\\My Code\\dsh-dispatch\\test\\.review-runtime\\boundaries\\closed-switch.json\n[codebuddy-run] 需要恢复派发时: node <本仓库>/collab-kit/dispatch-switch.mjs --project <宿主项目> on\n"
+    },
+    {
+      "engine": "opencode",
+      "code": 3,
+      "stdout": "",
+      "stderr": "[opencode-run] ⛔ 派发总开关为「关闭」，拒绝派发（未启动任何进程、未消耗任何额度）。\n[opencode-run] 开关文件: F:\\My Code\\dsh-dispatch\\test\\.review-runtime\\boundaries\\closed-switch.json\n[opencode-run] 需要恢复派发时: node <本仓库>/collab-kit/dispatch-switch.mjs --project <宿主项目> on\n"
+    }
+  ],
+  "bomRealRunner": {
+    "code": 0,
+    "stdout": "[qoder-run] tag=(none) mode=qoder cwd=F:\\My Code\\dsh-dispatch\\test\\.review-runtime\\boundaries\n[qoder-run] cli=F:\\My Code\\dsh-dispatch\\test\\.review-runtime\\boundaries\\probe.mjs\n[qoder-run] permission-mode=accept_edits（默认：无头下可改工作目录内文件）\n{\"type\":\"result\",\"result\":\"AUDIT_FIXTURE_OK\",\"is_error\":false}\n[qoder-run] permission-mode-requested=accept_edits reported=(unknown)\n[qoder-run] thinking-observed=silent blocks=0 chars=0 requested=null\n[qoder-run] credits total=- contextRatio=- durationMs=- turns=-\n[qoder-run] usage requests=- in=- out=- cacheRead=-\n[qoder-run] context used=- (-% of ?) turnCount=-\n[qoder-run] done exit=0 elapsed=0.2s responseChars=16\n[qoder-run] result=F:\\My Code\\dsh-dispatch\\test\\.review-runtime\\boundaries\\collab\\logs\\qoder-run-untagged-2026-10-26T13-47-32-307Z.result.json\n",
+    "stderr": "[qoder-run] 未从 init 事件读到 permissionMode，无法确认权限模式是否生效（请求 accept_edits）\n"
+  },
+  "fallbackAfterDispose": {
+    "disposedBeforeProbeReturned": true,
+    "jobs": [
+      {
+        "id": "j-mvpb9unl-0-3826",
+        "state": "paused",
+        "engine": "zcode",
+        "parentJobId": null
+      },
+      {
+        "id": "j-mvpb9ur9-1-e0e3",
+        "state": "done",
+        "engine": "qoder",
+        "parentJobId": "j-mvpb9unl-0-3826"
+      }
+    ]
+  },
+  "fallbackNotification": {
+    "jobStates": [
+      {
+        "id": "j-mvpb9uw0-0-da5a",
+        "state": "paused",
+        "parentJobId": null
+      },
+      {
+        "id": "j-mvpb9v06-1-e892",
+        "state": "done",
+        "parentJobId": "j-mvpb9uw0-0-da5a"
+      }
+    ],
+    "noticeCount": 1,
+    "notices": "[{\"id\":\"42601506-e840-4159-b9d8-2b8e93752ba7\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"[dispatch] 派发任务 j-mvpb9uw0-0-da5a 已暂停 —— 需要你决定：action=retry 续跑，或换通道交接。\\n（kind=prompt, engine=zcode, exit=1, 暂停原因=quota-exhausted）[status: paused]\\n用 dispatch action=tail（id=j-mvpb9uw0-0-da5a, n=30）读最近输出，或 action=list 看全部 job。\"}],\"source\":{\"kind\":\"dispatch\",\"form\":\"notice\",\"summary\":\"zcode job j-mvpb9uw0-0-da5a paused\"}}]",
+    "stats": {
+      "registered": 1,
+      "notified": 1,
+      "delivered": 1,
+      "followup": 1,
+      "inject": 0,
+      "suppressed": 0,
+      "missingAgent": 0,
+      "capped": 0,
+      "insertAcked": 0,
+      "lostWakes": 0,
+      "tracked": 0,
+      "wakeBudget": 0,
+      "unconfirmed": 1,
+      "owners": []
+    }
+  },
+  "concurrentChannels": {
+    "requests": 3,
+    "probes": 3
+  }
+}

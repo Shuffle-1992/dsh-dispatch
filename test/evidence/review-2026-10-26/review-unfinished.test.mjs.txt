@@ -1,0 +1,18 @@
+✔ ZB-118 ①：opencode/qoder/codebuddy 都有派发总开关门禁（exit 3） (3.3869ms)
+✔ ZB-118 ②：timeoutMin 有上界（Node 定时器 2^31-1 ms） (0.9898ms)
+✔ ZB-118 ③：core 有 dispose，且插件卸载时调用 (1.4372ms)
+✔ ZB-118 ④：lockBlockersFor 用显式 jobId 参数（不再靠 spec.__jobId） (3.3393ms)
+✔ ZB-118 ⑤：killTree 抽成共享模块，三个执行器都用它 (3.3241ms)
+✔ ZB-118 ⑥：zcode-run 的 done 行前缀来自协议文件（不再手抄） (0.4845ms)
+✔ ZB-118 ⑦：qoder/codebuddy 打印 memory-ban=on，且 target 分支也注入禁令 (1.2074ms)
+✔ ZB-118 ⑧：createRemoteFace / attachHostWire 支持复用外部 handler (0.6794ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 29.4392
+
+--- STDERR ---

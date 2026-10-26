@@ -1,0 +1,20 @@
+
+A. setChannel 必须把 reasoningLevel 透传到 core（真机 bug 的直接回归）
+  ✓ A1 setChannel 成功（实际 true）
+  ✓ A2 ★ core 里存下了 high（修复前这里会是 agent —— 面板跳回 Agent决定）
+  ✓ A3 model 也透传了
+  ✓ A4 ★ channel.json 落盘含 reasoningLevel=high（重启后读回不丢）
+  ✓ A5 ★ channel() 读回仍是 high（面板不会再跳回 Agent决定）
+
+B. 别名与缺省语义不变（不误伤既有行为）
+  ✓ B1 `thinking` 别名同样透传（工具侧入口）
+  ✓ B2 ★ 只改通道不传档位 ⇒ 沿用原值（不被重置成 agent）
+  ✓ B3 显式 agent 照传（Agent决定 也是有效值）
+
+C. 通用守门：remote 方法**参数透传**核对（防同类坑再犯）
+  ✓ C1 setChannel 到达了 core
+  ✓ C2 ★ setChannel 的三个字段**原样**到达 core（一个都不能丢）
+
+===== ZB-73 remote 参数透传：10 PASS / 0 FAIL =====
+
+--- STDERR ---

@@ -1,0 +1,167 @@
+
+A. 协议层：第四引擎 codebuddy
+  ✓ ENGINES 含 codebuddy
+  ✓ 行前缀 = [codebuddy-run]（实际 "[codebuddy-run]"）
+  ✓ codebuddy/glm-5.1 是合法通道 id（模型名含点）
+  ✓ codebuddy/deepseek-v3-2-volc 是合法通道 id
+  ✓ 空模型名不是合法通道 id
+  ✓ auto 是合法裸模型名
+  ✓ 含路径分隔符的不是合法模型名（防把日志行当模型）
+  ✓ provider 形态 ⇒ 推断为 codebuddy（实际 "codebuddy"）
+  ✓ 裸 provider=codebuddy（已规整的 spec）⇒ codebuddy（实际 "codebuddy"）
+  ✓ 裸 provider=workbuddy ⇒ codebuddy（实际 "codebuddy"）
+  ✓ provider 形态 ⇒ model 被剥成裸名（实际 "glm-5.1"）
+  ✓ ★ 显式 model 带前缀同样被剥（否则 CLI 静默退 auto）（实际 "kimi-k2.5"）
+  ✓ provider 规整为裸 codebuddy（实际 "codebuddy"）
+
+B. 执行器：探测 / argv / 权限模式
+  ✓ 从 --help 的 `Currently supported:` 解析出 9 个模型（实际 9）
+  ✓ 模型顺序按 CLI 声明（auto 在首位）（实际 "auto"）
+  ✓ 从 --help 解析出 6 个思考档位（实际 ["minimal","low","medium","high","xhigh","max"]）
+  ✓ ★ 解析不到 ⇒ 空数组（绝不编造模型清单）（实际 []）
+  ✓ ★ 解析不到 ⇒ 空数组（绝不编造档位）（实际 []）
+  ✓ argv 前三位 = -p --output-format stream-json
+  ✓ 档位映射为 --effort
+  ✓ 模型透传为 --model
+  ✓ 续跑用 --session-id
+  ✓ ★ 正文在最后（避免被当成选项）（实际 "do it"）
+  ✓ 默认权限模式 = acceptEdits（无头下可改工作目录内文件）（实际 "acceptEdits"）
+  ✓ --auto ⇒ bypassPermissions（仅显式要求）（实际 "bypassPermissions"）
+  ✓ snake_case 输入归一为 CLI 的驼峰值（实际 "acceptEdits"）
+  ✓ CLI 自带档 dontAsk 原样透传（实际 "dontAsk"）
+  ✓ acceptEdits 回传 acceptEdits ⇒ 未回落
+  ✓ ★ 请求 bypassPermissions 实际 default ⇒ 判定回落（写操作可能被静默拒绝）
+  ✓ 回落时给出可读 warning
+  ✓ ★ 无扩展名 + node shebang ⇒ 前置 node（Windows 不能直接 spawn）
+  ✓ 非 node 脚本不被误当脚本执行
+
+C. stream-json 聚合器
+  ✓ session_id 被捕获（实际 "s1"）
+  ✓ init.permissionMode（驼峰）被捕获（实际 "acceptEdits"）
+  ✓ apiKeySource 被捕获（账号区域线索）（实际 "www.workbuddy.cn"）
+  ✓ result.result 是权威正文（实际 "你好"）
+  ✓ thinking 内容块被计数（档位是否生效的唯一可观测信号）（实际 1）
+  ✓ 真实 token 被采集（实际 [5,7,3]）
+  ✓ contextWindow 来自 result.modelUsage（实际 168000）
+  ✓ is_error=false（实际 false）
+  ✓ is_error=true 被识别（实际 true）
+  ✓ ★ errors[] 被采集（未登录的可读原因）
+  ✓ 坏 JSON 行只记 parseError，不抛
+  ✓ 未知事件类型被计数（降级透明）
+
+D. 端到端：假 CLI（result.is_error=true 且进程 exit 0）
+  ✓ ★ 任务失败必须让执行器 exit 1（实际 exit=1）—— 否则 core 会把失败当成功收尾
+  ✓ stderr 给出可读的「未登录」原因（不是 unknown 失败）
+  ✓ stderr 含可执行的 /login 指引
+  ✓ 协议行 done exit=1（core 据此 finalize 为失败/paused）
+  ✓ 权限模式回显且未回落
+
+E. core 集成
+  ✓ provider=codebuddy/glm-5.1 ⇒ job.engine=codebuddy（实际 "codebuddy"）
+  ✓ ★ spec.model 是裸名（CLI 的 --model 要裸名）（实际 "glm-5.1"）
+  ✓ 假执行器 exit 0 ⇒ done（实际 "done"）
+  ✓ ★ effort 行解析进 reasoningLevelApplied（面板显示实际档位）（实际 "high"）
+  ✓ 未登录 ⇒ paused（可修，不是 failed）（实际 "paused"）
+  ✓ ★ pauseReason=not-logged-in（可读原因，用户知道只需登录）（实际 "not-logged-in"）
+  ✓ ★ codebuddy 传 mode ⇒ 可读报错（不静默丢弃用户意图）
+  ✓ codebuddy 接受 auto:true（映射 --permission-mode bypassPermissions）
+  ✓ 默认 maxConcurrentCodebuddy = 2（保守默认，未做并发实测）（实际 2）
+  ✓ ★ maxConcurrentCodebuddy 配置真的生效（不是摆设）（实际 5）
+  ✓ codebuddy 与 zcode 分开计数
+
+F. 登录助手（ZB-87）
+  ✓ parseArgs 支持 --login-serve / --port
+  ✓ dispatcher 暴露 startCodebuddyLogin
+  ✓ dispatcher 暴露 codebuddyLoginStatus
+  ✓ dispatcher 暴露 stopCodebuddyLogin
+  ✓ ★ 未启动时 status 给可读错误（不抛、不假装已登录）
+  ✓ stop 幂等（没会话也不报错，且 stopped=false）
+  ✓ ★ ACTIONS 含 login（否则 wire 直接报"未知 action"）
+  ✓ ★ REMOTE_METHODS 含 login（否则客户端 wire 调不到）
+
+G. 登录条位置与数据源（用户要求：只放插件详情页）
+  ✓ 定义了**自包含**组件 EngineLoginBar（自己用 useWire，不靠 props 层层传）
+  ✓ ★ 插件详情页（DispatchConfigCard）渲染登录条
+  ✓ ★ 登录条判据双保险：engineDetail.codebuddy 或「通道清单里出现 codebuddy」任一成立就渲染
+  ✓ 能定位 ChannelSection 与 DispatchConfigCard 的函数体
+  ✓ ★ 侧栏面板（ChannelSection）**不**渲染登录条（用户要求）
+  ✓ 找到 2 处 setChannelsInfo 对象字面量调用（App + 配置卡）
+  ✓ ★ 每处 setChannelsInfo 都保留 engineDetail（漏了它引擎状态条/登录条会静默消失）
+  ✓ ★ snapshot 兜底分支同样保留 engineDetail
+  ✓ ★ face 变体的 login 走 `remote.call(...)`（真机曾误写成裸 call 报错）
+  ✓ ★ 裸 `call` 版只出现在**后面的** ext 变体里（顺序锁，防抄错作用域）
+  ✓ login 走 remote.call（face 变体 + 方法表至少各一处）
+  ✓ 裸 call 版 login 恰好 1 处
+  ✓ 能取出 face 映射表字面量
+  ✓ ★ face 映射表覆盖所有 face.* 调用（缺：无）
+  ✓ ★ face 映射表含 split（ZB-91 真机就是漏了它导致分流开关点不动）
+  ✓ core 有只读登录产物扫描 scanCodebuddyAuthArtifacts
+  ✓ 能取出 scanCodebuddyAuthArtifacts 实现
+  ✓ ★ 扫描函数**只读**（不含 write/unlink/rename/rm）—— 派发台不读内容、不删凭据
+  ✓ ★ 诊断结果挂进 engineDetail.codebuddyAuth（随 engineDetail 自动流转，无需逐处补 setChannelsInfo）
+  ✓ 诊断失败不影响通道清单（包在 try 里）
+  ✓ runner 导出 authArtifacts（可测/可复用）
+  ✓ runner 能识别 .logged-out 残留
+  ✓ ★ 登录态常显节点带 data-wb-state（可被测试/样式钩住）
+  ✓ 客户端读 hasResidue
+  ✓ ★ 三态判定按「残留 → 已登录 → 未登录 → 未知」的优先级写（顺序错会把要重登显示成已登录）
+  ✓ 客户端用到残留/已登录文案
+  ✓ ★ 新增登录态文案 zh/en 全齐（269 key 对齐）
+  ✓ ★ 有 `cost usd=` 行解析（WorkBuddy 的费用口径）
+  ✓ ★ 费用落到 job.costUsd（与 qoder 的 credits 分开，绝不混用）
+  ✓ 有 creditConsumptionSnapshot
+  ✓ ★ 消耗聚合标注 scope=process（不冒充历史累计）
+  ✓ ★ creditConsumption 出现在 listChannels 返回里（agent 可读）
+  ✓ ★ credits 与 costUsd **不相加**（两者口径不同，混算会得出无意义的数）
+  ✓ wire.host 导出 buildCreditSummary
+  ✓ ★ qoder/codebuddy 标 available:null（官方不提供，不是临时故障）
+  ✓ ★ creditBriefOf 提成模块级公共函数（口径单一）
+  ✓ creditBriefOf 被多处复用（定义 + 引擎条 + 侧栏 = ≥3，实际 3）
+  ✓ ★ 侧栏额度按**选中通道的引擎**取（选中谁显示谁）
+  ✓ 侧栏读 channelsInfo.creditSummary
+  ✓ 额度节点带 data-dsp-credit（可被测试/样式钩住）
+  ✓ ★ 通用额度行以 `!giftSel` 为前提（免费额度通道保留原有进度条，不重复不冲突）
+  ✓ ★ creditBriefOf 只认 available===true（无接口/免费/取不到 ⇒ null）
+  ✓ ★ UI 里不再渲染「无额度接口 / 额度不可用」（用户明确说那是噪音）
+  ✓ ★ 额度行为「有真数据才出现」（不再用 `—` 占位）
+  ✓ ★ Section 支持 titleExtra 槽（`?` 放在标题右侧）
+  ✓ ★ `?` 必须 stopPropagation（标题整行是折叠按钮，不拦就点一下把分区收起）
+  ✓ locale 有 creditFree
+  ✓ locale 有 creditUnavailable
+  ✓ locale 有 creditNoApi
+  ✓ 能取出 impl.channels()
+  ✓ ★ impl.channels() 必须返回 ok:true（漏了 ⇒ 面板永不采用它的结果，creditSummary 到不了）
+  ✓ ★ 客户端判据放宽为 `r.ok || Array.isArray(r.channels)`（兼容旧宿主）
+  ✓ ★ 两处 channels 拉取（侧栏 + 详情页）都要放宽
+  ✓ ★ 探测缓存过期后**仍给结论**并标注陈旧（不再因超时直接变"未知"）
+  ✓ 陈旧上限 24 小时（再久就别当结论）
+  ✓ ★ 不再有"超过 10 分钟即作废"的硬门槛
+  ✓ ★ 新增「凭据在（未验证）」态（凭据存在时不显示未知）
+  ✓ 判定链里 credPresent 在 unknown 之前
+  ✓ ★ 「超时/未启动」按中性提示渲染（不吓人）
+  ✓ ★ 有轻量登录判定（零 spawn、零额度）
+  ✓ ★ 明确把 not-logged-in 判为未登录（缓存不比凭据旧时）
+  ✓ ★ 其它 reason（如 no-model-list-in-error）判为已登录（通过鉴权）
+  ✓ ★ status 返回里带 loggedIn
+  ✓ ★ 客户端收下 status.loggedIn
+  ✓ ★ 三态合并：engineDetail 优先，其次 status.loggedIn
+  ✓ ★ scanCodebuddyAuthArtifacts 返回 latestMtimeMs
+  ✓ 取凭据文件里最新的 mtime
+  ✓ ★ 凭据比探测缓存新 ⇒ 判为已登录（修「刚登录完仍显示未登录」）
+  ✓ ★ 有 manualLoggedIn 状态
+  ✓ ★ manualLoggedIn 在 effLoggedIn 里**优先级最高**（压过 engineDetail）
+  ✓ ★ 登录/检查状态返回后写回 manualLoggedIn
+  ✓ ★ 取值优先 loggedIn（轻量判定），其次 authenticated（账号态）
+  ✓ ★ 工具描述里有「派发第一纪律」
+  ✓ ★ 该纪律排在描述数组**第一项之前**（比 action 说明更早被读到）
+  ✓ ★ model 参数说明写明「⛔ 默认不要传」（原来完全没提）
+  ✓ ★ provider 参数说明写明「⛔ 默认不要传」
+  ✓ ★ dispatch 返回里算 panelNote
+  ✓ ★ 显式覆盖面板设置时返回 notice
+  ✓ ★ 通道与模型两种越权都有对应文案
+  ✓ 文案明确告诉 agent 下次别传
+  ✓ ★ login 的 sub 接受 op 别名（避免误触发 start）
+
+===== ZB-84 WorkBuddy/CodeBuddy 引擎：149 PASS / 0 FAIL =====
+
+--- STDERR ---

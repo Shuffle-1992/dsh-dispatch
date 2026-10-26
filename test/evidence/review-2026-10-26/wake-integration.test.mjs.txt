@@ -1,0 +1,16 @@
+✔ apply 全链路：派发 → 落地 → 唤醒发起会话；systemPrompt 段落也注入 (468.8775ms)
+✔ notifyOnSettle=false：不建唤醒器、不注入（派发照旧可用） (10.152ms)
+✔ agents 服务缺席：唤醒器照建（懒解析）、派发不受影响、落地不抛（激活安全） (577.3176ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1077.0178
+
+--- STDERR ---
+[dispatch] 宿主远端面未注册（客户端将走降级链）： provide 不可用
+[dispatch] 宿主远端面未注册（客户端将走降级链）： provide 不可用
+[dispatch] 宿主远端面未注册（客户端将走降级链）： provide 不可用

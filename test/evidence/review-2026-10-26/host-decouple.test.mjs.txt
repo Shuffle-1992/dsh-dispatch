@@ -1,0 +1,50 @@
+① [P0-1] 探测次数（假 dispatcher 计数；核心断言：listChannels ≤ 1）
+  ✓ 限流命中：listChannels 调用次数 ≤ 1（实际 1）
+  ✓ 限流命中：仍然建了 job（提示/改派不阻塞派发）（实际 1）
+  ✓ 限流命中：返回 { ok:true, job }
+  ✓ 限流命中：仍带 redirectedFrom=plan（字段一字不改）
+  ✓ 限流命中：仍带 warning（含改派说明）
+  ✓ 限流未命中：listChannels 调用次数 ≤ 1（实际 0）
+  ✓ 限流未命中：不带改派/提示字段（不误报）
+  ✓ 台账不存在：0 次探测且照常派发（listChannels=0）
+  ✓ applyExhaustedChannelGuard 仍返回改派目标（导出未变）
+  ✓ dispatchQuotaHint 仍返回 suggestedProvider（导出未变）
+
+② [P0-3] remote 方法表单源（REMOTE_METHODS ≡ FACE_METHOD_TABLE ≡ TYPERT）
+  ✓ REMOTE_METHODS 仍是**单行字面量数组**（single-source:76 钉住）
+  ✓ 能取出 FACE_METHOD_TABLE（21 行）
+  ✓ ★ FACE_METHOD_TABLE 与 REMOTE_METHODS 方法集**完全相等**（21 vs 21）
+  ✓ REMOTE_METHODS 里没有缺元数据的方法（缺：无）
+  ✓ TYPERT.invocations 覆盖全部 REMOTE_METHODS（21 vs 21）
+  ✓ ★ 此前缺的两个方法（modelSwitchesGet/modelSwitchSet）已进 TYPERT
+  ✓ 每个 invocation 都带 strict codec（缺：无）
+  ✓ 每个 invocation 都带 parameters 数组
+  ✓ TYPERT.model.services[].members 与方法集一致
+
+③ [M2] 状态目录单一所有者（core.statePath）
+  ✓ dispatcher 暴露 statePath(name)
+  ✓ statePath 就是 jobsFile 同目录（路径推导只此一处）（C:\Users\ADMINI~1\AppData\Local\Temp\dsp-decouple-statepath-Bc9w0t\state\dismissed.json）
+  ✓ statePath 对其它状态文件同样成立
+  ✓ ★ wire.host.mjs 的 dismissed 路径改走 dispatcher.statePath
+  ✓ wire 不再自己 dirname(jobsFile) 拼 dismissed 路径
+
+④ [M3] 台账「近期限流」解析入 core（引用级单源）
+  ✓ core/quota.mjs 导出 recentRateLimited
+  ✓ ★ wire.recentQuotaExhausted 与 core.recentRateLimited 是**同一个函数**（引用级）
+  ✓ 判据逐条保留：provider 归一（去 plan: 前缀）+ retryAfterSec 透传（{"bigmodel-coding-plan":{"at":"2026-10-26T12:52:04.381Z","retryAfterSec":600}}）
+  ✓ 别名仍能命中（matchQuotaExhausted 未变）
+  ✓ 台账不存在 → 空对象（不抛）
+  ✓ 窗口外条目不计入（5 小时）
+
+⑤ [F8] validateSpec 只调一次（且在引擎规整之前）
+  ✓ 非法 engine 仍抛可读 TypeError（行为不变）（dispatch(spec): spec.engine 必须是 zcode|opencode|qoder|codebuddy（收到 "bogus"））
+  ✓ 非法 spec 不建 job（校验先于建 job）
+  ✓ ★ 通道默认通道为 opencode 时 mode 仍被拒（证明单次校验发生在补默认值之后）（dispatch(spec): engine=opencode 不支持 mode（OpenCode 无 --mode；如需放开权限用 auto，不要用 mode））
+  ✓ 该拒绝同样不建 job
+  ✓ 非法 kind 仍抛可读 TypeError
+  ✓ ★ core 里 validateSpec 调用点只剩 1 处（改前为 2）（实际 1）
+  ✓ ★ dispatchRaw 先 validateSpec(spec) 再 effEngineSpec(spec)（校验看得见原始 engine）
+
+===== host-decouple（解耦执行轮验收）：37 PASS / 0 FAIL =====
+
+--- STDERR ---

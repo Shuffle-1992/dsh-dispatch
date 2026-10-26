@@ -1,0 +1,26 @@
+[
+  {
+    "file": "channel-retry.test.mjs",
+    "code": 0,
+    "error": null,
+    "ms": 5205
+  },
+  {
+    "file": "core.test.mjs",
+    "code": 0,
+    "error": null,
+    "ms": 8266
+  },
+  {
+    "file": "engine-discover.test.mjs",
+    "code": 0,
+    "error": null,
+    "ms": 9037
+  },
+  {
+    "file": "opencode-executor.test.mjs",
+    "code": 0,
+    "error": null,
+    "ms": 25648
+  }
+]

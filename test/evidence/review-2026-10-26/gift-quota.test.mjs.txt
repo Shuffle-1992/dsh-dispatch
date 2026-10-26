@@ -1,0 +1,22 @@
+✔ ZB-33 尾读：从尾部倒读命中最后一条 balance 行（跨块也不丢行） (4.4704ms)
+✔ ZB-33 解析：JSON 体 + 行首时刻 (4.2119ms)
+✔ ZB-33 归一化：生效中 → active，剩余取自余额桶（不自算） (2.1545ms)
+✔ ZB-33 归一化：权益未生效（无桶）→ pending，**不拿 grant 冒充剩余** (0.7914ms)
+✔ ZB-33 归一化：窗口已过 → expired；非 start-plan → ok:false (6.7558ms)
+✔ ZB-33 摘要：剩余 + 百分比 + 窗口 + 剩余时长；不可用时返回 null (1.2804ms)
+✔ ZB-33 readGiftQuota：走假 fsImpl 端到端（不触真磁盘），并带 observedAt/日志名 (2.0132ms)
+✔ ZB-33 通道形态：account:<family>-start-plan 才算免费额度通道 (0.3635ms)
+✔ ZB-96 formatGiftQuota：日志 >24h 时必须明说"数据 N 天前" (1.6604ms)
+✔ ZB-96 creditSummary：四引擎如实三态（有余额 / 取不到 / 官方无接口 / 免费） (86.1064ms)
+✔ ZB-105 giftQuota：多条 entitlement 各自成桶 ⇒ 余额汇总 + models/perModel (1.6673ms)
+✔ ZB-105 giftQuota：单模型活动仍走原单行文案（观感不变） (0.6369ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 131.5771
+
+--- STDERR ---

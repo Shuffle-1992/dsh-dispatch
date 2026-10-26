@@ -1,0 +1,16 @@
+✔ A. ★ --list-providers 覆盖个人通道模型（deepseek-flash 原先一条档位行都没有） (183.7271ms)
+✔ B. ★ 匹配式与 ZCode 逐字同式（^(?:match)$ + i）；大小写不同也命中 (1.2474ms)
+✔ C. ★ core listChannels：plan 别名与 personal 通道都带上同一份探测表的 thinkingLevels (31.5723ms)
+✔ D. ★ 真实内置配置：GLM-5.3/Flash = low,high,max；deepseek-flash = disabled,low,high,max (10.5268ms)
+✔ F. ★ 面板：失效档位显式列为 option（否则 <select> 会静默显示「Agent决定」） (5.2452ms)
+✔ E. 非法档位 fail-fast 报错列出修正后的可用档位（low|high|max） (273.3346ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 517.0981
+
+--- STDERR ---

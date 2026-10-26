@@ -1,0 +1,48 @@
+
+A. 逐模型档位声明（用户从 Qoder GUI 提供的真实矩阵）
+  ✓ A1 声明表 QODER_MODEL_LEVELS 存在（逐模型档位只此一处，面板自动跟随）
+  ✓ A2 ★ Qwen3.8-Flash = low/medium/xhigh（与 Qoder GUI 模型卡片一致）
+  ✓ A3 ★ DeepSeek-Flash = low/high/max（与 Qoder GUI 模型卡片一致）
+  ✓ A4 ★ 通道构造优先用逐模型声明，并标注 scope=model
+  ✓ A5 未声明的模型退回引擎级并集并标注 scope=engine（诚实降级，不谎称逐模型精确）
+
+B. 执行器 → core 的观测信号链路
+  ✓ B1 执行器打 thinking-observed 行（观测到的思考状态）
+  ✓ B2 执行器统计 thinking 内容块（唯一可观测信号：none 恒 0 块、其余档位恒有块）
+  ✓ B3 core 解析 thinking-observed 行
+  ✓ B4 解析结果落到 job.thinkingObserved
+  ✓ B5 ★ 观测值不取自请求值（否则核对=永远通过，等于没核对）
+
+C. 核对判据（不误报是关键）
+  ✓ C1 核对函数存在
+  ✓ C2 ★ 请求本身就是"不思考"档（none/disabled）⇒ 不算不符（silent 符合预期）
+  ✓ C3 观测到 thinking ⇒ 相符
+  ✓ C4 ★ 没有观测信号 ⇒ 不判定为不符（"无法核对" ≠ "通过"，也 ≠ "不符"）
+  ✓ C5 `agent`（Agent决定）不参与核对（无预期档位可比）
+  ✓ C6 ★ 不符结论进 parseWarnings（面板/CLI 可见）
+  ✓ C7 ★ 同时落结构化字段 thinkingMismatch（含 requested/observed/suggested）
+
+D. 向上改档建议（用户："优先向上改档位"）
+  ✓ D1 强度序 LEVEL_STRENGTH 存在（仅用于排序，不做合法性校验）
+  ✓ D2 向上建议函数存在
+  ✓ D3 ★ 只找比当前更强、且**最近**的一档（绝不向下/平级，也不直接拉满）
+  ✓ D4 ★ 拿不到该模型支持集 ⇒ 不给建议（不猜档位）
+  ✓ D5 语义档位（auto/agent）不参与向上比较
+  ✓ D6 ★ 支持集优先取逐模型声明（建议不会越出该模型的真实可选范围）
+
+E. 真机行为：端到端（假执行器 → 核对 → 结论）
+  ✓ E1 观测值落到 job（实际 "silent"）
+  ✓ E2 ★ 请求 xhigh + 实际 silent ⇒ 报不符（真机"极高变关闭思考"场景）
+  ✓ E3 mismatch.requested=xhigh（实际 "xhigh"）
+  ✓ E4 ★ 已是最强档（xhigh）⇒ 不给向上建议（实际 null）
+  ✓ E5 结论进了 parseWarnings（可见）
+  ✓ E6 ★ 档位不符**不**改判任务状态（任务本身 done，实际 done）
+  ✓ E7 请求 low + 实际 silent ⇒ 报不符
+  ✓ E8 ★ 向上建议 = medium（low 之上该模型支持的最近一档，实际 "medium"）
+  ✓ E9 ★ 请求 none + 实际 silent ⇒ 相符（不误报）
+  ✓ E10 不产生核对警告
+  ✓ E11 ★ 观测到 thinking ⇒ 相符
+
+===== ZB-75 逐模型档位 + 核对 + 向上改档：34 PASS / 0 FAIL =====
+
+--- STDERR ---

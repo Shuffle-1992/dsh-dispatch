@@ -85,7 +85,7 @@ import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from 'node:child_proce
 import { request as httpRequest } from 'node:http'; // ZB-87：登录助手调官方 --serve 的 REST
 import { createServer as createNetServer } from 'node:net'; // ZB-87：取空闲端口
 import {
-  closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync,
+  closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync,
   realpathSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync,
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -4166,6 +4166,17 @@ export function createDispatcher(options = {}) {
       if (!Array.isArray(spec.write)) throw new TypeError('dispatch(spec): spec.write 必须是文件路径数组');
       for (const p of spec.write) {
         if (typeof p !== 'string' || !p.trim()) throw new TypeError('dispatch(spec): spec.write 里不能有空路径或非字符串');
+        /* R06（2026-10-26 审查 P2）：工具契约要求**绝对路径**，但原先只校验了"非空字符串"。
+         * 相对路径会被 `normalizeForLock` 用 `resolve()` 按**宿主进程 cwd** 解析 ——
+         * 既不是任务声明的 `spec.cwd`，也不是用户以为的目录 ⇒ 两把本该冲突的锁被拆成两把，
+         * **互斥静默失效**（两个任务实际写同一文件却各持一把锁）。
+         * 按契约直接拒绝（支持相对路径需要相对"有效任务 cwd"解析并贯穿所有入口，复杂度不值得）。 */
+        if (!isAbsolute(p.trim())) {
+          throw new TypeError(
+            `dispatch(spec): spec.write 必须是**绝对路径**（收到相对路径 ${JSON.stringify(p)}）——`
+            + '相对路径会相对宿主进程的 cwd 解析，导致锁错文件、互斥失效',
+          );
+        }
       }
     }
     /* ZB-44：引擎专属约束。
@@ -4614,6 +4625,43 @@ export function createDispatcher(options = {}) {
    *     项目根下（`<项目>/collab/logs/…`），而 runnerCwd 来自 config（可信），不是 jobs.json。
    * 越界的候选**跳过并留痕**（不静默），最终回落到内存 tailLines —— 与既有降级链一致。
    */
+  /** R12（2026-10-26 审查 P2）：**从文件尾按块反向读**，够 `count` 行就停。
+   *  原先 `tail()` 用 `readFileSync` 读**整个文件**再 `.slice(-count)` ——
+   *  32 MiB 日志读 30 行也要整份读入 + 同步解析（报告实测 210ms/次），且面板展开的 JobRow
+   *  会随快照反复请求 ⇒ 持续阻塞宿主事件循环。
+   *  这里只读末尾若干块（每块 64 KiB）并在 Buffer 上数换行；最后**一次性** `toString('utf8')`，
+   *  避免在多字节字符中间按块解码产生替换符。
+   *  @returns {string[]|null} 行数组（旧→新）；失败返回 null（调用方回落到内存 tailLines）
+   */
+  function readTailLines(file, count) {
+    let fd = null;
+    try {
+      fd = openSync(file, 'r');
+      const size = statSync(file).size;
+      if (!size) return [];
+      const CHUNK = 64 * 1024;
+      const chunks = [];
+      let newlines = 0;
+      let pos = size;
+      /* 多读一块作为保险：保证最后一行的行首完整（否则可能从半行开始）。 */
+      while (pos > 0 && newlines <= count) {
+        const len = Math.min(CHUNK, pos);
+        pos -= len;
+        const buf = Buffer.allocUnsafe(len);
+        readSync(fd, buf, 0, len, pos);
+        chunks.unshift(buf);
+        for (let i = 0; i < len; i += 1) if (buf[i] === 0x0a) newlines += 1;
+      }
+      const arr = Buffer.concat(chunks).toString('utf8').split('\n');
+      if (arr.length && arr[arr.length - 1] === '') arr.pop();
+      return arr.slice(-count);
+    } catch {
+      return null;
+    } finally {
+      if (fd != null) { try { closeSync(fd); } catch { /* 已关 */ } }
+    }
+  }
+
   function tail(id, n = 50) {
     const job = jobs.get(id);
     if (!job) return null;
@@ -4631,11 +4679,9 @@ export function createDispatcher(options = {}) {
         continue;
       }
       if (existsSync(f)) {
-        try {
-          const lines = readFileSync(f, 'utf8').split('\n');
-          if (lines.length && lines[lines.length - 1] === '') lines.pop();
-          return lines.slice(-count);
-        } catch { /* 换下一个来源 */ }
+        /* R12：改**尾读**（只读末尾若干块，够 count 行即停）—— 不再整份读入 + 解析。 */
+        const got = readTailLines(f, count);
+        if (got != null) return got;
       }
     }
     return (tails.get(id) ?? []).slice(-count);

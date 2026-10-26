@@ -1,0 +1,15 @@
+
+A. 四种传法的一致性：显式指定模型 ⇒ 顺序链不接管
+  ✓ A 传 model 裸名 ⇒ model 保留为 DeepSeek-Flash（实际 "DeepSeek-Flash"）
+  ✓ B 传 model 完整 id ⇒ model 保留为 DeepSeek-Flash（实际 "DeepSeek-Flash"）
+  ✓ C ★ 传 provider 完整 id（本 bug 现场） ⇒ model 保留为 DeepSeek-Flash（实际 "DeepSeek-Flash"）
+  ✓ D 都不传 ⇒ 顺序链接管取第一项（实际 "Qwen3.8-Flash"）
+
+B. 档位也不许被顺序链覆盖
+  ✓ B1 model 保留（实际 "DeepSeek-Flash"）
+  ✓ B2 ★ 显式档位 max 保留（不被列表第一项的档位覆盖，实际 "max"）
+  ✓ B3 不指定 ⇒ 顺序链取第一项（既有行为保持）
+
+===== ZB-78 顺序链不劫持显式模型：7 PASS / 0 FAIL =====
+
+--- STDERR ---

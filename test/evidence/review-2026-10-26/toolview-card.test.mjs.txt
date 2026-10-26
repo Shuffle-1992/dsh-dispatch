@@ -1,0 +1,109 @@
+A. 槽位注册（keyed `tool.call.toolview`，key = 工具名 dispatch）
+  ✓ A1 TOOLVIEW_SLOT = 'tool.call.toolview'（DSH 0.2.1 新增 keyed 槽位）
+  ✓ A2 TOOLVIEW_KEY = 'dispatch'（= index.js 里 defineTool({name:'dispatch'}) 的工具名）
+  ✓ A3 注册字面量 = inject(TOOLVIEW_SLOT) → register({name, key}, DispatchToolRow)
+  ✓ A4 行组件存在：DispatchToolRow(props)
+  ✓ A5 注册在 apply() 内、ensureStyle() 之后
+  ✓ A6 注册在会话头入口与配置卡**之后**（不动既有注册的字面形状与次序）
+  ✓ A7 注册被 try/catch 包住（注册失败只留痕，绝不影响插件加载/面板/工具）
+  ✓ A8 key 走常量（不是散落的字面量）
+
+B. 三阶段分支与 a11y
+  ✓ B1 阶段判据：`kind` in block ⇒ result；phase='start' ⇒ start；否则 preparing
+  ✓ B2 preparing 提前返回（占位行，不解析入参）
+  ✓ B3 preparing 用 tvPreparing（「正在派发…」占位行）
+  ✓ B4 start 从 argsRaw 里取目标（prompt/task/target 首行）
+  ✓ B5 result 按信封分派：{ok:false} / {ok,jobs} / {ok,job} 三条路都在
+  ✓ B6 折叠行是 role=button + tabIndex=0 + aria-expanded（a11y）
+  ✓ B7 键盘 Enter / Space 可展开
+  ✓ B8 卡片带 data-state（状态既在文本也在属性上，不只靠颜色）
+  ✓ B9 状态胶囊的类名走白名单（未知状态回落 queued；TV_PILL 由 JOB_STATE_META 派生）
+
+C. 绝不抛错（静态纪律）
+  ✓ C1 行组件最外层 try/catch ⇒ 异常退化成一行纯文本
+  ✓ C2 兜底渲染自身也不抛（再包一层）
+  ✓ C3 解析层里没有任何 throw（只 try/catch + 返回退化值）
+  ✓ C4 **不调用** 宿主的 useDisclosure（可选 prop ⇒ 条件式调用会打断 hook 顺序；自带 useState 更稳）
+  ✓ C5 hooks 无条件调用（React.useState 出现 3 次，位于 try 之前）
+  ✓ C6 三个 useState 都写在 try 之前（hook 顺序稳定，不会被异常打断；CRLF/LF 无关）
+
+D. 样式纪律
+  ✓ D1 client.js 无字面色值（只走主题令牌；命中：none）
+  ✓ D2 卡片自带 border-box 作用域（它渲染在会话流里，拿不到 .dsp-menu 的那条规则）
+  ✓ D3 卡片样式全部用 T.* 令牌（引用 31 处）
+  ✓ D4 卡片样式里没有任何字面色值
+  ✓ D5 原文块限高滚动（大 JSON 不整段铺开）
+  ✓ D6 摘要列省略号截断（长目标/长错误不撑破行）
+
+E. 文案三方同步
+  ✓ E1 能从 client.js 取出内嵌 STRINGS
+  ✓ E2 卡片用到 17 个 tv* 文案键
+  ✓ E3 用到的键都在 STRINGS 里（缺：无）
+  ✓ E4 内嵌 STRINGS 与 locale 两语言**逐键逐值**一致（差异：无）
+  ✓ E5 locale 里的 tv* 键数 == 代码用到的键数（17 vs 17；防"加了没用/用了没加"）
+
+F. 执行（沙箱里真跑解析层与行组件）
+  ✓ F1 能从源码里切出「解析层 + 行组件」这一段（锚点仍在）
+  ✓ F2 tvJson：JSON 对象/数组才认（null 字面量/空/坏 JSON 一律 null 且不抛）
+  ✓ F4 tvClip：截断 + total 记录（原文长度不丢）
+  ✓ F5 tvFirstLine：单行化且容忍 null
+  ✓ F6 tvCountsText：只列 >0 的状态并折叠
+  ✓ F7 tvElapsed：紧凑耗时格式（<10s 留一位小数，≥10s 取整；分/时带前导零）
+  ✓ F8 tvPillClass：白名单外的状态回落到安全类名
+  ✓ F9 preparing：不解析入参，状态=preparing
+  ✓ F10 preparing 渲染出「正在派发…」占位文案（键 tvPreparing）
+  ✓ F11 preparing 不显示状态胶囊（此时还没有状态可言）
+  ✓ F12 start：动作/tag/目标首行都解析出来（多行只取首行）
+  ✓ F13 start：折叠行 role=button 且 aria-expanded=false
+  ✓ F14 start：折叠行显示 动作 + tag + 摘要
+  ✓ F15 start：状态胶囊 = running（调用在飞）
+  ✓ F16 result/job：状态/耗时/模型来自 job
+  ✓ F16b ★ brief 形状（无 spec）也能判出引擎（实际 {"k":"tvEngineCh","v":"opencode · opencode/x"}）
+  ✓ F17 result/job：摘要是派发原文首行（不是整段 JSON）
+  ✓ F18 result/job：展开区字段齐（tvJobId,tvState,tvAction,tvEngineCh,cwd,timeout,repoLock,writeFiles）
+  ✓ F19 result/job：给出"用 action=tail 读输出"的下一步提示（带 id）
+  ✓ F20 result/job：paused 原因带进说明行
+  ✓ F21 result/job：胶囊用 paused 的状态色类名
+  ✓ F22 点击后 aria-expanded=true（展开态）
+  ✓ F23 展开区显示 job id、字段名与 tail 提示
+  ✓ F24 展开区有「原始入参 / 原始结果」两个**默认折叠**的原文开关（实际 2）
+  ✓ F25 原文默认不铺开（展开前 DOM 里没有 <pre>）
+  ✓ F26 点开原文后 <pre> 出现且内容是原始入参 JSON
+  ✓ F27 键盘 Enter 触发展开（并 preventDefault）
+  ✓ F28 非 Enter/Space 与 null 事件不抛错
+  ✓ F29 result/list：一行概览 = total + counts（实际 "56 tvJobs · done×55 · running×1"）
+  ✓ F30 result/list：note（截断说明）原样带出
+  ✓ F31 result/list：jobs 收进模型，且**不假设有 spec**（brief 形状缺 spec 不得产生 undefined 字段）
+  ✓ F32 result/list：展开区逐条一行（id/state/exit/stalled 等 brief 字段）
+  ✓ F33 result/list：展开区显示 note
+  ✓ F34 其它信封 status：一行摘要含「switchOn」（实际 "switchOn"）
+  ✓ F34 其它信封 channel：一行摘要含「plan/GLM-5.3」（实际 "plan/GLM-5.3"）
+  ✓ F34 其它信封 channels：一行摘要含「2 · provider」（实际 "2 · provider · 1 !"）
+  ✓ F34 其它信封 tail：一行摘要含「3 tvLines」（实际 "3 tvLines"）
+  ✓ F34 其它信封 quota：一行摘要含「secQuota」（实际 "secQuota"）
+  ✓ F34 其它信封 fallback：一行摘要含「fallbackTitle」（实际 "fallbackTitle：fallbackStateOn"）
+  ✓ F34 其它信封 dismiss：一行摘要含「j-7 → done」（实际 "j-7 → done"）
+  ✓ F35 失败信封：状态 failed、错误全文进展开区、摘要只取首行
+  ✓ F36 失败：展开区有错误行（danger 令牌着色）
+  ✓ F37 未知形状：退化成"已完成 + 原文首行"，原文仍可展开（不丢信息、不猜语义）
+  ✓ F38 非 JSON 正文：当文本处理
+  ✓ F39 interrupted：状态 = interrupted（不是 done/failed）
+  ✓ F40 ★ 绝不抛错：18 组垃圾输入下 tvModel / tvFallbackRow / 渲染全部不抛
+  ✓ F41 垃圾输入仍渲染出一张卡（不是 null、不是抛错）
+  ✓ F42 无 block 时退化成 preparing 占位（不谎报已完成）
+  ✓ F43 兜底行含工具名与 callId
+  ✓ F44 兜底行容忍 undefined props
+
+G. 端到端 apply()（真加载 client.js + 桩 ctx）
+  ✓ G1 client.js 经 __ModuleLoader__ 注册（id=dsh-dispatch）
+  ✓ G2 apply() 不抛错
+  ✓ G3 `tool.call.toolview` 槽位真的被 inject + register（不是只写在注释里）
+  ✓ G4 注册 key = dispatch（实际 dispatch）
+  ✓ G5 注册的是组件函数
+  ✓ G6 首个注册仍是会话头入口（未打乱既有次序；实际 conversation.session.header.actions）
+  ✓ G7 配置卡注册仍在（未被挤掉）
+  ✓ G8 真模块里的组件可渲染出卡片（data-tool=dispatch）
+
+===== D1 工具卡片契约：92 PASS / 0 FAIL =====
+
+--- STDERR ---

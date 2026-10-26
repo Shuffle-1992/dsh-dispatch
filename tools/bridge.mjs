@@ -32,7 +32,8 @@ function readDispatchSwitch() {
   try {
     if (!SWITCH_FILE) return { enabled: true, source: 'default(未配置 DSP_SWITCH_FILE=开启)' };
     if (!existsSync(SWITCH_FILE)) return { enabled: true, source: 'default(无文件=开启)' };
-    const raw = JSON.parse(readFileSync(SWITCH_FILE, 'utf8'));
+    /* R03：去 BOM（带 BOM 的正常 JSON 会让 JSON.parse 抛错 ⇒ 被误判"损坏" ⇒ 关闭失效）。 */
+    const raw = JSON.parse(readFileSync(SWITCH_FILE, 'utf8').replace(/^\uFEFF/, ''));
     return { enabled: raw.enabled !== false, updatedAt: raw.updatedAt, updatedBy: raw.updatedBy, note: raw.note };
   } catch (e) {
     return { enabled: true, source: `default(读取失败: ${e.message})` };

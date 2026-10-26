@@ -1,0 +1,138 @@
+A. 槽位与注册契约
+  ✓ A1 HEADER_SLOT 指向会话标题行槽位
+  ✓ ★ A2 order=**-25**（插在子智能体目录 -30 与智能体团队 -20 之间 = 用户要求「移到子智能体后面」）
+  ✓ ★ A3 不得以字面量直接注册 shell.overlay（备用槽位只能经 FALLBACK_SLOT 走降级链）
+  ✓ ★ A4 旧浮层 cell id（dispatch.console）已移除
+
+B. 入口样式**逐项对齐官方源码**（ui-jobs/JobListAction —— 同槽位的「按钮 + 弹层」入口）
+  ✓ B1 有 .dsp-chip 规则
+  ✓ B2 display:inline-flex
+  ✓ ★ B3 gap 4px（子智能体 .oXE0lW_trigger 同值 —— 用户点名参考它；官方 jobs 是 3px、agent-team 是 5px，官方自身不统一）
+  ✓ ★ B4 min-height 28px（官方同值；不是 height:22px —— 那是被动装饰 agent-preset）
+  ✓ ★ B5 padding 3px 2px（= 左邻居子智能体的官方值：入口移到子智能体后面后，逐项与左邻居一致最不易看出差别）
+  ✓ B6 border 0
+  ✓ ★ B7 圆角 --dsw-radius-sm（官方同值）
+  ✓ B8 background transparent（官方同值；也是用户"不要背景色"的要求）
+  ✓ ★ B9 字号 12px / 行高 18px（官方同值）
+  ✓ ★ B10 不声明 font-family（官方 .trigger 也不声明 ⇒ <button> 用 UA 按钮字体；写 inherit 会变成应用字体，这是前几轮的坑）
+  ✓ ★ B11 不声明 font-weight（官方同值；UA 400）
+  ✓ B12 常态色 label-tertiary（T.text3）
+  ✓ ★ B13 hover/focus-visible → **label-primary**（T.text，子智能体/agent-team 的 .trigger:hover 同值）
+  ✓ B14 箭头过渡 120ms（官方 .trigger svg{transition:transform 120ms ease}）
+  ✓ ★ B15 展开时旋转 **svg 本身**（官方 .triggerOpen 用法一致）
+  ✓ ★ B16 箭头 14×14 / viewBox 16（子智能体用默认 14 —— 用户点名参考它；jobs 用 12）
+  ✓ ★ B17 箭头路径与 strokeWidth 1 逐字取自官方 IconChevronDownOutlineRegular
+  ✓ B18 透明底
+  ✓ ★ B18b 入口**不设** appearance:none（否则 <button> 丢掉 UA 按钮字体：略大且基线偏下 —— 现场症状）
+  ✓ B18c 用官方同款方式消除原生外观（border:0 + radius，不靠 appearance）
+  ✓ ★ B19 无字面色值 ⇒ 明暗两套主题自适应（颜色只走 T.* 令牌）
+  ✓ ★ B20 有"所有交互态统一无底色"的成组重置（含 [aria-expanded="true"]）
+  ✓ ★ B21 重置覆盖 hover / focus / focus-visible / active / aria-expanded 真与假
+  ✓ ★ B22 背景 !important 且清 background-image（第三方类名挡宿主状态高亮；官方用自己的类名无此问题）
+  ✓ B23 有 .dsp-menu 规则
+  ✓ B24 挂入口下方 top:calc(100% + 5px)（官方同值）
+  ✓ ★ B25 padding 3px / gap 1px（官方 .menu 同值）
+  ✓ B26 背景/圆角/阴影用官方同款令牌
+  ✓ ★ B27 backdrop-filter 用 --dsw-menu-backdrop-filter（官方同值）
+  ✓ ★ B28 max-height min(480px,100vh-140px)（官方同值）
+  ✓ ★ ZB-36 面板自身高度上限 ×2（960px；视口项不变，短屏不顶出屏幕）
+  ✓ ★ ZB-36 覆盖**只挂在面板容器上**（不污染 .dsp-menu 类 —— job-list 等弹层共用它）
+  ✓ ★ B29 与入口**左对齐、向右展开**（官方 .menu 同款 left:0；用户要求「改成往右侧，参考智能体的」）
+  ✓ ★ B29b 靠近视口右缘时用 menuShift（marginLeft 负值）兜回视口内 —— 与官方 JobListAction 的 style={{left: menuShift}} 同一意图
+  ✓ B30 内容滚动
+  ✓ ★ B44 已移除临时的 headerShort 键与引用（不留死键：短标签试验回退后不再使用）
+  ✓ ★ B31 颜色内联且**仅 hover** 高亮（resting=label-tertiary / hover=**label-primary**，与两个可见邻居 .trigger:hover 同值）
+  ✓ ★ B32 悬停态用 React 状态表达（不依赖宿主伪类命中）
+  ✓ ★ B32b 容器 onMouseEnter 只调度展开、**不设 hover**（面板是子节点，指针移到面板上不应让入口变亮）
+  ✓ ★ B32c 已移除"容器进入即 setHover(true)"的写法
+  ✓ ★ B33 聚焦态同上（键盘可达时的视觉反馈）
+  ✓ B34 hover 状态声明
+  ✓ B35 内联色只用主题令牌（无字面色值 ⇒ 明暗自适应）
+
+C. 弹窗：系统菜单样式 + 开合交互
+  ✓ C1 有 .dsp-menu 规则
+  ✓ C2 背景用系统菜单令牌 --dsw-specific-menu
+  ✓ C3 阴影用 --dsw-elevation-prominent
+  ✓ C4 圆角用 --dsw-radius-lg
+  ✓ C5 绝对定位挂在入口下方（top: calc(100% + 5px)，与 job-list 同款）
+  ✓ C6 限高 + 内部滚动（不高出视口）
+  ✓ C7 ★ box-sizing 作用域改到 .dsp-menu（ZB-17 的输入框撑破回归不能复发）
+  ✓ C8 点外部关闭
+  ✓ ★ C8b 悬浮展开：150ms 延时（官方 CatalogDropdown scheduleHoverOpen 同值，穿过缝隙不闪）
+  ✓ ★ C8c 离开即关：120ms 延时（官方 scheduleHoverClose 同值）
+  ✓ ★ C8d 窗口/应用失焦时关闭
+  ✓ ★ C8e 焦点仍在子树内（移入弹窗）⇒ 不关（用 currentTarget/ref 做包含判断）
+  ✓ ★ C8g relatedTarget 为空（焦点落到 body）**不关**；明确移到子树外才 scheduleClose（修「点进程行面板就关」）
+  ✓ ★ C8f 点击只负责"打开"（供触屏/键盘），不再切换 —— 避免指针停在入口上时一点就关
+  ✓ C9 Esc 关闭
+  ✓ C10 无障碍属性：aria-expanded / aria-haspopup
+
+D. 解耦：入口不建 wire；浮窗时代的状态与交互不再残留
+  ✓ D1 定位 HeaderEntry 函数体
+  ✓ ★ D2 入口读共享 wire 的快照（用于任务/加载图标）
+  ✓ ★ D2b 入口体内**不得**自己 createWire()（否则每会话一条轮询）
+  ✓ ★ D3 ZB-24 的模块级共享 store 已移除（入口只是开合开关）
+  ✓ ★ D4 最小化状态/药丸相关代码已清除
+  ✓ ★ D5 药丸/浮窗类名与标记已清除
+  ✓ ★ D6 共享 wire 单例与引用计数（createSharedWireRegistry 工厂）
+  ✓ ★ D7 useWire 取得共享实例
+  ✓ ★ D8 释放走引用计数且**配对**（只 dispose 自己那条；最后一个才 dispose）
+  ✓ ★ D8b 释放**指名 wire**（无参调用绝迹）
+  ✓ ★ D9 远端就绪后作废重建共享 wire
+  ✓ ★ D10 入口有活动槽位 .dsp-chip-activity
+  ✓ ★ D11 槽位 14×14（官方 .oXE0lW_activitySlot 同值）
+  ✓ ★ D12 进行中 → running（脉动）；仅排队 → queued
+  ✓ ★ D13 @keyframes dsp-pulse 已补回（曾被当死代码误删，导致 running 点不脉动）
+
+G. ZB-27f：入口是 <button>（与邻居同元素 ⇒ 同 UA 字体）+ 双层防高亮 + 容器同权重置
+  ✓ ★ G1 入口是 <button>（与邻居同元素类型 ⇒ 自然拿到同一套 UA/平台按钮字体）
+  ✓ G2 type='button'（不触发提交行为）
+  ✓ G3 无障碍属性保留（aria-expanded / aria-haspopup）
+  ✓ ★ G4 内联样式兜底（内联优先于 :hover/:focus 等非 important 规则）
+  ✓ ★ G5 外层 .dsp-entry 也重置背景/边框/阴影
+  ✓ ★ G6 .dsp-entry 的 :focus-within / :active 也重置（祖先型高亮）
+  ✓ ★ G8 交互态清掉 outline（若宿主用焦点环填充则一并消除）
+
+F. 样式注入时机（ZB-27b 的根因守卫）
+  ✓ ★ F1 apply() 里调用 ensureStyle()（激活即注入样式）
+  ✓ ★ F2 注入**早于**槽位注册（入口一出现就带样式）
+  ✓ F3 注入被 try 包住（样式失败不影响入口注册）
+
+E. 真渲染（React 桩）：开合与弹窗内容
+  ✓ E1 第一个注册的仍是会话头槽位 cell（实际 conversation.session.header.actions）
+  ✓ E1 会话头 cell 已注册且是组件函数
+  ✓ E1b 插件详情页配置卡已注册（key=dsh-dispatch，keyed 槽位按包名派发）
+  ✓ E2 渲染出入口按钮（.dsp-chip）
+  ✓ ★ E3 入口文字是面板标题「派发台」（ZB-41 命名决策；实际=派发台）
+  ✓ ★ E3c 入口文字不含「ZCode」（去品牌化；实际=派发台）
+  ✓ ★ E3b 入口标签取自 title（与面板标题同源）
+  ✓ E4 初始未展开
+  ✓ E5 未展开时没有弹窗（不预先建 wire）
+  ✓ E6 ★ 点击后挂出弹窗（.dsp-menu）
+  ✓ ★ ZB-36 弹窗行内 maxHeight = 960px 上限（实际 "min(960px, calc(100vh - 140px))"）
+  ✓ E7 展开状态与 aria-expanded 一致
+  ✓ E8 弹窗里是原面板内容（含分区标题，实际片段=派发台派发：未知连接中通道进程暂无进程记录仓库文件锁用量本地用量（可核对）：台账）
+  ✓ E9 外层容器带 onMouseEnter（悬浮展开挂点）
+  ✓ ★ E10 再次点击**不再收起**（点击只负责打开，避免指针停在入口上一点就关）
+[dispatch] $mount 成功：remote.dispatch 已本地挂载
+  ✓ ★ E11 指针离开 ⇒ 120ms 后收起（官方同款延时可避免穿过缝隙时闪）
+  ✓ ★ E12 指针进入 ⇒ 150ms 后展开（无需点击）
+  ✓ E13 焦点仍在子树内（移入弹窗/入口）⇒ 不关
+  ✓ ★ E14 relatedTarget 为空（焦点落到 body，点弹窗内不可聚焦元素）⇒ **不关**（修「点进程行面板就关」）
+  ✓ ★ E15 焦点明确移到子树外的元素 ⇒ 120ms 后关闭（保持"失焦关闭"语义）
+  ✓ ZB60a 备用槽位常量 = shell.overlay（主入口不可用时的退路）
+  ✓ ZB60b 备用槽位**确有**注册调用（否则"降级链"只是注释）
+  ✓ ZB60c 备用注册的 name 用常量（不另写字面量，避免两处漂移）
+  ✓ ZB60d 覆盖"槽位未声明"（spec() 查询或宽限计时至少其一）—— 只靠 try/catch 抓不到静默等待
+  ✓ ★ ZB60e 降级与撤回**都留可读 warn**（降级要可观测；主槽位迟到就绪要撤回，绝不双 UI）
+  ✓ ZB60f 主槽位仍是首选（字面形状保留：本文件全篇依赖它）
+
+===== ZB-27：114 PASS / 0 FAIL =====
+
+--- STDERR ---
+[dispatch] 远端面未就绪 → 降级 wire。诊断= {
+  mountDiag: { attempted: true, ok: null, error: null },
+  childFiberService: false,
+  hasModCtx: true,
+  ctxRemoteDispatch: false
+}

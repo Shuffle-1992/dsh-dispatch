@@ -1,0 +1,102 @@
+(node:268256) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+{
+  "package_root": {
+    "files": 18,
+    "collabKitFiles": 0,
+    "code": 1,
+    "stderr": "node:internal/modules/esm/resolve:275\r\n    throw new ERR_MODULE_NOT_FOUND(\r\n          ^\r\n\r\nError [ERR_MODULE_NOT_FOUND]: Cannot find module 'F:\\My Code\\dsh-dispatch\\test\\.review-runtime\\package-root\\package\\collab-kit\\run-line-protocol.mjs' imported from F:\\My Code\\dsh-dispatch\\test\\.review-runtime\\package-root\\package\\dispatch\\core\\dispatch-core.mjs\r\n    at finalizeResolution (node:internal/modules/esm/resolve:275:11)\r\n    at moduleResolve (node:internal/modules/esm/resolve:865:10)\r\n    at defaultResolve (node:internal/modules/esm/resolve:991:11)\r\n    at #cachedDefaultResolve (node:internal/modules/esm/loader:719:20)\r\n    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:736:38)\r\n    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:765:52)\r\n    at #resolve (node:internal/modules/esm/loader:701:17)\r\n    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:621:35)\r\n    at ModuleJob.syncLink (node:internal/modules/esm/module_job:160:33)\r\n    at ModuleJob.link (node:internal/modules/esm/module_job:245:17) {\r\n  code: 'ERR_MODULE_NOT_FOUND',\r\n  url: 'file:///F:/My%20Code/dsh-dispatch/test/.review-runtime/package-root/package/collab-kit/run-line-protocol.mjs'\r\n}\r\n\r\nNode.js v24.14.1\r\n"
+  },
+  "package_dispatch": {
+    "files": 16,
+    "collabKitFiles": 0,
+    "code": 1,
+    "stderr": "node:internal/modules/esm/resolve:275\r\n    throw new ERR_MODULE_NOT_FOUND(\r\n          ^\r\n\r\nError [ERR_MODULE_NOT_FOUND]: Cannot find module 'F:\\My Code\\dsh-dispatch\\test\\.review-runtime\\package-dispatch\\collab-kit\\run-line-protocol.mjs' imported from F:\\My Code\\dsh-dispatch\\test\\.review-runtime\\package-dispatch\\package\\core\\dispatch-core.mjs\r\n    at finalizeResolution (node:internal/modules/esm/resolve:275:11)\r\n    at moduleResolve (node:internal/modules/esm/resolve:865:10)\r\n    at defaultResolve (node:internal/modules/esm/resolve:991:11)\r\n    at #cachedDefaultResolve (node:internal/modules/esm/loader:719:20)\r\n    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:736:38)\r\n    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:765:52)\r\n    at #resolve (node:internal/modules/esm/loader:701:17)\r\n    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:621:35)\r\n    at ModuleJob.syncLink (node:internal/modules/esm/module_job:160:33)\r\n    at ModuleJob.link (node:internal/modules/esm/module_job:245:17) {\r\n  code: 'ERR_MODULE_NOT_FOUND',\r\n  url: 'file:///F:/My%20Code/dsh-dispatch/test/.review-runtime/package-dispatch/collab-kit/run-line-protocol.mjs'\r\n}\r\n\r\nNode.js v24.14.1\r\n"
+  },
+  "shell_qoder": {
+    "shell": true,
+    "argv": [
+      "-p",
+      "-o",
+      "stream-json",
+      "--permission-mode",
+      "accept_edits",
+      "hello & echo AUDIT_SHELL_EXECUTED & rem"
+    ],
+    "code": 0,
+    "stdout": "AUDIT_FAKE_CLI\r\nAUDIT_SHELL_EXECUTED \r\n",
+    "stderr": "",
+    "injected": true
+  },
+  "shell_codebuddy": {
+    "shell": true,
+    "argv": [
+      "-p",
+      "--output-format",
+      "stream-json",
+      "--permission-mode",
+      "acceptEdits",
+      "hello & echo AUDIT_SHELL_EXECUTED & rem"
+    ],
+    "code": 0,
+    "stdout": "AUDIT_FAKE_CLI\r\nAUDIT_SHELL_EXECUTED \r\n",
+    "stderr": "",
+    "injected": true
+  },
+  "liveLockExpiry": {
+    "ownerPid": 268256,
+    "ownerIsCurrentLiveProcess": true,
+    "stale": true,
+    "acquired": true,
+    "after": {
+      "jobId": "second-owner",
+      "pid": 268256,
+      "at": "2026-10-26T13:52:53.553Z"
+    }
+  },
+  "crossProcessKill": {
+    "code": 0,
+    "stdout": "{\"before\":\"running\",\"ok\":true,\"after\":\"running\"}\n",
+    "stderr": "",
+    "ownerAfter": "running"
+  },
+  "relativeWriteLock": {
+    "a": {
+      "state": "running",
+      "lockPaths": {
+        "file:f:/my code/dsh-dispatch/same.txt": "F:\\My Code\\dsh-dispatch\\test\\.review-runtime\\relative-lock\\locks\\files\\952e22b996cbdddf.lock"
+      }
+    },
+    "b": {
+      "state": "running",
+      "lockPaths": {
+        "file:f:/my code/dsh-dispatch/test/.review-runtime/target-project/same.txt": "F:\\My Code\\dsh-dispatch\\test\\.review-runtime\\relative-lock\\locks\\files\\754602ccba094453.lock"
+      }
+    },
+    "expectedFile": "F:\\My Code\\dsh-dispatch\\test\\.review-runtime\\target-project\\same.txt",
+    "fileLocks": [
+      {
+        "file": "f:/my code/dsh-dispatch/same.txt",
+        "paths": [
+          "f:/my code/dsh-dispatch/same.txt"
+        ],
+        "jobId": "j-mvpbgrqu-0-d93e",
+        "tag": null,
+        "at": "2026-10-26T13:52:55.168Z",
+        "pid": 268256,
+        "heldSec": 0
+      },
+      {
+        "file": "f:/my code/dsh-dispatch/test/.review-runtime/target-project/same.txt",
+        "paths": [
+          "f:/my code/dsh-dispatch/test/.review-runtime/target-project/same.txt"
+        ],
+        "jobId": "j-mvpbgrro-1-e175",
+        "tag": null,
+        "at": "2026-10-26T13:52:55.193Z",
+        "pid": 268256,
+        "heldSec": 0
+      }
+    ]
+  }
+}

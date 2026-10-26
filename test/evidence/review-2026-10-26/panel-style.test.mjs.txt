@@ -1,0 +1,44 @@
+A. 样式已移出组件树（根治前提）
+  ✓ A1 组件树里不再渲染 h('style', null, CSS)（注释引用不算）
+  ✓ A2 生效代码里无 h('style' 出现
+  ✓ A3 改为 document.createElement('style')
+  ✓ A4 注入到 document.head（脱离 React 协调）
+
+B. 幂等与生命周期
+  ✓ B1 有 ensureStyle()
+  ✓ B2 已注入则跳过插入（幂等，不重复插入）
+  ✓ B3 先按 id 查找已存在的样式（跨组件实例复用）
+  ✓ B4 有 detachStyle()（保持"卸载即清理"语义）
+  ✓ B5 挂载时 ensureStyle() 取得引用、卸载时释放自己那一份
+  ✓ ★ B6 样式表引用计数 STYLE_REFS
+  ✓ ★ B7 ensureStyle() 计数 +1 并返回释放函数；仅计数归零才 detachStyle()
+  ✓ ★ B8 **禁止**任何组件卸载时直接 detachStyle()（会让常驻入口掉样式）
+
+C. 样式作用域与历史缺陷的防复发
+  ✓ ★ C1 border-box 作用域 = .dsp-menu 子树（输入框撑破右边界不会复发）
+  ✓ C2 旧的 .dsp-root 作用域已不存在
+  ✓ C3 入场动画与 keyframes 已随浮窗移除（重影那类问题的载体消失）
+  ✓ C4 药丸 / 缩放手柄样式已清除
+  ✓ C5 行内小图标按钮样式**保留**（JobRow 仍在用）
+  ✓ ★ C6 派发开关徽标：字号/行高与 .dsp-conn 一致（同高），横向 1px 5px 更小巧
+  ✓ ★ C7 面板容器有基础字号 12px/17px（与官方弹层主行同值；否则未显式设字号的元素会继承 ~14px）
+  ✓ ★ C8 面板内不再出现 10.5px 中间值（统一到官方 12/11/10px 三档）
+
+D. DOM 桩实测：注入一次且重渲染不再触碰 head
+  ✓ D1 弹窗打开后 head 里恰好 1 个 <style>
+  ✓ D2 样式带稳定 id（幂等查找依据）
+  ✓ D3 注入的 CSS 含弹窗定位
+  ✓ D4 注入的 CSS 含 .dsp-menu 的 border-box 作用域
+  ✓ D5 组件树里没有 <style> 节点
+  ✓ D6 ★ 连续 10 次重渲染后 head 插入/移除次数不变（1→1 / 0→0）
+  ✓ D7 重渲染后样式仍在位
+
+===== 样式回归：27 PASS / 0 FAIL =====
+
+--- STDERR ---
+[dispatch] 远端面未就绪 → 降级 wire。诊断= {
+  mountDiag: { attempted: true, ok: null, error: null },
+  childFiberService: false,
+  hasModCtx: true,
+  ctxRemoteDispatch: false
+}

@@ -1,0 +1,48 @@
+✔ 并发 3 个 dispatch（maxConcurrent=1）→ 执行区间不重叠且 FIFO (1325.5875ms)
+✔ ZB-16 锁模型：不同文件集可并行、同文件集排队 FIFO、锁文件内容与释放 (1681.1751ms)
+✖ kill()：running → killed 且退出码非 0；queued → 直接 killed 不再启动 (20158.3477ms)
+✖ dispatcher 看门狗：超过 timeoutMin+grace 强杀并标 timedOut (10158.7547ms)
+✔ 台账回读合并：补缺字段、坏行不崩、sessionId 不匹配时不误绑 (923.673ms)
+✔ quota.aggregate：窗口边界（5h 半开/周一起/当日零点）、坏行计数、文件缺失不崩 (104.4855ms)
+✔ restore()：上次残留 running/queued → interrupted（记录原因），队列继续可用 (419.313ms)
+✔ JOBS_FILE_CAP 淘汰终态时回收其捕获日志；越界路径被拒绝（ZB-05） (453.3174ms)
+✔ snapshot() 纯 JSON 可序列化（无循环引用），终态后依旧 (472.6981ms)
+✔ runner 路径无效 → state=failed、exitCode 记录、有 warning 不崩 (14.3887ms)
+✔ parseRunnerLine 单元：真实 runner 各种行格式（含 - 值与三行分开的 out/err/result） (3.7041ms)
+✔ 清理临时目录 (19.9403ms)
+✔ ZB-44 parseRunnerLine(line, engine)：按引擎取前缀；省略 ⇒ 两个已知前缀都试；zcode 逐字不变 (5.2867ms)
+✔ ZB-44 parseProviderTable(text, engine)：opencode 的 variants 与 zcode 的 reasoning-levels 走同一段实现 (1.9568ms)
+ℹ Error: Test "kill()：running → killed 且退出码非 0；queued → 直接 killed 不再启动" at dispatch\test\core.test.mjs:144:1 generated asynchronous activity after the test ended. This activity created the error "Error: ENOENT: no such file or directory, open 'C:\Users\ADMINI~1\AppData\Local\Temp\dsp-test-C2sDnC\state\jobs.json.276568.1793019088165.tmp'" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ tests 14
+ℹ suites 0
+ℹ pass 12
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 63159.4911
+
+✖ failing tests:
+
+test at dispatch\test\core.test.mjs:144:1
+✖ kill()：running → killed 且退出码非 0；queued → 直接 killed 不再启动 (20158.3477ms)
+  Error: waitForTerminal(j-mvp98gfv-0-f4e1) 超时 20000ms，最后状态: {"id":"j-mvp98gfv-0-f4e1","tag":"kill-A","spec":{"kind":"prompt","prompt":"long","tag":"kill-A","provider":"plan","reasoningLevel":"agent","engine":"zcode"},"engine":"zcode","lock":"repo","state":"running","queuedAt":"2026-10-26T12:50:28.027Z","startedAt":"2026-10-26T12:50:28.029Z","finishedAt":null,"elapsedSec":20.151,"exitCode":null,"signal":null,"sessionId":null,"provider":"plan:bigmodel-coding-plan","endpoint":null,"model":"GLM-5.3-Flash","reasoningLevel":"agent","usage":{"requests":null,"inputTokens":null,"outputTokens":null,"cacheReadTokens":null},"contextUsed":null,"contextWindow":null,"responseChars":null,"outLog":null,"errLog":null,"resultFile":null,"captureOut":"C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\dsp-test-C2sDnC\\logs\\j-mvp98gfv-0-f4e1.out.log","captureErr":"C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\dsp-test-C2sDnC\\logs\\j-mvp98gfv-0-f4e1.err.log","tailLines":["[zcode-run] tag=fake mode=edit cwd=F:\\My Code\\dsh-dispatch","[zcode-run] provider=plan:bigmodel-coding-plan model=GLM-5.3-Flash (Fake Provider（ZCode 套餐）)"],"parseWarnings":["kill() called"],"memoryBanApplied":true,"memoryBanRunner":null,"autoApproved":false,"timedOut":false,"timedOutBy":null,"pausedAt":null,"watchdogSec":null,"summarySeen":false,"ledgerMatched":false,"pauseReason":null,"pauseDetail":null,"parentJobId":null,"attempts":[],"hopCount":0,"handedOffTo":null,"resumedBy":null,"ownerPid":276568,"updatedAt":1793019028164,"lockPaths":{"repo":"C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\dsp-test-C2sDnC\\locks\\repo.lock"},"lockWait":null}
+      at Timeout._onTimeout (file:///F:/My%20Code/dsh-dispatch/dispatch/test/core.test.mjs:47:11)
+      at listOnTimeout (node:internal/timers:605:17)
+      at process.processTimers (node:internal/timers:541:7)
+
+test at dispatch\test\core.test.mjs:170:1
+✖ dispatcher 看门狗：超过 timeoutMin+grace 强杀并标 timedOut (10158.7547ms)
+  AssertionError [ERR_ASSERTION]: 应在 ~1.2s 被杀，实际 10.145s
+      at TestContext.<anonymous> (file:///F:/My%20Code/dsh-dispatch/dispatch/test/core.test.mjs:178:12)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+--- STDERR ---

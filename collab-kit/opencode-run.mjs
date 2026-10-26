@@ -1142,10 +1142,23 @@ async function main(argv) {
     process.stdout.write(HELP);
     return 0;
   }
-  /* ZB-118（GLM-5.3 审查 MED，已核实）：**派发总开关门禁**（与 zcode-run 同契约）。
-   * 原先只有 zcode-run 实现了这道闸，opencode/qoder/codebuddy 三个执行器**直调即可绕过**
-   * 派发总开关（开关关闭时仍会起进程、耗额度）。退出码 3 = 因总开关关闭而拒绝
-   * （与参数错误 1、超时 124 区分）。只读探测（--list-models/--version）在此之前已 return，不过闸。 */
+  const cli = findOpencodeCli();
+  if (!cli) {
+    process.stderr.write(
+      `${PREFIX} 找不到 opencode 可执行文件（已查 OPENCODE_CLI / npm 全局目录 / PATH）。\n` +
+        `${PREFIX} 安装: npm install -g opencode-ai    或用 OPENCODE_CLI 指定路径。\n`,
+    );
+    return 1;
+  }
+  /* 只读探测（--list-models / --version）**不过闸** —— 与 ZCode 契约一致：
+   * 冻结派发时面板仍要能列通道/看版本，否则关闭开关会让引擎被显示成"探测失败"。
+   * （R08：ZB-118 加门禁时误放在这两个分支之前，会让三个引擎的只读探测一并失效。） */
+  if (opt.listModels) return listModels(cli, opt.withVariants === true);
+  if (opt.version) return printVersion(cli);
+
+  /* ZB-118（GLM-5.3 审查 MED）：**派发总开关门禁**（与 zcode-run 同契约）——
+   * 只对**真实派发**生效（只读探测已在上方 return）。退出码 3 = 因总开关关闭而拒绝
+   * （与参数错误 1、超时 124 区分）。 */
   {
     const sw = readDispatchSwitch();
     if (!sw.enabled) {
@@ -1156,16 +1169,6 @@ async function main(argv) {
       return 3;
     }
   }
-  const cli = findOpencodeCli();
-  if (!cli) {
-    process.stderr.write(
-      `${PREFIX} 找不到 opencode 可执行文件（已查 OPENCODE_CLI / npm 全局目录 / PATH）。\n` +
-        `${PREFIX} 安装: npm install -g opencode-ai    或用 OPENCODE_CLI 指定路径。\n`,
-    );
-    return 1;
-  }
-  if (opt.listModels) return listModels(cli, opt.withVariants === true);
-  if (opt.version) return printVersion(cli);
   return runOnce(opt, cli);
 }
 

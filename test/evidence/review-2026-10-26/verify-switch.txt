@@ -1,0 +1,10 @@
+PASS  无开关文件 = 开启（不误锁）  ok=true calls=1
+PASS  关闭 → dispatch 被拒  error=派发总开关已关闭（collab/dispatch.switch.json）
+PASS  关闭 → 未调用 dispatcher.dispatch（不建 job/不 spawn）  calls 1→1
+PASS  switch 动作写入并返回状态  {"enabled":true,"updatedAt":"2026-10-26T13:51:38.537Z","updatedBy":"dsh-probe","note":"复现用","source":"file"}
+PASS  文件字段与 CLI 契约一致  enabled,updatedAt,updatedBy,note,contract
+PASS  重新开启 → dispatch 恢复  ok=true calls=2
+PASS  文件损坏 → 视为开启且不抛  ok=true
+PASS  snapshot() 暴露 switch 状态  {"enabled":false,"updatedAt":null,"updatedBy":null,"note":null,"source":"file"}
+
+[Z12 独立复现] 8 项，失败 0 项；临时目录 C:\Users\ADMINI~1\AppData\Local\Temp\z12-verify-Up6Cm4

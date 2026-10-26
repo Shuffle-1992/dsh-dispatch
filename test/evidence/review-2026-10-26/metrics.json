@@ -1,0 +1,44 @@
+{
+  "syntax": {
+    "checked": 124,
+    "failures": []
+  },
+  "tail": {
+    "fixtureBytes": 33554432,
+    "trials": [
+      {
+        "ms": 210.57,
+        "readBytes": 33554432,
+        "returnedLines": 30,
+        "returnedBytes": 30719
+      },
+      {
+        "ms": 203.55,
+        "readBytes": 33554432,
+        "returnedLines": 30,
+        "returnedBytes": 30719
+      },
+      {
+        "ms": 215.94,
+        "readBytes": 33554432,
+        "returnedLines": 30,
+        "returnedBytes": 30719
+      }
+    ]
+  },
+  "staleRenameRace": {
+    "method": "deterministic fs interleaving: another owner replaces stale lock immediately before rename",
+    "injected": true,
+    "acquired": true,
+    "finalOwner": "candidate-C"
+  },
+  "profileSecretScan": {
+    "candidateCount": 0,
+    "candidates": [],
+    "note": "Heuristic, not a full secret scanner; values never emitted"
+  },
+  "inventory": {
+    "textAssertionHeuristicFiles": 52,
+    "absoluteSourceReaderFiles": 13
+  }
+}

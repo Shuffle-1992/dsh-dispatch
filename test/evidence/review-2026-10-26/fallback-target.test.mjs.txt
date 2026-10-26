@@ -1,0 +1,16 @@
+✔ A. core：setFallbackTarget 单目标（通道+模型+思考强度）；null=关闭；落盘 version 2 且旧 version 1 可迁移 (49.4006ms)
+✔ ★ B. 自动降级：跳到目标时带上目标通道的 model 与思考强度（交接 spec 可核对） (580.2134ms)
+✔ B2. core/CLI 路径：目标未指定 model/档位（null）⇒ 沿用原任务（面板不再产生 null，见 D 段） (559.9522ms)
+✔ C. wire：fallback 动作接受 对象/数组/null；face.setFallbackChain 对象走单目标 (15.6261ms)
+✔ D. ★ client.js：降级开关带指示灯（.dsp-dot）、aria-pressed；关闭时不渲染目标三下拉；档位走中文标签 (9.1834ms)
+✔ E. 文案：新增键在 client STRINGS 与 locale 中英四处齐备 (9.4624ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1246.4255
+
+--- STDERR ---

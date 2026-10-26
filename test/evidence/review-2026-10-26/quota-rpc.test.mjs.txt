@@ -1,0 +1,26 @@
+✔ RPC 基本收发：裸 {id,method,params} 帧、id 自增、响应按 id 匹配 (10.9648ms)
+✔ S→C 通知（无 id）与 JSON 坏行不致命：分别计数，不影响后续响应 (3.9404ms)
+✔ 并发 call：响应按 id 各回各家，不被串扰 (173.1285ms)
+✔ call 超时：明确报错且清理挂起表，后续可继续 (139.21ms)
+✔ close()：taskkill /T /F + kill 均触发；挂起请求以 client-closed 收尾；close 后 call 拒绝且幂等 (3.8885ms)
+✔ RPC 错误响应（如 -32601）：call 以 rpc-error 拒绝且带 code (5.9148ms)
+✔ 进程异常退出：挂起请求以 app-server-exited 收尾，不悬挂 (67.8349ms)
+✔ spawn 失败（ENOENT 模拟）：createAppServerClient 直接拒绝 (3.6253ms)
+✔ fetchPlanQuota 映射：week.used=本周日桶合计、5h 不可导出、raw 裁剪、source/plan 正确 (48.8043ms)
+✔ fetchPlanQuota：方法不存在（-32601）→ available:false + 短因，不抛 (4.3208ms)
+✔ fetchPlanQuota：超时 → available:false，不抛，按 timeoutMs 收敛 (264.2509ms)
+✔ fetchPlanQuota：进程异常退出 / spawn 失败 → available:false，不抛 (52.5209ms)
+✔ fetchPlanQuota：JSON 坏行——只有坏行走超时；坏行+有效响应则照常可用 (184.4274ms)
+✔ fetchPlanQuota：意外响应形状 → unexpected-usage-stats-shape (5.8839ms)
+✔ fetchPlanQuota：注入 client 时不负责 close（生命周期归注入方） (1.4288ms)
+✔ fetchPlanQuota：timeoutMs 非正数 → TypeError（沿用原契约） (0.4754ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 983.8906
+
+--- STDERR ---

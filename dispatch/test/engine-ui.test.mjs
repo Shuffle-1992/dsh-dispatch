@@ -227,7 +227,12 @@ console.log('\n⑧ 进程列表/连接状态不再被慢探测拖死（真机事
   const wireSrc = readFileSync(join(PKG, 'wire.host.mjs'), 'utf8');
   ok(/function cachedChannels\(\)/.test(wireSrc), '宿主有**只读缓存**的 cachedChannels()');
   ok(/if \(stale && channelsProbeInFlight == null\)/.test(wireSrc), '过期时**后台**刷新（不阻塞调用方）');
-  ok(/channelsProbeInFlight = \(async \(\) => \{/.test(wireSrc), '探测去重（同一时刻只跑一次，不并发 spawn）');
+  /* R13：探测点抽成 doRefreshChannels()，前台/后台都登记同一个 channelsProbeInFlight。 */
+  ok(/channelsProbeInFlight = doRefreshChannels\(\)/.test(wireSrc), '探测去重（同一时刻只跑一次，不并发 spawn）');
+  ok(/async function doRefreshChannels\(\)/.test(wireSrc), '★ 唯一探测点 doRefreshChannels 存在');
+  /* R13：前台冷启动/过期也要登记 in-flight（原先只后台登记 ⇒ 多客户端并发各自探测）。 */
+  ok(/const fresh = doRefreshChannels\(\);\s*\r?\n\s*channelsProbeInFlight = fresh/.test(wireSrc),
+    '★ 前台 channelsCached 冷启动也登记在途 Promise（R13）');
   const snapFn = wireSrc.slice(wireSrc.indexOf('async snapshot() {'), wireSrc.indexOf('async quota()'));
   ok(snapFn.length > 0, '能定位 snapshot() 实现');
   /* ZB-51：快照现在把整个 `cachedChannels()` 结果取一次（`const cached = cachedChannels()`），

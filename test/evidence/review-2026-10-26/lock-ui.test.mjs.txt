@@ -1,0 +1,28 @@
+① 分区名与中文锁名
+  ✓ A1 分区名 = 「仓库文件锁」（ZB-17 用户要求；原为「文件锁 / 记忆锁」）
+  ✓ A2 repo 锁显示为「仓库锁」
+  ✓ A3 lockHeld 文案同步中文化
+  ✓ A4 旧的「memory 锁」英文名已移除
+  ✓ A5 空态文案改为「仓库整锁」（不再提 repo/memory 粗粒度锁）
+
+③ memory 锁已删除（用户要求 ③）
+  ✓ B1 LockStatus 不再渲染 memory 锁那一格
+  ✓ B2 仍显示仓库锁与队列长度
+  ✓ B3 派发侧不再产生 lock:'both'
+  ✓ B4 派发侧不再产生 lock:'memory'
+
+② 派发表单已移除（ZB-29c：派发一律由 Agent 经工具完成）
+  ✓ ★ C1 派发表单锁控件（仓库文件锁勾选）已随表单移除（文案键保留无渲染）
+  ✓ ★ C2 parseFiles 仅服务于派发表单，随之移除
+  ✓ C3 锁意图契约仍在 core：spec.lock / spec.write 校验与加锁（工具调用方声明）
+
+locale 中英对称
+  ✓ E1 中英 key 数一致（281）
+  ✓ E2 locale 含 secLocks
+  ✓ E2 locale 含 noFileLocks
+  ✓ E2 locale 含 lockHeld
+  ✓ E3 locale 的分区名同步为「仓库文件锁」
+
+===== ZB-16(UI)：17 PASS / 0 FAIL =====
+
+--- STDERR ---

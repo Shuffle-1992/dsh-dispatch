@@ -1,0 +1,16 @@
+✔ wait 等到终态：返回终态 job，timedOut=false (697.065ms)
+✔ wait 对已终态的 job：立即返回，不空转 (479.962ms)
+✔ wait 缺 id / id 不存在：ok:false 且给出可读错误 (4.9607ms)
+✔ wait 超时：返回 timedOut=true + 当前状态，不谎报完成 (3180.911ms)
+✔ wait 的 timeoutSec 非法：ok:false (504.1281ms)
+✔ paused 的 job：wait 立即返回 paused，不干等 (325.7115ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5218.3994
+
+--- STDERR ---
