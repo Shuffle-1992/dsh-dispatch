@@ -60,8 +60,14 @@ check('manifest: meta 标题/描述/图标', !!pkg.meta?.title && !!pkg.meta?.de
   const listed = new Set(rootPkg.files ?? []);
   const covered = (f) => listed.has(f) || [...listed].some((d) => !d.includes('.') && f.startsWith(`${d}/`));
   const cross = new Set();
-  const coreFiles = readdirSync(join(PKG, 'core')).filter((f) => f.endsWith('.mjs')).map((f) => join('core', f));
-  for (const rel of ['index.js', 'wire.host.mjs', ...coreFiles]) {
+  /* ZB-123（Qwen3.8-Max 复审查出）：**扫描面不能手写白名单**。
+   * 原先只查 `index.js` / `wire.host.mjs` / `core/*.mjs` —— 漏掉了 `notify.mjs`
+   * （它确实 `import '../collab-kit/run-line-protocol.mjs'`）和 `bin/*.mjs`；
+   * 当时能"通过"只是因为 `collab-kit` 整个目录碰巧进了包。改成递归扫 dispatch 下全部脚本。 */
+  const coreFiles = readdirSync(PKG, { recursive: true })
+    .filter((f) => /\.(mjs|js)$/.test(f) && !f.includes('test') && !f.includes('node_modules'))
+    .map((f) => String(f).replace(/\\/g, '/'));
+  for (const rel of coreFiles) {
     const src = readFileSync(join(PKG, rel), 'utf8');
     for (const m of src.matchAll(/from\s+'(\.\.[^']+)'/g)) {
       cross.add(relative(ROOT, resolve(dirname(join(PKG, rel)), m[1])).replace(/\\/g, '/'));

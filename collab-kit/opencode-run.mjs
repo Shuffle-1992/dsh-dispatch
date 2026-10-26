@@ -603,18 +603,11 @@ function looksLikeNodeScript(file) {
  * 返回 { cmd, argv }（**不改全局**，便于测试）。
  */
 export function spawnSpec(cli, args) {
-  const lower = String(cli).toLowerCase();
-  if (lower.endsWith('.cmd') || lower.endsWith('.bat')) {
-    const comspec = process.env.ComSpec || 'cmd.exe';
-    return { cmd: comspec, argv: ['/d', '/s', '/c', String(cli), ...args.map(String)] };
-  }
-  if (lower.endsWith('.js') || lower.endsWith('.mjs') || lower.endsWith('.cjs')) {
-    return { cmd: process.execPath, argv: [String(cli), ...args.map(String)] };
-  }
-  if (!/\.[A-Za-z0-9]+$/.test(lower) && existsSync(cli) && looksLikeNodeScript(cli)) {
-    return { cmd: process.execPath, argv: [String(cli), ...args.map(String)] };
-  }
-  return { cmd: String(cli), argv: args.map(String) };
+  /* ZB-123：统一走 `spawn-target.mjs`（与 qoder/codebuddy 同一份实现）。
+   * 原先这里对 `.cmd/.bat` 返回 `cmd /c <cli> <args...>` —— **cli 没加引号、参数没转义**：
+   * 路径含空格会断词，提示词含 `& | < >` 会被当成命令分隔符执行（比 qoder/codebuddy 更危险）。
+   * 现在优先解析 npm shim 直连真实 exe/node（提示词不经 shell），解析不了则 fail-closed。 */
+  return spawnTarget(String(cli), args.map(String));
 }
 
 /** 同步跑一个 opencode 子命令（只读探测用）。永不抛：失败返回 { ok:false, ... }。 */
@@ -622,6 +615,7 @@ export function runCliSync(cli, args, timeoutMs = 30_000) {
   const spec = spawnSpec(cli, args);
   try {
     const r = spawnSync(spec.cmd, spec.argv, {
+      ...spawnOptions(spec),
       encoding: 'utf8',
       timeout: timeoutMs,
       maxBuffer: 32 * 1024 * 1024,
@@ -715,6 +709,9 @@ function resolveContextWindow(cli, model, env = process.env) {
 
 /* ZB-118（GLM-5.3 审查 MED）：killTree 已抽到共享模块（三个执行器原先各写一份且行为不一致）。 */
 import { killTree } from './kill-tree.mjs';
+/* ZB-123：`.cmd/.bat` 的安全启动抽到共享模块 —— 原先这里 `cmd /c <cli> <args>` 既没引号也没转义，
+ * 路径含空格会断词、参数含 `&|<>` 会被当成命令分隔符执行。 */
+import { spawnOptions, spawnTarget } from './spawn-target.mjs';
 
 /* ---------------- 主流程 ---------------- */
 
@@ -918,6 +915,7 @@ async function runOnce(opt, cli) {
   let spawnError = null;
   try {
     child = spawn(spec.cmd, spec.argv, {
+      ...spawnOptions(spec),
       cwd,
       env: { ...process.env },
       windowsHide: true,

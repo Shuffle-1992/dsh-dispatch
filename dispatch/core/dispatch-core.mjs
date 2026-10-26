@@ -617,6 +617,21 @@ function acquireLockFile(file, info, nowMs) {
         } catch {
           continue; // ENOENT：已被别人搬走/清理 —— 直接下一轮 wx 重试
         }
+        /* ZB-123（Qwen + Kimi 两份复审查出）：**rename 也不等于比较并交换**。
+         * `readLockFile`(602) 与 `renameSync`(616) 之间仍有窗口：若期间原陈旧锁被清掉、
+         * 另一进程 C 已用 `wx` 建好**新锁**，我们搬走的就是 C 的新锁 —— 随后自己 wx 成功
+         * ⇒ 依旧双持。原注释"rename 是原子"只保证了"搬走这个动作"，没保证"搬走的是
+         * 我判定为陈旧的那一把"。修法：搬走后**核对内容身份**（jobId+pid），不是同一把
+         * 就立刻搬回去并重试（rename 回来是原子的，新锁不会丢）。 */
+        try {
+          const moved = readLockFile(trash);
+          const sameOne = moved != null && rec != null
+            && moved.jobId === rec.jobId && String(moved.pid) === String(rec.pid);
+          if (!sameOne) {
+            try { renameSync(trash, file); } catch { /* 已经又被别人拿走：尽力 */ }
+            continue;
+          }
+        } catch { /* 读不动/内容坏了：本来就该回收，直接清理 */ }
         try { unlinkSync(trash); } catch { /* 临时名清理失败不影响抢锁 */ }
         continue;
       }
@@ -2343,6 +2358,12 @@ export function createDispatcher(options = {}) {
    *   `config-error` 不延续 —— 那是**参数/配置错**，换任何模型都一样（延续只是白烧额度）。
    */
   function advanceSequential(job, reason) {
+    /* ZB-123（Qwen3.8-Max 复审查出的**我自己引入的回归**）：**卸载后必须立刻停**。
+     * R05 让 `retry()` 在 disposed 时 throw —— 但本函数是在子进程 `close` 事件链里被调的
+     * （finalizeJob → advanceSequential → retry），EventEmitter 监听器里抛出的异常**没人接**，
+     * 会变成未捕获异常、可能直接崩宿主进程。
+     * 修法前只是"静默复活一个任务"（坏但不崩），修后反而更危险 ⇒ 入口直接返回。 */
+    if (disposed) return false;
     /* ⚠️ **只认"在派发时被登记过"的任务**（`seqRuns` 由 dispatch / maybeAutoFallback 播种）：
      * 不这样做的话，任何"恰好没指定模型 + 该引擎有顺序列表"的历史任务失败时都会被劫持进顺序链 ——
      * 那是**替用户改了意图**（他没选顺序派发，只是没写模型）。登记过 = 确实按顺序派发起的。 */
@@ -3444,6 +3465,11 @@ export function createDispatcher(options = {}) {
     if (!existsSync(codebuddyRunnerPath)) return { ok: false, error: `WorkBuddy 执行器不存在：${codebuddyRunnerPath}` };
     stopCodebuddyLogin(); // 幂等：重开前先清掉旧的
     const port = await pickFreePort();
+    /* ZB-123（Kimi/Qwen 两份复审查出）：**`await` 之后必须重新确认释放状态**。
+     * `pickFreePort()` 是异步的，这期间插件可能已卸载 —— 而 `dispose()` 早已执行过
+     * `stopCodebuddyLogin()`，随后这里仍会 spawn 一个**无人回收**的登录服务进程
+     * （进程泄漏 + 占用端口）。 */
+    if (disposed) return { ok: false, error: 'dispatcher 已释放（插件卸载），已取消启动登录服务' };
     let child;
     try {
       child = spawnImpl(process.execPath, [codebuddyRunnerPath, '--login-serve', '--port', String(port)], { cwd: runnerCwd, env: { ...process.env } });
@@ -4674,17 +4700,28 @@ export function createDispatcher(options = {}) {
       const size = statSync(file).size;
       if (!size) return [];
       const CHUNK = 64 * 1024;
+      /* ZB-123（Kimi-K3.1-Pro 复审查出）：**必须有总字节上限**。
+       * 原实现只在"数够 count 个换行"时停 —— 如果日志里有一条超长单行（或整个文件没有换行），
+       * 循环会一路读到文件头，等于又回到"整份读入 + 整份解码"（128 MiB 单行照样读满）。
+       * 语义上取"最多往回读 2 MiB"：30~200 行除非单行超 10 KB 否则绰绰有余，
+       * 真超了就从**半行**开始 —— 与 `tail` 只保证"末尾 count 行"的既有语义一致（并留 slice(-count)）。 */
+      const MAX_BYTES = 2 * 1024 * 1024;
       const chunks = [];
       let newlines = 0;
+      let budget = MAX_BYTES;
       let pos = size;
       /* 多读一块作为保险：保证最后一行的行首完整（否则可能从半行开始）。 */
-      while (pos > 0 && newlines <= count) {
-        const len = Math.min(CHUNK, pos);
+      while (pos > 0 && newlines <= count && budget > 0) {
+        const len = Math.min(CHUNK, pos, budget);
         pos -= len;
+        budget -= len;
+        /* ZB-123：**按实际读取字节数切片**。原实现 `Buffer.allocUnsafe(len)` + 忽略 readSync
+         * 返回值 —— 文件被截断/短读时，buf 尾部是**未初始化内存**，会被当成日志内容返回。 */
         const buf = Buffer.allocUnsafe(len);
-        readSync(fd, buf, 0, len, pos);
-        chunks.unshift(buf);
-        for (let i = 0; i < len; i += 1) if (buf[i] === 0x0a) newlines += 1;
+        const read = readSync(fd, buf, 0, len, pos);
+        const got = read > 0 ? buf.subarray(0, read) : Buffer.alloc(0);
+        chunks.unshift(got);
+        for (let i = 0; i < got.length; i += 1) if (got[i] === 0x0a) newlines += 1;
       }
       const arr = Buffer.concat(chunks).toString('utf8').split('\n');
       if (arr.length && arr[arr.length - 1] === '') arr.pop();
@@ -4724,16 +4761,18 @@ export function createDispatcher(options = {}) {
   function kill(id, reason = 'kill() called') {
     const job = jobs.get(id);
     if (!job || isTerminal(job)) return false;
-    /* R07（2026-10-26 审查 P2）：**非拥有者不能"假杀"别人的 running 任务**。
-     * `ChildProcess` 只存在于**拥有者实例**的 `children` Map 里；另一个进程（独立 CLI / 另一个 DSH）
-     * 调 kill 时找不到 child，原实现仍 `return true` ⇒ 调用方以为杀掉了，实际任务还在跑
-     * （报告复现：`{before:"running", ok:true, after:"running"}`）。
-     * 通过 owner IPC 转发需要一个常驻通道（改动大），这里取**诚实的做法**：明确拒绝，
-     * 让调用方知道"必须去拥有它的那个会话里 kill"。 */
-    if (job.state === 'running' && job.ownerPid != null && Number(job.ownerPid) !== process.pid) {
+    /* R07（2026-10-26 审查 P2）：**非拥有者不能"假杀"别人的任务**。
+     * `ChildProcess` / 内存 `queue` 都只存在于**拥有者实例**里；另一个进程（独立 CLI / 另一个 DSH）
+     * 调 kill 时既找不到 child 也改不动对方的队列，原实现仍 `return true` ⇒ 调用方以为杀掉了，
+     * 实际任务还在跑（报告复现：`{before:"running", ok:true, after:"running"}`）。
+     * ZB-123 复审补充：**queued 也要挡** —— 本进程把记录标成 killed 落盘，
+     * 而拥有者的内存队列照样会把它跑起来（"假杀"的另一种形态）。
+     * 通过 owner IPC 转发需要常驻通道（改动大），这里取**诚实的做法**：明确拒绝。 */
+    if ((job.state === 'running' || job.state === 'queued')
+      && job.ownerPid != null && Number(job.ownerPid) !== process.pid) {
       throw new Error(
-        `kill: job ${id} 正由另一个进程持有（ownerPid=${job.ownerPid}，本进程=${process.pid}）——`
-        + '本进程没有它的子进程句柄，无法终止；请在拥有它的那个 DSH 会话里 kill',
+        `kill: job ${id}（${job.state}）正由另一个进程持有（ownerPid=${job.ownerPid}，本进程=${process.pid}）——`
+        + '本进程既没有它的子进程句柄、也改不动它的内存队列，无法终止；请在拥有它的那个 DSH 会话里 kill',
       );
     }
     if (job.state === 'queued') {

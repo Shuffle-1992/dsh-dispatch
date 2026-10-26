@@ -303,8 +303,9 @@ test('④e 可执行文件解析与 spawn 形态（零依赖、不执行任何 o
     rmSync(dir, { recursive: true, force: true });
   }
 
-  assert.deepEqual(oc.spawnSpec('C:\\x\\opencode.exe', ['run', 'a']), { cmd: 'C:\\x\\opencode.exe', argv: ['run', 'a'] });
-  assert.deepEqual(oc.spawnSpec('C:\\x\\fake.mjs', ['run']), { cmd: process.execPath, argv: ['C:\\x\\fake.mjs', 'run'] });
+  assert.deepEqual(oc.spawnSpec('C:\\x\\opencode.exe', ['run', 'a']), { cmd: 'C:\\x\\opencode.exe', argv: ['run', 'a'], shell: false });
+  /* ZB-123：spawnSpec 现在统一返回 spawn-target.mjs 的形状（多一个 shell 字段，供 spawnOptions 使用）。 */
+  assert.deepEqual(oc.spawnSpec('C:\\x\\fake.mjs', ['run']), { cmd: process.execPath, argv: ['C:\\x\\fake.mjs', 'run'], shell: false });
   const cmdSpec = oc.spawnSpec('C:\\x\\opencode.cmd', ['run', 'a']);
   assert.ok(/cmd/i.test(cmdSpec.cmd) && cmdSpec.argv.includes('/c'), '.cmd 经 cmd.exe 转调（Node ≥18.20 不能直接 spawn 批处理）');
 });

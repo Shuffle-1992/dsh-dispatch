@@ -44,6 +44,8 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { readDispatchSwitch, SWITCH_FILE } from './dispatch-switch.mjs'; // ZB-118：派发总开关门禁（与 zcode-run 同契约）
 import { killTree } from './kill-tree.mjs'; // ZB-118：统一树杀（带超时，防 taskkill 挂死）
+/* ZB-123：`.cmd/.bat` 的安全启动抽到共享模块（shim 解析 → 直连真实 exe/node；回落 fail-closed）。 */
+import { quoteWinArg, resolveShimTarget, spawnOptions, spawnTarget } from './spawn-target.mjs';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, openSync, readSync, closeSync, statSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve, extname, basename, sep } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -494,63 +496,6 @@ function isNodeShebang(p) {
  * 也可能是无扩展名的，若一律前置 node 就会把它们跑坏。
  * `.cmd` / `.bat` 必须经 shell（否则 EFTYPE）。
  */
-/** R02（2026-10-26 审查 P1）：**Windows cmd.exe 的安全参数转义**（与 qoder-run 同实现）。
- *  `.cmd/.bat` 必须经 shell，而 `spawn(cmd, argv, {shell:true})` 不转义 ⇒ 提示词里的
- *  `& | < > ^` 会变成命令分隔符（真机可复现）。 */
-export function quoteWinArg(arg) {
-  const s = String(arg);
-  if (s === '') return '""';
-  if (!/[\s"&|<>^%!()]/.test(s)) return s;
-  const inner = s
-    .replace(/%/g, '%%')
-    .replace(/"/g, '\\"')
-    .replace(/!/g, '^!');
-  return `"${inner}"`;
-}
-
-/** R02（2026-10-26 审查 P1，**根治方案**）：解析 `.cmd/.bat` shim，直接启动真实目标
- *  （与 qoder-run 同实现；实测 `opencode.cmd` 里是 `"...\bin\opencode.exe" %*`）。 */
-export function resolveShimTarget(shimPath) {
-  try {
-    const text = readFileSync(shimPath, 'utf8');
-    const dir = dirname(shimPath);
-    const lines = text.split(/\r?\n/).filter((l) => l.includes('%*') && !/^\s*(rem|::)/i.test(l));
-    const line = lines[lines.length - 1];
-    if (!line) return null;
-    const parts = [...line.matchAll(/"([^"]+)"/g)].map((m) => m[1]
-      /* `%~dp0` **自带末尾反斜杠**，`%dp0%` 没有 ⇒ 分开替换（否则 `"%~dp0app.js"` 会缺分隔符）。 */
-      .replace(/%~dp0/gi, dir + sep)
-      .replace(/%dp0%/gi, dir));
-    if (!parts.length) return null;
-    const [head, ...rest] = parts;
-    if (/\.exe$/i.test(head)) return { cmd: head, argv: rest, shell: false };
-    if (/(?:^|[\\/])node(?:\.exe)?$/i.test(head) && rest.length > 0) return { cmd: head, argv: rest, shell: false };
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-export function spawnTarget(cli, args) {
-  const base = basename(String(cli));
-  const ext = extname(base).toLowerCase();
-  const isScript = /\.(cjs|mjs|js)$/i.test(base) || (ext === '' && isNodeShebang(cli));
-  if (isScript) return { cmd: process.execPath, argv: [cli, ...args], shell: false };
-  const needShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(base);
-  if (!needShell) return { cmd: cli, argv: args, shell: false };
-  /* R02：**先尝试绕过 shell**（解析 shim 直启真实 exe/node）—— 这是根治：
-   * cmd 命令行不能含换行（多行 prompt 会被截断），`%VAR%` 也会被展开。 */
-  const resolved = resolveShimTarget(cli);
-  if (resolved) return { ...resolved, argv: [...resolved.argv, ...args] };
-  /* 回落：自己拼命令行 + 转义（整体再包一层引号；`windowsVerbatimArguments` 防二次转义）。 */
-  const line = `"${cli}" ${args.map(quoteWinArg).join(' ')}`;
-  return {
-    cmd: process.env.ComSpec || 'cmd.exe',
-    argv: ['/d', '/s', '/c', `"${line}"`],
-    shell: false,
-    verbatim: true,
-  };
-}
 
 /** 跑一个只读子命令（带超时，不抛）。 */
 export function probe(cli, args, timeoutMs = 20000) {
@@ -1146,4 +1091,5 @@ if (invokedDirectly) {
     .catch((e) => { process.stderr.write(`${PREFIX} 未捕获异常：${e?.stack ?? e}\n`); process.exit(1); });
 }
 
+export { spawnTarget, spawnOptions, quoteWinArg, resolveShimTarget };
 export { main, PREFIX, helpText, isNodeShebang, loginServe };

@@ -395,6 +395,10 @@ const TOOL_PARAMETERS = {
   limit: { type: 'integer', description: 'list：最多回多少条 job（默认 50，上限 200；按 running→queued→paused→终态、同状态内新→旧排序）。省略的条数会写在返回的 note 里' },
   full: { type: 'boolean', description: 'list：true = 旧完整形状（含每条 job 的派发原文 spec.body、progress、usage、lockPaths）。默认 false = 紧凑形状（更省上下文，且不会被宿主截断）；两种形状都受 limit 约束' },
   retryModel: { type: 'string', description: 'retry：目标模型（同通道续跑时不允许传——--resume 带 --model 必失败）' },
+  /* ZB-123（Kimi-K3.1-Pro 复审查出）：教学段落让 Agent「用 `action=retry {reasoningLevel:<suggested>}`
+   * 修正档位，但参数表原先**只声明了 `thinking`** —— 那个参数对模型不可发现，还可能被宿主校验拒掉。
+   * 这里把两个名字都声明出来（wire/core 都支持，`??` 取先出现者）。 */
+  reasoningLevel: { type: 'string', description: 'retry：目标思考强度（等价于 `thinking`；改档会走交接重跑而非 --resume，因为 runners 只在新建会话时应用档位）。档位集合见 action=channels 的 thinkingLevels' },
   /* ZB-30：降级目标 = 有序数组；元素为通道 id 字符串（工具 schema 只允许字符串数组——
    * 对象形状留给面板/CLI 经 face.setFallbackChain 直传）。单目标 = provider + model + thinking。 */
   chain: { type: 'array', items: { type: 'string' }, description: 'fallback：降级目标通道 id 数组（有序，空数组/null=关闭）。单目标也可直接传 provider（+model/thinking）' },
