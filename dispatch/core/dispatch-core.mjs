@@ -1096,7 +1096,14 @@ export function createDispatcher(options = {}) {
   function isUnder(root, p) {
     if (typeof p !== 'string' || p === '') return false;
     try {
-      const rel = relative(root, resolve(p));
+      /* R11（2026-10-26 审查 P2）：**先解析真实路径再判归属**。
+       * 原先只做 `relative(root, resolve(p))` 的**纯字符串**比较 —— 于是
+       * `logs\link -> C:\secret`（junction/symlink）会被认为"在 logs 下"，
+       * 实际读到的却是根目录外的内容（报告的复现：tail 读出了 work 外的合成文本）。
+       * 两侧都用 best-effort realpath（不存在的路径回落到逐级祖先解析，不会因"文件还没生成"而误拒）。 */
+      const realRoot = realpathBestEffort(resolve(root));
+      const realP = realpathBestEffort(resolve(p));
+      const rel = relative(realRoot, realP);
       return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
     } catch { return false; }
   }
@@ -4529,6 +4536,12 @@ export function createDispatcher(options = {}) {
      * —— 等于把同一个不可重试的错误撞了 10 遍，顺序派发完全失效。
      * 判据修正：`targetModel != null && targetModel !== job.spec.model` ⇒ **不算同会话续跑**。 */
     const modelChanged = targetModel != null && targetModel !== (job.spec.model ?? null);
+    /* R10（2026-10-26 审查 P2）：**改思考档位也必须走交接重跑**（不能 resume）。
+     * `--resume` 时 runner 会忽略 `--reasoning-level`（仅新建会话生效）⇒ 若判据只看
+     * 通道/引擎/模型，改档的 retry 会悄悄"续跑旧档位"，用户以为改成功了。
+     * 与 ZB-71 的 modelChanged 同一条道理。 */
+    const reasoningChanged = targetReasoning != null
+      && targetReasoning !== (job.spec.reasoningLevel ?? null);
     /* ZB-120（真机实测发现，2026-10-24）：**免费额度（app-server）通道不支持 `--resume`**。
      *
      * 现场：一个 ZCode 任务撞 `concurrency-limited`（model concurrency limit exceeded）后，
@@ -4539,7 +4552,7 @@ export function createDispatcher(options = {}) {
      * 根因：那个 sessionId 是从**台账回读**来的（`ledgerMatched=true`），而 gift 后端的会话
      * 根本不能跨进程续跑。判据补一条：目标通道是 `account:*-start-plan` 形态时，一律走交接重跑。 */
     const appServerProvider = /^account:[a-z]+-start-plan$/.test(String(targetProvider ?? origProvider ?? ''));
-    if (sameChannel && !engineChanged && !modelChanged && job.sessionId && !appServerProvider) {
+    if (sameChannel && !engineChanged && !modelChanged && !reasoningChanged && job.sessionId && !appServerProvider) {
       const spec = { ...job.spec, resume: job.sessionId };
       /* ZB-45：`opts.auto` 显式优先 —— false 表示"这次明确不放行"，true 表示"这次放行"
        * （沿用 job.spec 是缺省行为，只有调用方显式给了 opts.auto 才覆盖）。 */
@@ -4711,6 +4724,18 @@ export function createDispatcher(options = {}) {
   function kill(id, reason = 'kill() called') {
     const job = jobs.get(id);
     if (!job || isTerminal(job)) return false;
+    /* R07（2026-10-26 审查 P2）：**非拥有者不能"假杀"别人的 running 任务**。
+     * `ChildProcess` 只存在于**拥有者实例**的 `children` Map 里；另一个进程（独立 CLI / 另一个 DSH）
+     * 调 kill 时找不到 child，原实现仍 `return true` ⇒ 调用方以为杀掉了，实际任务还在跑
+     * （报告复现：`{before:"running", ok:true, after:"running"}`）。
+     * 通过 owner IPC 转发需要一个常驻通道（改动大），这里取**诚实的做法**：明确拒绝，
+     * 让调用方知道"必须去拥有它的那个会话里 kill"。 */
+    if (job.state === 'running' && job.ownerPid != null && Number(job.ownerPid) !== process.pid) {
+      throw new Error(
+        `kill: job ${id} 正由另一个进程持有（ownerPid=${job.ownerPid}，本进程=${process.pid}）——`
+        + '本进程没有它的子进程句柄，无法终止；请在拥有它的那个 DSH 会话里 kill',
+      );
+    }
     if (job.state === 'queued') {
       queue = queue.filter((q) => q !== id);
       job.state = 'killed';

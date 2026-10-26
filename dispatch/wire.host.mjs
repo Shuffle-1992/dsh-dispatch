@@ -963,6 +963,13 @@ export function createActionHandler(dispatcher, config = {}) {
             model: p.model ?? p.retryModel,
             ...(p.engine != null && p.engine !== '' ? { engine: p.engine } : {}),
             ...(p.auto != null ? { auto: Boolean(p.auto) } : {}),
+            /* R10（2026-10-26 审查 P2）：**思考档位也要能经 retry 改**。
+             * 工具的教学提示写着「用 `action=retry {reasoningLevel:<suggested>}` 修正 Qoder 档位」，
+             * 但这里原先只转发 provider/model/engine/auto ⇒ 那个参数根本到不了核心。
+             * 兼容两种叫法：`reasoningLevel`（core 术语）与 `thinking`（dispatch 的通用参数）。 */
+            ...((p.reasoningLevel ?? p.thinking) != null && (p.reasoningLevel ?? p.thinking) !== ''
+              ? { reasoningLevel: p.reasoningLevel ?? p.thinking }
+              : {}),
           });
           return { ok: true, job: slimJob(job) };
         }
