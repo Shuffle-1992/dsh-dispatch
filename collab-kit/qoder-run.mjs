@@ -31,7 +31,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readDispatchSwitch, SWITCH_FILE } from './dispatch-switch.mjs'; // ZB-118：派发总开关门禁（与 zcode-run 同契约）
 import { killTree } from './kill-tree.mjs'; // ZB-118：统一树杀（带超时，防 taskkill 挂死）
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prefixFor } from './run-line-protocol.mjs';
 import { discoverEngine } from './engine-discover.mjs';
@@ -442,11 +442,73 @@ function whichOnPath(name, env = process.env) {
  * 这与发现层处理 ZCode 自带 CLI（`zcode.cjs`）是同一类问题，故统一前置 `node`。
  * `.cmd` / `.bat` 则必须经 shell（否则同样 EFTYPE）。
  */
+/** R02（2026-10-26 审查 P1）：**Windows cmd.exe 的安全参数转义**。
+ *  `.cmd/.bat` 在 Windows 上必须经 shell 才能 spawn（否则 EINVAL），而 Node 的
+ *  `spawn(cmd, argv, {shell:true})` 只是把 cmd 与 argv 用空格**拼起来**交给 shell ——
+ *  **完全不做转义**。于是提示词里的 `& | < > ^` 会被当成命令分隔符执行
+ *  （真机复现：`hello & echo AUDIT_SHELL_EXECUTED & rem` 会真的跑 echo）。
+ *  这里对每个参数做保守转义：空串/含特殊字符 ⇒ 包双引号；`%` ⇒ `%%`（防变量展开）；
+ *  `"` ⇒ `\"`；`!` ⇒ `^!`（防延迟展开）。引号内的 `& | < >` 不再有命令语义。 */
+export function quoteWinArg(arg) {
+  const s = String(arg);
+  if (s === '') return '""';
+  if (!/[\s"&|<>^%!()]/.test(s)) return s;
+  const inner = s
+    .replace(/%/g, '%%')
+    .replace(/"/g, '\\"')
+    .replace(/!/g, '^!');
+  return `"${inner}"`;
+}
+
+/** R02（2026-10-26 审查 P1，**根治方案**）：解析 `.cmd/.bat` shim，**直接启动真实目标**，
+ *  让提示词完全不经 shell。实测 npm shim 形态（`opencode.cmd`）：
+ *    `"%dp0%\node_modules\opencode-ai\bin\opencode.exe"   %*`
+ *  或 node 脚本形态：`"%~dp0\node.exe" "%~dp0\node_modules\xxx\cli.js" %*`
+ *  解析成功 ⇒ 直接 spawn exe/node（多行 prompt、`%`、`&|<>` 全部安全）；
+ *  解析失败 ⇒ 回落"转义后的 cmd.exe"分支（残余风险见 quoteWinArg 注释）。
+ *  @returns {{cmd:string,argv:string[],shell:false}|null} */
+export function resolveShimTarget(shimPath) {
+  try {
+    const text = readFileSync(shimPath, 'utf8');
+    const dir = dirname(shimPath);
+    /* 真正的执行行 = 末尾含 `%*` 且不是注释的那行（shim 前半段是 find_dp0 样板）。 */
+    const lines = text.split(/\r?\n/).filter((l) => l.includes('%*') && !/^\s*(rem|::)/i.test(l));
+    const line = lines[lines.length - 1];
+    if (!line) return null;
+    const parts = [...line.matchAll(/"([^"]+)"/g)].map((m) => m[1]
+      /* `%~dp0` **自带末尾反斜杠**（cmd 的语义），`%dp0%` 没有（shim 里通常写成 `%dp0%\x`）
+       * ⇒ 两种变量必须分开替换，否则 `"%~dp0app.js"` 会拼成 `...\dirnameapp.js`（缺分隔符）。 */
+      .replace(/%~dp0/gi, dir + sep)
+      .replace(/%dp0%/gi, dir));
+    if (!parts.length) return null;
+    const [head, ...rest] = parts;
+    if (/\.exe$/i.test(head)) return { cmd: head, argv: rest, shell: false };
+    if (/(?:^|[\\/])node(?:\.exe)?$/i.test(head) && rest.length > 0) return { cmd: head, argv: rest, shell: false };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function spawnTarget(cli, args) {
   const isScript = /\.(cjs|mjs|js)$/i.test(cli);
   if (isScript) return { cmd: process.execPath, argv: [cli, ...args], shell: false };
   const needShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(cli);
-  return { cmd: needShell ? `"${cli}"` : cli, argv: args, shell: needShell };
+  if (!needShell) return { cmd: cli, argv: args, shell: false };
+  /* R02：**先尝试绕过 shell** —— 解析 shim 找到真实 exe/node 脚本直接启动。
+   * 这是根治：cmd 命令行**不能含换行**（多行 prompt 会被截断），`%VAR%` 也会被展开，
+   * 光靠转义解决不了。 */
+  const resolved = resolveShimTarget(cli);
+  if (resolved) return { ...resolved, argv: [...resolved.argv, ...args] };
+  /* 回落：自己拼命令行并转义（不再用 `shell:true` —— 那会完全不转义）。
+   * 整体再包一层双引号（`cmd /s /c` 会剥掉最外层）。 */
+  const line = `"${cli}" ${args.map(quoteWinArg).join(' ')}`;
+  return {
+    cmd: process.env.ComSpec || 'cmd.exe',
+    argv: ['/d', '/s', '/c', `"${line}"`],
+    shell: false,
+    verbatim: true,
+  };
 }
 
 /** 跑一个只读子命令（带超时，不抛）。 */
@@ -454,7 +516,7 @@ function probe(cli, args, timeoutMs = 20000) {
   const t = spawnTarget(cli, args);
   try {
     const r = spawnSync(t.cmd, t.argv, {
-      encoding: 'utf8', timeout: timeoutMs, windowsHide: true, shell: t.shell, stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8', timeout: timeoutMs, windowsHide: true, shell: t.shell, windowsVerbatimArguments: t.verbatim === true, stdio: ['ignore', 'pipe', 'pipe'],
     });
     return { code: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
   } catch (e) {
@@ -587,7 +649,7 @@ async function runOnce(opt, cli) {
     child = spawn(t.cmd, t.argv, {
       cwd: opt.cwd ? resolve(opt.cwd) : undefined,
       env: { ...process.env },
-      shell: t.shell,
+      shell: t.shell, windowsVerbatimArguments: t.verbatim === true,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

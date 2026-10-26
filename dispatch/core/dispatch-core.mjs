@@ -570,9 +570,21 @@ function isStaleLock(rec, file, nowMs) {
       return true;
     }
   }
+  /* R04（2026-10-26 审查 P1）：**先判持有者是否还活着**，年龄只作兜底。
+   * 原判据是「年龄 > 2h ⇒ 陈旧」，**先于** PID 判断 —— 而任务允许的 `timeoutMin` 上限远高于
+   * 两小时（约 24.8 天）⇒ 一个**仍在正常运行**的长任务，锁会在 2 小时整点被别的任务抢走，
+   * 互斥**静默失效**（两个任务同时写同一仓库），而两边的面板都显示"持有锁"。
+   *
+   * 正确语义：
+   *   · 有 PID 且进程活着 ⇒ 锁**有效**（无论持有多久）；
+   *   · 有 PID 但进程已死 ⇒ 陈旧（可立即回收，不受年龄影响）；
+   *   · **没有 PID 信息**（旧版锁记录 / 权限差异读不到）⇒ 才用年龄兜底。
+   * 这样长任务不再被抢，死进程的锁也能立刻回收。 */
+  const pid = Number(rec.pid);
+  if (Number.isInteger(pid) && pid > 0) return !pidAlive(pid);
   const at = Date.parse(rec.at);
-  if (Number.isFinite(at) && nowMs - at > LOCK_STALE_MS) return true;
-  return !pidAlive(rec.pid);
+  if (Number.isFinite(at)) return nowMs - at > LOCK_STALE_MS;
+  return true; // 既无 PID 也无时间戳：无法判断 ⇒ 按陈旧处理（与旧行为一致）
 }
 
 function acquireLockFile(file, info, nowMs) {
@@ -2179,6 +2191,11 @@ export function createDispatcher(options = {}) {
         } else {
           channels = (await listChannels()).channels ?? [];
         }
+        /* R05（2026-10-26 审查 P1）：**卸载后不得再自动派发**。
+         * 上面两个 await 可能跨越插件卸载 —— dispose() 只清了定时器，原先没有任何
+         * "已释放"状态 ⇒ 探测返回后这里仍会 `retry()` 起一个新任务（实测：暂停后卸载，
+         * 延迟探测一释放就创建新 job 并跑至 done）。await 之后必须重新确认一次。 */
+        if (disposed) return;
         const live = jobs.get(job.id);
         if (!live || live.state !== 'paused') return;
         for (let i = searchFrom; i < fallbackTargets.length; i += 1) {
@@ -4339,6 +4356,8 @@ export function createDispatcher(options = {}) {
    *  引擎规整之前（详见 dispatchRaw 内注释）。补默认值只可能让"有效引擎"更明确（如默认通道是
    *  opencode 通道），那种情况仍会被 dispatchRaw 里的同一次校验拦下。 */
   function dispatch(spec) {
+    /* R05：卸载后拒绝任何新派发（不可逆）。 */
+    if (disposed) throw new Error('dispatcher 已释放（插件卸载），拒绝新的派发');
     const effSpec = { ...spec };
     if (effSpec.provider == null && channel.provider) effSpec.provider = channel.provider;
     /* ZB-82：**分流模式** —— 主通道名额将满时，把这次任务改派到降级通道（名额独立）。
@@ -4457,6 +4476,8 @@ export function createDispatcher(options = {}) {
    * @returns 新 job（get() 序列化形状；簿记已写在存储态，d.get()/d.list()/jobs.json 均可读回）
    */
   function retry(jobId, opts = {}) {
+    /* R05：卸载后拒绝续跑（自动降级的 continuation 也走这里，必须同样拦住）。 */
+    if (disposed) throw new Error('dispatcher 已释放（插件卸载），拒绝续跑');
     const job = jobs.get(jobId);
     if (!job) throw new Error(`retry: 找不到 job：${jobId}`);
     if (job.state === 'queued' || job.state === 'running') {
@@ -4746,7 +4767,16 @@ export function createDispatcher(options = {}) {
    *  插件卸载时 index.js 只 kill running/queued，**管不到 paused** —— 而并发自动重试的定时器
    *  会在 25 秒后把 paused 的 job 重新拉起来（用户已卸载插件，任务却还在跑）。
    *  这里一次性清掉所有定时器 + 登录服务 + 落盘脏标记。幂等，可重复调用。 */
+  /* R05（2026-10-26 审查 P1）：**不可逆的释放状态**（插件卸载时置位）。
+   * 派发入口与所有异步 continuation 都必须检查它 —— 否则卸载后仍会有新 job 被拉起。 */
+  let disposed = false;
+
   function dispose() {
+    /* R05（2026-10-26 审查 P1）：**不可逆的 disposed 状态**。
+     * 光清定时器不够 —— 自动降级在 `await listChannels()` 期间若发生卸载，
+     * 返回后仍会 retry 起新任务（见 maybeAutoFallback 里的二次确认）。
+     * 所有派发入口（dispatch / retry）与异步 continuation 都检查它。 */
+    disposed = true;
     if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
     persistDirty = false;
     for (const t of concurrencyRetryTimers.values()) { try { clearTimeout(t); } catch { /* 已触发 */ } }
