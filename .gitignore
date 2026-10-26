@@ -41,3 +41,8 @@ refs/plugin-whale-pet/
 *.bak-*
 *.orig
 *.rej
+
+# 审查工具生成的临时产物（2026-10-26 全面审查）
+test/.review-runtime/
+test/.npm-review-cache/
+
